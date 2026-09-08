@@ -136,6 +136,44 @@ def create_connected_account(
         ) from exc
 
 
+def retrieve_account_status(stripe_account_id: str) -> dict:
+    """Read a connected account's current state straight from Stripe.
+
+    The account.updated webhook is the normal path, but it is not the only
+    one that has to work. Stripe's own guidance for hosted onboarding is that
+    the return_url carries no state, so the platform should retrieve the
+    account and check its requirements -- a webhook that was missed, arrived
+    while the worker was down, or was never configured would otherwise leave
+    the portal permanently disagreeing with Stripe.
+
+    Returns the flags plus why charges are disabled, if they are. Without the
+    reason, "onboarding incomplete" is a dead end for whoever is trying to
+    get a restaurant live.
+    """
+    try:
+        account = stripe.Account.retrieve(stripe_account_id)
+    except stripe.StripeError as exc:
+        detail = getattr(exc, "user_message", None) or str(exc)
+        log.error("could not retrieve connected account %s: %s", stripe_account_id, detail)
+        raise errors.payment_provider_unavailable(
+            f"Stripe could not be reached for this account: {detail}"
+        ) from exc
+
+    requirements = account.requirements
+    currently_due = list(requirements.currently_due or []) if requirements else []
+    past_due = list(requirements.past_due or []) if requirements else []
+    disabled_reason = requirements.disabled_reason if requirements else None
+
+    return {
+        "charges_enabled": bool(account.charges_enabled),
+        "payouts_enabled": bool(account.payouts_enabled),
+        "details_submitted": bool(account.details_submitted),
+        "disabled_reason": disabled_reason,
+        "currently_due": currently_due,
+        "past_due": past_due,
+    }
+
+
 def construct_connect_event(payload: bytes, signature: str) -> stripe.Event:
     """Verify the Connect webhook signature. Raises on tampering."""
     return stripe.Webhook.construct_event(

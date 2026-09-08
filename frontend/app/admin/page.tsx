@@ -57,6 +57,11 @@ export default function AdminPage() {
   // Shown once, then gone. The API returns the temporary password at creation
   // and never again, so losing it here means reissuing rather than looking up.
   const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
+  // What Stripe said the last time we asked, per restaurant. Kept out of the
+  // restaurant row itself because it is a point-in-time answer, not stored state.
+  const [stripeStatus, setStripeStatus] = useState<
+    Record<string, { charges_enabled: boolean; disabled_reason: string | null; past_due: string[]; currently_due: string[] }>
+  >({});
   const router = useRouter();
 
   async function signOut() {
@@ -113,6 +118,25 @@ export default function AdminPage() {
     try {
       await restaurants.call(`/admin/restaurants/${id}`, { method: "PATCH", body: changes });
       setEditing(null);
+      await restaurants.refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function refreshStripe(id: string) {
+    setBusy(id);
+    setError(null);
+    try {
+      const res = await restaurants.call<{
+        charges_enabled: boolean;
+        disabled_reason: string | null;
+        past_due: string[];
+        currently_due: string[];
+      }>(`/admin/restaurants/${id}/stripe-refresh`, { method: "POST" });
+      setStripeStatus((prev) => ({ ...prev, [id]: res }));
       await restaurants.refresh();
     } catch (e) {
       setError(errorMessage(e));
@@ -288,6 +312,34 @@ export default function AdminPage() {
                     ) : (
                       <span className="text-brick">Onboarding incomplete</span>
                     )}
+                    {/* Why, not just that. Without the outstanding requirement
+                        there is nothing for an operator to act on. */}
+                    {stripeStatus[r.id] && !stripeStatus[r.id].charges_enabled && (
+                      <div className="mt-1 text-muted">
+                        {stripeStatus[r.id].disabled_reason && (
+                          <div>Stripe: {stripeStatus[r.id].disabled_reason}</div>
+                        )}
+                        {(stripeStatus[r.id].past_due.length > 0 ||
+                          stripeStatus[r.id].currently_due.length > 0) && (
+                          <div>
+                            Needs:{" "}
+                            {[
+                              ...new Set([
+                                ...stripeStatus[r.id].past_due,
+                                ...stripeStatus[r.id].currently_due,
+                              ]),
+                            ]
+                              // Stripe prefixes person requirements with the
+                              // person id, which means nothing to the operator.
+                              .map((req) => req.replace(/^person_[^.]+\./, ""))
+                              .join(", ")}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {stripeStatus[r.id]?.charges_enabled && (
+                      <div className="mt-1 text-muted">Synced from Stripe.</div>
+                    )}
                   </td>
                   <td className="py-3 text-right">
                     <div className="inline-flex gap-2">
@@ -297,7 +349,19 @@ export default function AdminPage() {
                           disabled={busy === r.id}
                           onClick={() => onboard(r.id)}
                         >
-                          Connect Stripe
+                          {r.stripe_account_id ? "Resume Stripe" : "Connect Stripe"}
+                        </button>
+                      )}
+                      {/* charges_enabled is otherwise only written by the
+                          account.updated webhook, so without this the portal
+                          stays wrong whenever that webhook did not arrive. */}
+                      {r.stripe_account_id && (
+                        <button
+                          className="btn-quiet px-2 py-1 text-xs"
+                          disabled={busy === r.id}
+                          onClick={() => refreshStripe(r.id)}
+                        >
+                          Refresh Stripe
                         </button>
                       )}
                       {r.deleted_at ? (

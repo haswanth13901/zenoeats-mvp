@@ -236,6 +236,24 @@ class RestaurantOut(BaseModel):
     deleted_at: datetime | None = None
 
 
+class StripeSyncOut(BaseModel):
+    """Connected account state after re-reading it from Stripe.
+
+    disabled_reason and the outstanding requirement lists are included so the
+    portal can say what is missing rather than only that something is.
+    """
+
+    stripe_account_id: str
+    charges_enabled: bool
+    payouts_enabled: bool
+    details_submitted: bool
+    onboarding_status: str
+    disabled_reason: str | None = None
+    currently_due: list[str] = []
+    past_due: list[str] = []
+    changed: bool = False
+
+
 class AdminOrderOut(BaseModel):
     """One order as the platform is allowed to see it.
 

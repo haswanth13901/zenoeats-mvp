@@ -28,7 +28,8 @@ from app.models import (
 )
 from app.schemas.api import (
     AdminOrderOut, AdminOrderPageOut, CreateOwnerIn, CreateOwnerOut,
-    CreateRestaurantIn, RestaurantOut, RestaurantReportOut, UpdateRestaurantIn,
+    CreateRestaurantIn, RestaurantOut, RestaurantReportOut, StripeSyncOut,
+    UpdateRestaurantIn,
 )
 from app.services import stripe_service
 
@@ -511,6 +512,77 @@ def start_stripe_onboarding(
 
     url = stripe_service.create_account_link(existing_account_id, refresh_url, return_url)
     return {"onboarding_url": url, "stripe_account_id": existing_account_id}
+
+
+@router.post("/restaurants/{restaurant_id}/stripe-refresh", response_model=StripeSyncOut)
+def refresh_stripe_status(
+    restaurant_id: UUID,
+    admin: User = Depends(require_platform_admin),
+):
+    """Re-read the connected account from Stripe and store what it says.
+
+    charges_enabled was only ever written by the account.updated webhook. That
+    leaves the portal wrong whenever the webhook did not arrive -- no endpoint
+    configured, a placeholder signing secret, or no worker running -- and the
+    restaurant then cannot be activated even though Stripe is happy. It is
+    also what Stripe's hosted onboarding guidance prescribes, because the
+    return_url carries no state of its own.
+
+    Stripe is the authority here; this only copies its answer. The reply
+    includes why charges are disabled so the operator has something to act on
+    rather than just "incomplete".
+    """
+    with tenant_session(restaurant_id) as session:
+        restaurant = session.get(Restaurant, restaurant_id)
+        if restaurant is None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        account = session.execute(select(RestaurantPaymentAccount)).scalar_one_or_none()
+        if account is None:
+            raise errors.ApiError(
+                409, "NO_STRIPE_ACCOUNT",
+                "This restaurant has no connected account yet. Start onboarding first.",
+            )
+        account_id = account.stripe_account_id
+
+    # Outside the transaction: a Stripe round trip must never hold a database
+    # lock open.
+    status = stripe_service.retrieve_account_status(account_id)
+
+    with tenant_session(restaurant_id) as session:
+        account = session.execute(select(RestaurantPaymentAccount)).scalar_one()
+        changed = (
+            account.charges_enabled != status["charges_enabled"]
+            or account.payouts_enabled != status["payouts_enabled"]
+            or account.details_submitted != status["details_submitted"]
+        )
+        account.charges_enabled = status["charges_enabled"]
+        account.payouts_enabled = status["payouts_enabled"]
+        account.details_submitted = status["details_submitted"]
+        account.onboarding_status = "COMPLETE" if status["details_submitted"] else "PENDING"
+        onboarding_status = account.onboarding_status
+
+    with system_session() as session:
+        _audit(
+            session, admin, "SUPER_ADMIN_REFRESH_STRIPE_STATUS",
+            {
+                "restaurant_id": str(restaurant_id),
+                "stripe_account_id": account_id,
+                "charges_enabled": status["charges_enabled"],
+                "changed": changed,
+            },
+        )
+
+    return StripeSyncOut(
+        stripe_account_id=account_id,
+        charges_enabled=status["charges_enabled"],
+        payouts_enabled=status["payouts_enabled"],
+        details_submitted=status["details_submitted"],
+        onboarding_status=onboarding_status,
+        disabled_reason=status["disabled_reason"],
+        currently_due=status["currently_due"],
+        past_due=status["past_due"],
+        changed=changed,
+    )
 
 
 @router.post("/restaurants/{restaurant_id}/activate", response_model=dict)
