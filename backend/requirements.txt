@@ -7,7 +7,7 @@ pydantic==2.10.4
 pydantic-settings==2.7.0
 python-multipart==0.0.20
 PyJWT[crypto]==2.10.1
-stripe==11.4.0
+stripe==15.6.1
 celery==5.4.0
 redis==5.2.1
 cryptography==44.0.0

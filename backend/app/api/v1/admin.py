@@ -164,19 +164,27 @@ def start_stripe_onboarding(
             raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
         account = session.execute(select(RestaurantPaymentAccount)).scalar_one_or_none()
         existing_account_id = account.stripe_account_id if account else None
+        restaurant_name = restaurant.name
         admin_email = admin.email
 
     if existing_account_id is None:
-        stripe_account = stripe_service.create_connected_account(admin_email)
+        # contact_email is still the platform admin's: Restaurant has no
+        # contact field yet. It becomes the owner's address once restaurant
+        # accounts exist, and Stripe's notifications about this account should
+        # go to them, not to us.
+        account_id = stripe_service.create_connected_account(
+            email=admin_email,
+            display_name=restaurant_name,
+        )
         with tenant_session(restaurant_id) as session:
             session.add(
                 RestaurantPaymentAccount(
                     restaurant_id=restaurant_id,
-                    stripe_account_id=stripe_account.id,
+                    stripe_account_id=account_id,
                     onboarding_status="PENDING",
                 )
             )
-        existing_account_id = stripe_account.id
+        existing_account_id = account_id
 
     url = stripe_service.create_account_link(existing_account_id, refresh_url, return_url)
     return {"onboarding_url": url, "stripe_account_id": existing_account_id}

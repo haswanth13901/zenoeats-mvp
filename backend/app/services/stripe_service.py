@@ -19,6 +19,13 @@ log = logging.getLogger(__name__)
 stripe.api_key = settings.STRIPE_SECRET_KEY
 stripe.max_network_retries = 2
 
+# Accounts v2 lives on the client object rather than the module globals.
+# Everything else here stays on v1 on purpose: Stripe accepts a v2 account id
+# at v1 endpoints, so AccountLink, Account.retrieve and PaymentIntent all keep
+# working unchanged against accounts created below. Verified against the live
+# test API rather than assumed.
+_client = stripe.StripeClient(settings.STRIPE_SECRET_KEY)
+
 
 def create_payment_intent(
     order: Order, account: RestaurantPaymentAccount, receipt_email: str | None
@@ -75,15 +82,58 @@ def create_account_link(stripe_account_id: str, refresh_url: str, return_url: st
         raise errors.payment_provider_unavailable() from exc
 
 
-def create_connected_account(email: str, country: str = "US") -> stripe.Account:
+def create_connected_account(
+    *,
+    email: str,
+    display_name: str,
+    country: str = "US",
+    entity_type: str = "company",
+) -> str:
+    """Create a connected account and return its id.
+
+    Accounts v2. Stripe rejects `Account.create` (v1) outright for new Connect
+    integrations, pointing at /v2/core/accounts instead.
+
+    The v1 `type="standard"` shape maps onto v2 as `dashboard="full"` plus an
+    explicit `merchant` configuration: v2 does not infer capabilities from an
+    account type, you request them. `responsibilities` both set to "stripe"
+    keeps the connected account liable for its own fees and losses, which is
+    what direct charges require and what makes the restaurant, not Zenoeats,
+    the merchant of record.
+
+    Returns the id rather than the object because the v2 response shape omits
+    most fields unless named in `include`, and every caller only wants the id.
+    """
     try:
-        return stripe.Account.create(
-            type="standard",
-            country=country,
-            email=email,
+        account = _client.v2.core.accounts.create(
+            {
+                "contact_email": email,
+                "display_name": display_name,
+                "dashboard": "full",
+                "identity": {"country": country.lower(), "entity_type": entity_type},
+                "configuration": {
+                    "merchant": {"capabilities": {"card_payments": {"requested": True}}}
+                },
+                "defaults": {
+                    "currency": "usd",
+                    "responsibilities": {
+                        "fees_collector": "stripe",
+                        "losses_collector": "stripe",
+                    },
+                },
+                "include": ["configuration.merchant", "identity", "requirements"],
+            }
         )
+        return account.id
     except stripe.StripeError as exc:
-        raise errors.payment_provider_unavailable() from exc
+        # Platform admins are trusted operators, not customers. The generic
+        # "try again" told them nothing and was actively wrong for errors that
+        # no amount of retrying fixes, such as a disabled capability.
+        detail = getattr(exc, "user_message", None) or str(exc)
+        log.error("stripe connected account creation failed: %s", detail)
+        raise errors.payment_provider_unavailable(
+            f"Stripe rejected the account creation: {detail}"
+        ) from exc
 
 
 def construct_connect_event(payload: bytes, signature: str) -> stripe.Event:
