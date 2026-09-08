@@ -18,9 +18,15 @@ COPY . .
 ARG NEXT_PUBLIC_API_BASE=/api/v1
 ARG NEXT_PUBLIC_ROOT_DOMAIN
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+# Likewise rewrites(): `next build` evaluates it and bakes the result into
+# .next/routes-manifest.json. Supplying this only at runtime left the
+# manifest on the build-time default of 127.0.0.1:8000, which inside a
+# container is the container itself -- every /api call 500'd.
+ARG API_PROXY_ORIGIN
 ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE \
     NEXT_PUBLIC_ROOT_DOMAIN=$NEXT_PUBLIC_ROOT_DOMAIN \
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
+    API_PROXY_ORIGIN=$API_PROXY_ORIGIN
 RUN npm run build
 
 FROM node:22-alpine AS runtime

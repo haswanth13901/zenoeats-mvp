@@ -127,11 +127,13 @@ services:
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
         NEXT_PUBLIC_ROOT_DOMAIN: ${NEXT_PUBLIC_ROOT_DOMAIN}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        # rewrites() is resolved by `next build` and baked into
+        # routes-manifest.json, so this is a build arg, not runtime env.
+        # Inside compose the API is reachable by service name; a native
+        # `npm run dev` evaluates next.config.js itself and falls back to
+        # the published port.
+        API_PROXY_ORIGIN: http://api:8000
     env_file: .env
-    environment:
-      # Inside compose the API is reachable by service name. Natively it is
-      # not, so next.config.js defaults to the published port instead.
-      API_PROXY_ORIGIN: http://api:8000
     depends_on:
       - api
     ports:
