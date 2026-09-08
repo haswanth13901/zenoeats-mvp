@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: zenoeats
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_pw
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+        ports: ["5432:5432"]
+
+    env:
+      PGPASSWORD: postgres_dev_pw
+      DATABASE_URL_APP: postgresql+psycopg2://zenoeats_app:app_dev_pw@localhost:5432/zenoeats
+      DATABASE_URL_SYSTEM: postgresql+psycopg2://zenoeats_system:system_dev_pw@localhost:5432/zenoeats
+      DATABASE_URL_MIGRATE: postgresql+psycopg2://zenoeats_migrate:migrate_dev_pw@localhost:5432/zenoeats
+      FIELD_ENCRYPTION_KEY: kZ0nQx3Yk8vJ9pL2mN7bR4tS6wU1cE5gH8jK0aD3fI4=
+      ROOT_DOMAIN: zenoeats.local
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Create database roles
+        run: psql -h localhost -U postgres -d zenoeats -f infra/postgres/01-roles.sql
+
+      - name: Apply migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      # These four gates are the reason this pipeline exists. A green build
+      # without them is not evidence of tenant isolation.
+      - name: Tenant isolation and privilege gates
+        working-directory: backend
+        run: pytest tests/test_rls_isolation.py -v
+
+      - name: Unit tests
+        working-directory: backend
+        run: pytest tests/ -v --ignore=tests/test_rls_isolation.py
+
+      - name: Migration is reversible
+        working-directory: backend
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - working-directory: frontend
+        run: npx tsc --noEmit
+      - working-directory: frontend
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk
+          CLERK_SECRET_KEY: sk_test_ci_placeholder
+        run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      # Build once, tag by commit, promote the SAME image from staging to
+      # production. Never rebuild between environments (rule 12).
+      - name: Build images
+        run: |
+          docker build -t ghcr.io/${{ github.repository }}/api:${{ github.sha }} ./backend
+          docker build -t ghcr.io/${{ github.repository }}/web:${{ github.sha }} ./frontend
