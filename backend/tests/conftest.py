@@ -1,11 +1,19 @@
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-os.environ.setdefault("DATABASE_URL_APP", "postgresql+psycopg2://zenoeats_app:app_dev_pw@localhost:5432/zenoeats")
-os.environ.setdefault("DATABASE_URL_SYSTEM", "postgresql+psycopg2://zenoeats_system:system_dev_pw@localhost:5432/zenoeats")
-os.environ.setdefault("DATABASE_URL_MIGRATE", "postgresql+psycopg2://zenoeats_migrate:migrate_dev_pw@localhost:5432/zenoeats")
-os.environ.setdefault("FIELD_ENCRYPTION_KEY", "kZ0nQx3Yk8vJ9pL2mN7bR4tS6wU1cE5gH8jK0aD3fI4=")
-os.environ.setdefault("ROOT_DOMAIN", "zenoeats.local")
+# Deliberately no os.environ.setdefault of DATABASE_URL_* here.
+#
+# pydantic-settings reads real environment variables in preference to the
+# .env file, so a "default" set in this module is not a fallback at all --
+# it silently overrides the project's actual configuration. The previous
+# values pointed at localhost:5432, correct only inside the api container,
+# while a native run publishes Postgres on 127.0.0.1:5433. The suite then
+# failed against a database that was running the whole time, and the fix
+# looked like exporting three DSNs by hand before every run.
+#
+# app.config resolves the repo-root .env from its own file location, so
+# alembic, uvicorn, celery and pytest all agree without help. If that file
+# is missing, Settings raises naming the field, which is a far better
+# failure than connecting somewhere unintended.

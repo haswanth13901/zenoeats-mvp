@@ -50,6 +50,15 @@ services:
   api:
     build: ./backend
     env_file: .env
+    environment:
+      # env_file supplies host-side URLs; these override them with the
+      # in-network equivalents. `environment:` wins over `env_file:`.
+      DATABASE_URL_APP: ${DOCKER_DATABASE_URL_APP}
+      DATABASE_URL_SYSTEM: ${DOCKER_DATABASE_URL_SYSTEM}
+      DATABASE_URL_MIGRATE: ${DOCKER_DATABASE_URL_MIGRATE}
+      CELERY_BROKER_URL: ${DOCKER_CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${DOCKER_CELERY_RESULT_BACKEND}
+      REDIS_RUNTIME_URL: ${DOCKER_REDIS_RUNTIME_URL}
     depends_on:
       postgres: {condition: service_healthy}
       redis-broker: {condition: service_healthy}
@@ -62,20 +71,62 @@ services:
   worker:
     build: ./backend
     env_file: .env
+    environment:
+      # env_file supplies host-side URLs; these override them with the
+      # in-network equivalents. `environment:` wins over `env_file:`.
+      DATABASE_URL_APP: ${DOCKER_DATABASE_URL_APP}
+      DATABASE_URL_SYSTEM: ${DOCKER_DATABASE_URL_SYSTEM}
+      DATABASE_URL_MIGRATE: ${DOCKER_DATABASE_URL_MIGRATE}
+      CELERY_BROKER_URL: ${DOCKER_CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${DOCKER_CELERY_RESULT_BACKEND}
+      REDIS_RUNTIME_URL: ${DOCKER_REDIS_RUNTIME_URL}
     depends_on:
       postgres: {condition: service_healthy}
       redis-broker: {condition: service_healthy}
     command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=2
+    # The image's HEALTHCHECK curls /health, which only the api serves. A
+    # worker has no HTTP surface, so it reported unhealthy forever and any
+    # orchestrator would restart it in a loop. Ask Celery instead.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
 
   beat:
     build: ./backend
     env_file: .env
+    environment:
+      # env_file supplies host-side URLs; these override them with the
+      # in-network equivalents. `environment:` wins over `env_file:`.
+      DATABASE_URL_APP: ${DOCKER_DATABASE_URL_APP}
+      DATABASE_URL_SYSTEM: ${DOCKER_DATABASE_URL_SYSTEM}
+      DATABASE_URL_MIGRATE: ${DOCKER_DATABASE_URL_MIGRATE}
+      CELERY_BROKER_URL: ${DOCKER_CELERY_BROKER_URL}
+      CELERY_RESULT_BACKEND: ${DOCKER_CELERY_RESULT_BACKEND}
+      REDIS_RUNTIME_URL: ${DOCKER_REDIS_RUNTIME_URL}
     depends_on:
       redis-broker: {condition: service_healthy}
     command: celery -A app.workers.celery_app.celery_app beat --loglevel=info
+    # beat is a scheduler with no queryable liveness surface: `inspect ping`
+    # answers from workers, not from beat. Rather than ship a check that
+    # always fails, declare that there isn't one. Missed schedules surface as
+    # stale PENDING_PAYMENT orders, which is what to alert on instead.
+    healthcheck:
+      disable: true
 
   web:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # NEXT_PUBLIC_* is inlined into the client bundle by `next build`, so
+      # these must be present as build args. Supplying them only at runtime
+      # leaves the bundle with no publishable key, and Clerk silently drops
+      # into keyless mode and mints throwaway credentials.
+      args:
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+        NEXT_PUBLIC_ROOT_DOMAIN: ${NEXT_PUBLIC_ROOT_DOMAIN}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
     env_file: .env
     environment:
       # Inside compose the API is reachable by service name. Natively it is
