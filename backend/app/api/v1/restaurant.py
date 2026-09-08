@@ -4,27 +4,180 @@ Every endpoint runs under the tenant-scoped session. Even if the role check
 were removed, RLS would return zero rows for another restaurant's data.
 """
 
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import (
-    current_restaurant, get_current_user, require_staff, tenant_db,
+    TenantContext, current_restaurant, current_staff_user, get_current_user,
+    require_staff, resolve_tenant, tenant_db,
 )
-from app.core import errors
+from app.config import settings
+from app.core import errors, staff_auth
+from app.core.ratelimit import per_ip
 from app.db.base import utcnow
-from app.db.session import system_session
+from app.db.session import system_session, tenant_session
 from app.models import (
     Category, CategoryKind, Item, ItemModifierGroup, Meal, ModifierGroup,
     ModifierOption, Order, OrderItem, OrderStatus, Payment, Restaurant,
     RestaurantUser, SelectionType, StaffRole, StaffStatus, User,
 )
+from app.schemas.api import ChangePasswordIn, StaffLoginIn, StaffMeOut
 from app.services.orders import transition
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/restaurant", tags=["restaurant"])
+
+
+@router.post(
+    "/login",
+    response_model=StaffMeOut,
+    # Unauthenticated and credential-bearing. Tight, and keyed by address
+    # because there is no session yet to key on.
+    dependencies=[Depends(per_ip("staff_login", limit=10, window_seconds=300))],
+)
+def staff_login(
+    body: StaffLoginIn,
+    response: Response,
+    tenant: TenantContext = Depends(resolve_tenant),
+):
+    """Sign in restaurant staff.
+
+    Authentication and authorization are separate steps on purpose. The
+    password proves who you are; membership of *this* restaurant, read from
+    restaurant_users under RLS, decides whether you may be here. Staff of
+    another restaurant therefore get the same refusal as a wrong password,
+    and learn nothing about which subdomain they do belong to.
+    """
+    email = body.email.strip().lower()
+
+    with system_session() as session:
+        user = session.execute(
+            select(User).where(User.email == email, User.password_hash.isnot(None))
+        ).scalar_one_or_none()
+        if user is None:
+            staff_auth.dummy_verify(body.password)
+            raise errors.ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
+        digest = user.password_hash
+        user_id = user.id
+        full_name = user.full_name
+        active = user.is_active and user.deleted_at is None
+        must_change = user.must_change_password
+
+    if not staff_auth.verify_password(digest, body.password):
+        log.warning("failed staff sign-in for %r", email[:64])
+        raise errors.ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
+    if not active:
+        raise errors.ApiError(403, "ACCOUNT_INACTIVE", "This account is not active.")
+
+    with tenant_session(tenant.restaurant_id) as session:
+        membership = session.execute(
+            select(RestaurantUser).where(
+                RestaurantUser.user_id == user_id,
+                RestaurantUser.status == StaffStatus.ACTIVE.value,
+            )
+        ).scalar_one_or_none()
+        if membership is None:
+            log.warning("staff %r has no active membership at %s", email[:64], tenant.slug)
+            raise errors.ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
+        role_code = membership.role_code
+
+    response.set_cookie(
+        key=staff_auth.SESSION_COOKIE,
+        value=staff_auth.issue_session(user_id),
+        max_age=settings.STAFF_SESSION_TTL_MINUTES * 60,
+        httponly=True,
+        samesite="lax",
+        secure=settings.ENV == "production",
+        path="/",
+    )
+    return StaffMeOut(
+        user_id=user_id, email=email, full_name=full_name,
+        role_code=role_code, must_change_password=must_change,
+    )
+
+
+@router.post("/logout", status_code=204)
+def staff_logout(response: Response):
+    response.delete_cookie(
+        key=staff_auth.SESSION_COOKIE,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.ENV == "production",
+    )
+
+
+@router.get("/me", response_model=StaffMeOut)
+def staff_me(
+    user: User = Depends(current_staff_user),
+    tenant: TenantContext = Depends(resolve_tenant),
+):
+    """Who the caller is, and whether they still owe a password change.
+
+    Uses current_staff_user rather than the ready variant so the frontend can
+    ask this while holding a temporary password and route to the change form.
+    """
+    with tenant_session(tenant.restaurant_id) as session:
+        membership = session.execute(
+            select(RestaurantUser).where(
+                RestaurantUser.user_id == user.id,
+                RestaurantUser.status == StaffStatus.ACTIVE.value,
+            )
+        ).scalar_one_or_none()
+        if membership is None:
+            raise errors.tenant_scope_denied()
+        role_code = membership.role_code
+
+    return StaffMeOut(
+        user_id=user.id, email=user.email, full_name=user.full_name,
+        role_code=role_code, must_change_password=user.must_change_password,
+    )
+
+
+@router.post("/change-password", status_code=204)
+def change_password(
+    body: ChangePasswordIn,
+    response: Response,
+    user: User = Depends(current_staff_user),
+):
+    """Set a new password.
+
+    Requires the current one even though the session already proves identity:
+    it is what stops an unattended signed-in tablet being turned into a
+    permanent account takeover.
+
+    This is not a reset. Forgotten passwords are reissued by the super admin
+    until there is an email provider to send a reset link through.
+    """
+    with system_session() as session:
+        row = session.get(User, user.id)
+        if row is None or row.password_hash is None:
+            raise errors.ApiError(401, "UNAUTHENTICATED", "Sign in to continue.")
+        if not staff_auth.verify_password(row.password_hash, body.current_password):
+            raise errors.ApiError(401, "INVALID_CREDENTIALS", "Current password is incorrect.")
+        if body.new_password == body.current_password:
+            raise errors.validation_error("Choose a password you have not used here before.")
+
+        row.password_hash = staff_auth.hash_password(body.new_password)
+        row.must_change_password = False
+
+    # Sessions are stateless, so every one issued before this point stays
+    # valid. Ending the current one is the honest signal that the credential
+    # changed; signing in again is cheap, and a session that outlives the
+    # password it was issued against is not something to leave lying around.
+    response.delete_cookie(
+        key=staff_auth.SESSION_COOKIE,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.ENV == "production",
+    )
+
 
 MANAGE = require_staff(StaffRole.ADMIN, StaffRole.MANAGER)
 KITCHEN = require_staff(StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.KITCHEN, StaffRole.CASHIER)

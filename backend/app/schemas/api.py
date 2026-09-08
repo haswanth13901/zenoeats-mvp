@@ -157,6 +157,41 @@ class CreateRestaurantIn(BaseModel):
     admin_email: str | None = None
 
 
+class StaffLoginIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    # 12 characters is the floor for an account that can read a restaurant's
+    # revenue and mark orders collected.
+    new_password: str = Field(min_length=12, max_length=256)
+
+
+class StaffMeOut(BaseModel):
+    user_id: UUID
+    email: str
+    full_name: str | None
+    role_code: str
+    must_change_password: bool
+
+
+class CreateOwnerIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=320)
+    full_name: str | None = Field(default=None, max_length=160)
+
+
+class CreateOwnerOut(BaseModel):
+    user_id: UUID
+    email: str
+    # Returned once, at creation, and never retrievable again -- only its
+    # argon2 hash is stored. The super admin passes it to the owner, who is
+    # forced to replace it at first sign-in.
+    temporary_password: str
+
+
 class UpdateRestaurantIn(BaseModel):
     """Every field optional: absent means "leave alone", which is what lets a
     caller clear the tagline by sending null without also blanking the rest.

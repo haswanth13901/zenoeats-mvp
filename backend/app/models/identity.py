@@ -43,6 +43,13 @@ class User(Base, TimestampMixin):
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     full_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Restaurant staff only. Customers authenticate through Clerk and platform
+    # administrators against ADMIN_USERS, so both are null for them.
+    password_hash: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

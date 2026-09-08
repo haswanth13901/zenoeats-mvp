@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     # Signs platform-admin session cookies. Rotating it logs every admin out.
     SESSION_SECRET: str = ""
     ADMIN_SESSION_TTL_MINUTES: int = 480
+    # Restaurant staff sessions. Longer than an admin session because it has
+    # to outlast a shift on a kitchen tablet, shorter than a day so a device
+    # left on the counter overnight is not still signed in.
+    STAFF_SESSION_TTL_MINUTES: int = 720
 
     # --- Stripe -----------------------------------------------------------
     STRIPE_SECRET_KEY: str = ""

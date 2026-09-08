@@ -18,15 +18,17 @@ from app.api.deps import require_platform_admin
 from app.config import settings
 from app.core import platform_auth
 from app.core.ratelimit import per_ip
+from app.core import staff_auth
 from app.core import errors
 from app.db.base import utcnow
 from app.db.session import system_session, tenant_session
 from app.models import (
     Restaurant, RestaurantOrderCounter, RestaurantPaymentAccount,
-    RestaurantStatus, User,
+    RestaurantStatus, RestaurantUser, StaffRole, StaffStatus, User,
 )
 from app.schemas.api import (
-    CreateRestaurantIn, RestaurantOut, RestaurantReportOut, UpdateRestaurantIn,
+    CreateOwnerIn, CreateOwnerOut, CreateRestaurantIn, RestaurantOut,
+    RestaurantReportOut, UpdateRestaurantIn,
 )
 from app.services import stripe_service
 
@@ -342,6 +344,132 @@ def create_restaurant(body: CreateRestaurantIn, admin: User = Depends(require_pl
         currency=body.currency, tax_rate_bps=body.tax_rate_bps, accepting_orders=True,
         stripe_account_id=None, charges_enabled=False, created_at=utcnow(),
     )
+
+
+@router.post(
+    "/restaurants/{restaurant_id}/owner",
+    response_model=CreateOwnerOut,
+    status_code=201,
+)
+def create_restaurant_owner(
+    restaurant_id: UUID,
+    body: CreateOwnerIn,
+    admin: User = Depends(require_platform_admin),
+):
+    """Issue the owner login for a restaurant.
+
+    The platform creates exactly one account per restaurant -- the owner, with
+    the ADMIN role -- and the owner invites their own staff from the
+    restaurant portal. Creating every kitchen hire here would turn each one
+    into a support request for the platform.
+
+    The temporary password is returned once, in this response, and never
+    again: only its argon2 hash is stored. must_change_password is set, so it
+    is worthless the moment the owner signs in and replaces it.
+
+    There is no email step yet, so the super admin passes the password to the
+    owner out of band. That is also why forgotten passwords are reissued here
+    rather than reset by the account holder.
+    """
+    email = body.email.strip().lower()
+
+    with system_session() as session:
+        restaurant = session.get(Restaurant, restaurant_id)
+        if restaurant is None or restaurant.deleted_at is not None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        slug = restaurant.slug
+
+        existing = session.execute(
+            select(User).where(User.email == email, User.password_hash.isnot(None))
+        ).scalar_one_or_none()
+        if existing is not None:
+            # One credentialed account per address, enforced by a partial
+            # unique index as well. Reissuing here would silently move an
+            # existing owner between restaurants.
+            raise errors.ApiError(
+                409, "EMAIL_TAKEN",
+                "That email already has a restaurant login.",
+            )
+
+        temp_password = staff_auth.generate_temp_password()
+        owner = User(
+            clerk_user_id=None,
+            email=email,
+            full_name=body.full_name,
+            password_hash=staff_auth.hash_password(temp_password),
+            must_change_password=True,
+        )
+        session.add(owner)
+        session.flush()
+        owner_id = owner.id
+
+        _audit(
+            session, admin, "SUPER_ADMIN_CREATE_RESTAURANT_OWNER",
+            {"restaurant_id": str(restaurant_id), "slug": slug, "owner_email": email},
+        )
+
+    # Membership is a tenant-owned row, so it is written under the tenant role
+    # with RLS in force rather than through the platform's system role.
+    with tenant_session(restaurant_id) as session:
+        session.add(
+            RestaurantUser(
+                restaurant_id=restaurant_id,
+                user_id=owner_id,
+                role_code=StaffRole.ADMIN.value,
+                status=StaffStatus.ACTIVE.value,
+                invited_at=utcnow(),
+                accepted_at=utcnow(),
+            )
+        )
+
+    return CreateOwnerOut(user_id=owner_id, email=email, temporary_password=temp_password)
+
+
+@router.post("/restaurants/{restaurant_id}/owner/reset-password", response_model=CreateOwnerOut)
+def reset_owner_password(
+    restaurant_id: UUID,
+    body: CreateOwnerIn,
+    admin: User = Depends(require_platform_admin),
+):
+    """Reissue a temporary password for an existing staff account.
+
+    Stands in for a self-service reset until there is an email provider to
+    send a link through. The account must already be staff at this restaurant,
+    so this cannot be used to take over an arbitrary address.
+    """
+    email = body.email.strip().lower()
+
+    with system_session() as session:
+        restaurant = session.get(Restaurant, restaurant_id)
+        if restaurant is None or restaurant.deleted_at is not None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        user = session.execute(
+            select(User).where(User.email == email, User.password_hash.isnot(None))
+        ).scalar_one_or_none()
+        if user is None:
+            raise errors.ApiError(404, "USER_NOT_FOUND", "No login for that email.")
+        user_id = user.id
+
+    with tenant_session(restaurant_id) as session:
+        membership = session.execute(
+            select(RestaurantUser).where(RestaurantUser.user_id == user_id)
+        ).scalar_one_or_none()
+        if membership is None:
+            raise errors.ApiError(
+                404, "USER_NOT_FOUND", "That login is not staff at this restaurant."
+            )
+
+    temp_password = staff_auth.generate_temp_password()
+    with system_session() as session:
+        user = session.get(User, user_id)
+        user.password_hash = staff_auth.hash_password(temp_password)
+        user.must_change_password = True
+        _audit(
+            session, admin, "SUPER_ADMIN_RESET_STAFF_PASSWORD",
+            {"restaurant_id": str(restaurant_id), "user_email": email},
+        )
+
+    return CreateOwnerOut(user_id=user_id, email=email, temporary_password=temp_password)
 
 
 @router.post("/restaurants/{restaurant_id}/stripe-onboarding")

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core import errors
 from app.core.auth import AuthError, ClerkPrincipal, verify_clerk_token
-from app.core import platform_auth
+from app.core import platform_auth, staff_auth
 from app.core.tenant import extract_slug
 from app.db.session import AppSessionLocal, system_session
 from app.models import (
@@ -130,16 +130,64 @@ def current_restaurant(
     return restaurant
 
 
+def current_staff_user(request: Request) -> User:
+    """Authenticate restaurant staff from their session cookie.
+
+    Not Clerk: Clerk is the customer identity provider. Staff credentials are
+    issued by the platform and live in users.password_hash.
+
+    Deliberately does NOT enforce the password-change gate, because
+    change_password itself depends on this -- an account holding a temporary
+    password has to be able to reach exactly one endpoint.
+    """
+    token = request.cookies.get(staff_auth.SESSION_COOKIE)
+    if not token:
+        raise errors.ApiError(401, "UNAUTHENTICATED", "Sign in to continue.")
+
+    principal = staff_auth.verify_session(token)
+    if principal is None:
+        raise errors.ApiError(401, "UNAUTHENTICATED", "Your session has expired. Sign in again.")
+
+    with system_session() as session:
+        user = session.get(User, principal.user_id)
+        # password_hash is the marker of a credentialed account. A customer or
+        # a platform admin has none, so a token naming one of them -- however
+        # it arose -- is not a staff session.
+        if user is None or user.password_hash is None:
+            raise errors.ApiError(401, "UNAUTHENTICATED", "Sign in to continue.")
+        if not user.is_active or user.deleted_at is not None:
+            raise errors.ApiError(403, "ACCOUNT_INACTIVE", "This account is not active.")
+        session.expunge(user)
+        return user
+
+
+def current_staff_user_ready(user: User = Depends(current_staff_user)) -> User:
+    """A staff account that has finished setting itself up.
+
+    Enforced here rather than in the frontend: a temporary password is issued
+    over the phone or on a note, so an account still holding one must not be
+    able to do anything by calling the API directly.
+    """
+    if user.must_change_password:
+        raise errors.ApiError(
+            403, "PASSWORD_CHANGE_REQUIRED", "Choose a new password before continuing."
+        )
+    return user
+
+
 def require_staff(*roles: StaffRole):
     """Authorize a staff role within the resolved tenant.
 
-    Clerk org membership in the token is not consulted. The authoritative
-    record is restaurant_users, read under the tenant-scoped session.
+    The session identifies the person; the tenant still comes from the Host
+    header and the authoritative record is restaurant_users, read under the
+    tenant-scoped session. So a session issued for one restaurant, presented
+    on another's subdomain, finds no membership and is refused -- without the
+    token needing to carry a restaurant id it could be wrong about.
     """
     allowed = {r.value for r in roles} if roles else {r.value for r in StaffRole}
 
     def _dep(
-        user: User = Depends(get_current_user),
+        user: User = Depends(current_staff_user_ready),
         db: Session = Depends(tenant_db),
         tenant: TenantContext = Depends(resolve_tenant),
     ) -> RestaurantUser:
