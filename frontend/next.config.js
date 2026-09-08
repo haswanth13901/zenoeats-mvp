@@ -25,17 +25,15 @@ module.exports = {
   // server-renders fine while never hydrating: no data fetch, no click
   // handlers, just a permanent "Loading...". Development only; a production
   // build serves these normally.
-  allowedDevOrigins: [
-    "zenoeats.local",
-    "admin.zenoeats.local",
-    "spicehouse.zenoeats.local",
-    "jr-corner.zenoeats.local",
-    // Wildcards are not supported here, so every new restaurant subdomain has
-    // to be added to this list AND to the machine's hosts file before it can
-    // be browsed with `next dev`. Production serves these normally and needs
-    // neither.
-    "*.zenoeats.local",
-  ],
+  // "*" stands in for exactly one hostname label, so this covers every
+  // restaurant subdomain, present and future -- no entry per restaurant. The
+  // bare domain needs its own entry because "*." does not match it.
+  //
+  // Locally a new subdomain still needs a hosts-file line, because the
+  // Windows hosts file has no wildcards. Production needs neither: one
+  // "*.zenoeats.com" DNS record covers everything, and this setting only
+  // applies to the dev server.
+  allowedDevOrigins: ["zenoeats.local", "*.zenoeats.local"],
   // Emits .next/standalone: a self-contained server with only the packages
   // actually imported, so the production image ships neither the full
   // node_modules tree nor the sources.
