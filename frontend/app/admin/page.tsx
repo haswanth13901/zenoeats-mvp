@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Empty, ErrorNote, Panel, Shell } from "@/components/Shell";
 import { ApiError, errorMessage } from "@/lib/api";
@@ -338,6 +339,12 @@ export default function AdminPage() {
                           >
                             Owner login
                           </button>
+                          <Link
+                            className="btn-quiet px-2 py-1 text-xs"
+                            href={`/admin/restaurants/${r.id}/orders`}
+                          >
+                            Orders
+                          </Link>
                           {/* The API refuses to delete an ACTIVE restaurant.
                               Hiding the button avoids offering a certain 409. */}
                           {r.status !== "ACTIVE" && (

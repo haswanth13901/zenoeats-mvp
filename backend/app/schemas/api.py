@@ -236,6 +236,36 @@ class RestaurantOut(BaseModel):
     deleted_at: datetime | None = None
 
 
+class AdminOrderOut(BaseModel):
+    """One order as the platform is allowed to see it.
+
+    Deliberately narrower than the restaurant's own view. zenoeats_system holds
+    column-level SELECT grants on orders, and customer_note, pickup_pin_encrypted
+    and customer_user_id are not among them -- so a platform operator answering a
+    billing question cannot read what a customer wrote or the PIN that hands
+    their food over. The database enforces that, not this class.
+    """
+
+    order_id: UUID
+    order_number: int
+    status: str
+    total_minor: int
+    tax_minor: int
+    currency: str
+    created_at: datetime
+    paid_at: datetime | None
+    expires_at: datetime | None
+    payment_status: str | None
+    stripe_payment_intent_id: str | None
+
+
+class AdminOrderPageOut(BaseModel):
+    restaurant_id: UUID
+    slug: str
+    total: int
+    orders: list[AdminOrderOut]
+
+
 class RestaurantReportOut(BaseModel):
     restaurant_id: UUID
     slug: str

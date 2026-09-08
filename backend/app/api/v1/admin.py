@@ -10,7 +10,7 @@ import io
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
@@ -27,8 +27,8 @@ from app.models import (
     RestaurantStatus, RestaurantUser, StaffRole, StaffStatus, User,
 )
 from app.schemas.api import (
-    CreateOwnerIn, CreateOwnerOut, CreateRestaurantIn, RestaurantOut,
-    RestaurantReportOut, UpdateRestaurantIn,
+    AdminOrderOut, AdminOrderPageOut, CreateOwnerIn, CreateOwnerOut,
+    CreateRestaurantIn, RestaurantOut, RestaurantReportOut, UpdateRestaurantIn,
 )
 from app.services import stripe_service
 
@@ -559,6 +559,88 @@ def suspend_restaurant(restaurant_id: UUID, admin: User = Depends(require_platfo
         _audit(session, admin, "SUPER_ADMIN_SUSPEND_RESTAURANT",
                {"restaurant_id": str(restaurant_id)})
     return {"restaurant_id": str(restaurant_id), "status": RestaurantStatus.SUSPENDED.value}
+
+
+@router.get("/restaurants/{restaurant_id}/orders", response_model=AdminOrderPageOut)
+def restaurant_orders(
+    restaurant_id: UUID,
+    status: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    admin: User = Depends(require_platform_admin),
+):
+    """Orders for one restaurant, for platform support and billing questions.
+
+    A cross-tenant read, so it runs on the declared system surface and is
+    audited like every other one. The column list is not a formatting choice:
+    zenoeats_system has column-level SELECT on orders, and customer_note,
+    pickup_pin_encrypted and customer_user_id are excluded from it. Asking for
+    them here would be refused by Postgres, which is the point -- answering
+    "why was this card charged" never requires reading what the customer wrote
+    or the PIN that releases their food.
+
+    currency comes from the restaurant rather than the order for the same
+    reason: orders.currency is outside the grant.
+    """
+    with system_session() as session:
+        restaurant = session.execute(
+            text(
+                "SELECT slug, currency FROM restaurants "
+                "WHERE id = :rid AND deleted_at IS NULL"
+            ),
+            {"rid": str(restaurant_id)},
+        ).mappings().one_or_none()
+        if restaurant is None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+
+        _audit(
+            session, admin, "SUPER_ADMIN_READ_RESTAURANT_ORDERS",
+            {"restaurant_id": str(restaurant_id), "status": status, "limit": limit},
+        )
+
+        total = session.execute(
+            text(
+                "SELECT count(*) FROM orders WHERE restaurant_id = :rid "
+                "AND (:status IS NULL OR status = :status)"
+            ),
+            {"rid": str(restaurant_id), "status": status},
+        ).scalar_one()
+
+        rows = session.execute(
+            text(
+                """
+                SELECT o.id, o.order_number, o.status, o.total_minor, o.tax_minor,
+                       o.created_at, o.paid_at, o.expires_at,
+                       p.status AS payment_status,
+                       p.stripe_payment_intent_id
+                FROM orders o
+                LEFT JOIN payments p ON p.order_id = o.id
+                WHERE o.restaurant_id = :rid
+                  AND (:status IS NULL OR o.status = :status)
+                ORDER BY o.created_at DESC
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            {"rid": str(restaurant_id), "status": status, "limit": limit, "offset": offset},
+        ).mappings().all()
+
+    return AdminOrderPageOut(
+        restaurant_id=restaurant_id,
+        slug=restaurant["slug"],
+        total=total,
+        orders=[
+            AdminOrderOut(
+                order_id=r["id"], order_number=r["order_number"], status=r["status"],
+                total_minor=r["total_minor"], tax_minor=r["tax_minor"],
+                currency=restaurant["currency"],
+                created_at=r["created_at"], paid_at=r["paid_at"],
+                expires_at=r["expires_at"],
+                payment_status=r["payment_status"],
+                stripe_payment_intent_id=r["stripe_payment_intent_id"],
+            )
+            for r in rows
+        ],
+    )
 
 
 @router.get("/reports", response_model=list[RestaurantReportOut])
