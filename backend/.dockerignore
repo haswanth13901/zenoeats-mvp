@@ -1,0 +1,13 @@
+# Keep the build context to source. __pycache__ and .venv in particular are
+# large, machine-specific, and never wanted inside the image.
+__pycache__
+*.pyc
+*.pyo
+.venv
+.pytest_cache
+.env
+.env.*
+.git
+.gitignore
+Dockerfile
+.dockerignore
