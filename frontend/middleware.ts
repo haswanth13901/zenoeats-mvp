@@ -4,11 +4,14 @@ import { NextResponse } from "next/server";
 // The menu is public. Everything else needs a session. Authorization itself
 // is decided server-side against restaurant_users and RLS; this only keeps
 // signed-out visitors off the operator screens.
+// Clerk guards the customer surface only. /admin authenticates against
+// ADMIN_USERS with its own httpOnly session cookie, checked server-side by
+// require_platform_admin -- if Clerk protected it too, an operator with no
+// Clerk account would be bounced to a customer sign-in they can never pass.
 const isProtected = createRouteMatcher([
   "/checkout(.*)",
   "/orders(.*)",
   "/manage(.*)",
-  "/admin(.*)",
 ]);
 
 const ROOT_DOMAIN = process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "zenoeats.local";

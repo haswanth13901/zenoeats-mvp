@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core import errors
 from app.core.auth import AuthError, ClerkPrincipal, verify_clerk_token
+from app.core import platform_auth
 from app.core.tenant import extract_slug
 from app.db.session import AppSessionLocal, system_session
 from app.models import (
@@ -156,7 +157,56 @@ def require_staff(*roles: StaffRole):
     return _dep
 
 
-def require_platform_admin(user: User = Depends(get_current_user)) -> User:
-    if not user.is_platform_admin:
-        raise errors.tenant_scope_denied("Platform administrator access required.")
-    return user
+def require_platform_admin(request: Request) -> User:
+    """Authorize a platform administrator from the environment-backed session.
+
+    Deliberately not Clerk. Clerk is the customer identity provider; platform
+    operators are a separate, tiny population declared in ADMIN_USERS. A Clerk
+    token cannot satisfy this dependency and an admin session cannot satisfy
+    the customer ones -- the two never overlap.
+
+    A users row is resolved (and created on first sign-in) because
+    platform_audit_logs.actor_user_id is a NOT NULL foreign key to users.id.
+    Every audited super-admin action needs a real actor, and naming each
+    operator in ADMIN_USERS is what keeps that column worth reading.
+    """
+    token = request.cookies.get(platform_auth.SESSION_COOKIE)
+    if not token:
+        raise errors.ApiError(401, "UNAUTHENTICATED", "Sign in to continue.")
+
+    admin = platform_auth.verify_session(token)
+    if admin is None:
+        raise errors.ApiError(401, "UNAUTHENTICATED", "Your session has expired. Sign in again.")
+
+    return _ensure_platform_admin_user(admin.email)
+
+
+def _ensure_platform_admin_user(email: str) -> User:
+    """The users row backing an environment-declared administrator.
+
+    is_platform_admin is re-asserted on every sign-in so the environment stays
+    the single source of truth: revoking someone in ADMIN_USERS is enough, and
+    a stale row cannot grant access on its own.
+    """
+    with system_session() as session:
+        user = session.execute(
+            select(User).where(User.email == email, User.clerk_user_id.is_(None))
+        ).scalar_one_or_none()
+
+        if user is None:
+            user = User(
+                clerk_user_id=None,
+                email=email,
+                full_name="Platform Administrator",
+                is_platform_admin=True,
+            )
+            session.add(user)
+            session.flush()
+        elif not user.is_platform_admin:
+            user.is_platform_admin = True
+
+        if not user.is_active or user.deleted_at is not None:
+            raise errors.ApiError(403, "ACCOUNT_INACTIVE", "This account is not active.")
+
+        session.expunge(user)
+        return user

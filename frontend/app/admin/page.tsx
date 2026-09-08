@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Empty, ErrorNote, Panel, Shell } from "@/components/Shell";
 import { ApiError, errorMessage } from "@/lib/api";
 import { money } from "@/lib/format";
-import { useResource } from "@/lib/useApi";
+import { useAdminResource } from "@/lib/useAdminApi";
 
 type Restaurant = {
   id: string;
@@ -37,11 +38,17 @@ type Report = {
 const NAV = [{ href: "/admin", label: "Restaurants" }];
 
 export default function AdminPage() {
-  const restaurants = useResource<Restaurant[]>("/admin/restaurants");
-  const reports = useResource<Report[]>("/admin/reports", 30_000);
+  const restaurants = useAdminResource<Restaurant[]>("/admin/restaurants");
+  const reports = useAdminResource<Report[]>("/admin/reports", 30_000);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const router = useRouter();
+
+  async function signOut() {
+    await restaurants.call("/admin/logout", { method: "POST" }).catch(() => {});
+    router.replace("/admin/login");
+  }
 
   async function act(id: string, action: string) {
     setBusy(id);
@@ -84,7 +91,15 @@ export default function AdminPage() {
   );
 
   return (
-    <Shell title="Zenoeats platform" nav={NAV}>
+    <Shell
+      title="Zenoeats platform"
+      nav={NAV}
+      action={
+        <button className="btn-quiet px-3 py-1.5 text-sm" onClick={signOut}>
+          Sign out
+        </button>
+      }
+    >
       <ErrorNote message={error ?? restaurants.error} />
 
       <div className="mb-10 grid grid-cols-3 gap-px border border-hairline bg-hairline">

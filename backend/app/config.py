@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     # Set true only for local development without a Clerk instance.
     AUTH_DEV_BYPASS: bool = False
 
+    # --- Platform administrators ------------------------------------------
+    # "email:argon2hash" pairs separated by ";" -- not "," because an argon2
+    # hash contains commas itself. Generate an entry with
+    #   python scripts/hash_password.py you@example.com
+    # Named rather than shared so platform_audit_logs.actor_user_id stays
+    # meaningful. Empty means nobody can sign in to the super admin portal.
+    ADMIN_USERS: str = ""
+    # Signs platform-admin session cookies. Rotating it logs every admin out.
+    SESSION_SECRET: str = ""
+    ADMIN_SESSION_TTL_MINUTES: int = 480
+
     # --- Stripe -----------------------------------------------------------
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""

@@ -46,6 +46,10 @@ export async function api<T>(path: string, opts: Opts = {}): Promise<T> {
       headers,
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       cache: "no-store",
+      // The platform-admin session is an httpOnly cookie. Same-origin is the
+      // fetch default, but stating it means a future change of API origin
+      // fails loudly rather than silently dropping the session.
+      credentials: "same-origin",
       signal: timeout.signal,
     });
   } catch (cause) {

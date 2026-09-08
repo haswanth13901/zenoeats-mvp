@@ -34,7 +34,12 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    clerk_user_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    # Nullable: platform administrators authenticate against credentials in
+    # the environment and have no Clerk identity, but still need a row here
+    # because platform_audit_logs.actor_user_id is a NOT NULL FK to users.id.
+    clerk_user_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, unique=True, index=True
+    )
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     full_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

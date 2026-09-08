@@ -10,10 +10,14 @@ export function Shell({
   title,
   nav,
   children,
+  action,
 }: {
   title: string;
   nav: { href: string; label: string }[];
   children: React.ReactNode;
+  /** Replaces the Clerk UserButton. The platform admin portal has no Clerk
+   *  session, so its sign-out has to end the admin cookie instead. */
+  action?: React.ReactNode;
 }) {
   const pathname = usePathname();
 
@@ -38,7 +42,7 @@ export function Shell({
               );
             })}
           </nav>
-          <UserButton afterSignOutUrl="/" />
+          {action ?? <UserButton afterSignOutUrl="/" />}
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-5 py-8">{children}</main>

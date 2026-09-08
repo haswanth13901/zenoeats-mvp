@@ -7,12 +7,17 @@ for platform analytics.
 
 import csv
 import io
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
 from app.api.deps import require_platform_admin
+from app.config import settings
+from app.core import platform_auth
+from app.core.ratelimit import per_ip
 from app.core import errors
 from app.db.base import utcnow
 from app.db.session import system_session, tenant_session
@@ -23,7 +28,69 @@ from app.models import (
 from app.schemas.api import CreateRestaurantIn, RestaurantOut, RestaurantReportOut
 from app.services import stripe_service
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["super-admin"])
+
+
+class LoginIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class AdminOut(BaseModel):
+    email: str
+
+
+@router.post(
+    "/login",
+    response_model=AdminOut,
+    # Unauthenticated and credential-bearing, so it is the one endpoint here
+    # worth brute forcing. Tight, and by address since there is no session yet.
+    dependencies=[Depends(per_ip("admin_login", limit=10, window_seconds=300))],
+)
+def login(body: LoginIn, response: Response):
+    admin = platform_auth.authenticate(body.email, body.password)
+    if admin is None:
+        # One message for both "no such admin" and "wrong password". The
+        # difference would tell an attacker which addresses are worth attacking.
+        log.warning("failed platform admin sign-in for %r", body.email[:64])
+        raise errors.ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
+
+    response.set_cookie(
+        key=platform_auth.SESSION_COOKIE,
+        value=platform_auth.issue_session(admin),
+        max_age=settings.ADMIN_SESSION_TTL_MINUTES * 60,
+        # httponly: unreadable to JavaScript, so an XSS bug on any page of the
+        # platform cannot exfiltrate a super-admin session.
+        httponly=True,
+        # lax: the cookie rides top-level navigations but not cross-site form
+        # posts, which is what stops a CSRF against the mutating endpoints.
+        samesite="lax",
+        # Development is plain HTTP on .local; live must never send this in
+        # the clear, so it follows the environment rather than being hardcoded.
+        secure=settings.ENV == "production",
+        path="/",
+    )
+    return AdminOut(email=admin.email)
+
+
+@router.post("/logout", status_code=204)
+def logout(response: Response):
+    response.delete_cookie(
+        key=platform_auth.SESSION_COOKIE,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.ENV == "production",
+    )
+
+
+@router.get("/me", response_model=AdminOut)
+def me(admin: User = Depends(require_platform_admin)):
+    """Whether the caller holds a valid admin session. The frontend uses this
+    to decide between the dashboard and the login form."""
+    return AdminOut(email=admin.email)
+
 
 # The declared cross-tenant read surface. Kept as one named query so the
 # system role's access is reviewable in one place.
