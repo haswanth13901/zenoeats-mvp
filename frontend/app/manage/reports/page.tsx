@@ -2,7 +2,7 @@
 
 import { Empty, ErrorNote, Panel, Shell } from "@/components/Shell";
 import { money } from "@/lib/format";
-import { useResource } from "@/lib/useApi";
+import { useStaffResource } from "@/lib/useStaffApi";
 import { MANAGE_NAV } from "../nav";
 
 type Report = {
@@ -18,7 +18,7 @@ type Report = {
 };
 
 export default function ReportsPage() {
-  const { data, error, loading } = useResource<Report>("/restaurant/reports", 60_000);
+  const { data, error, loading } = useStaffResource<Report>("/restaurant/reports", 60_000);
 
   return (
     <Shell title="Reports" nav={MANAGE_NAV}>

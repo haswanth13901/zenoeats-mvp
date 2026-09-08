@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Empty, ErrorNote, Shell } from "@/components/Shell";
 import { ApiError, errorMessage } from "@/lib/api";
 import { money } from "@/lib/format";
-import { useResource } from "@/lib/useApi";
+import { useStaffResource } from "@/lib/useStaffApi";
 import { MANAGE_NAV } from "./nav";
 
 type BoardOrder = {
@@ -21,7 +21,7 @@ type BoardOrder = {
 export default function KitchenBoard() {
   // Polling stands in for WebSockets at MVP volume. Five seconds is well
   // inside the time it takes to read a new ticket.
-  const board = useResource<BoardOrder[]>("/restaurant/orders", 5000);
+  const board = useStaffResource<BoardOrder[]>("/restaurant/orders", 5000);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [pinFor, setPinFor] = useState<string | null>(null);

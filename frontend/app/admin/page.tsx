@@ -52,6 +52,10 @@ export default function AdminPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  const [ownerFor, setOwnerFor] = useState<Restaurant | null>(null);
+  // Shown once, then gone. The API returns the temporary password at creation
+  // and never again, so losing it here means reissuing rather than looking up.
+  const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
   const router = useRouter();
 
   async function signOut() {
@@ -109,6 +113,23 @@ export default function AdminPage() {
       await restaurants.call(`/admin/restaurants/${id}`, { method: "PATCH", body: changes });
       setEditing(null);
       await restaurants.refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createOwner(restaurant: Restaurant, email: string, fullName: string) {
+    setBusy(restaurant.id);
+    setError(null);
+    try {
+      const res = await restaurants.call<{ email: string; temporary_password: string }>(
+        `/admin/restaurants/${restaurant.id}/owner`,
+        { method: "POST", body: { email, full_name: fullName || null } }
+      );
+      setOwnerFor(null);
+      setIssued({ email: res.email, password: res.temporary_password });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -188,6 +209,38 @@ export default function AdminPage() {
             }}
             call={restaurants.call}
             onError={setError}
+          />
+        )}
+
+        {issued && (
+          <div className="mb-4 border border-hairline bg-surface p-4">
+            <h3 className="text-sm font-medium">Owner login created</h3>
+            <p className="mt-1 text-sm text-muted">
+              Give these to the owner now. The password is not stored and cannot
+              be shown again — only reissued.
+            </p>
+            <dl className="mt-3 grid gap-1 text-sm">
+              <div className="flex gap-2">
+                <dt className="w-20 text-muted">Email</dt>
+                <dd>{issued.email}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 text-muted">Password</dt>
+                <dd className="tnum font-medium tracking-wide">{issued.password}</dd>
+              </div>
+            </dl>
+            <button className="btn-quiet mt-4 px-3 py-1.5 text-sm" onClick={() => setIssued(null)}>
+              I have saved it
+            </button>
+          </div>
+        )}
+
+        {ownerFor && (
+          <OwnerForm
+            restaurant={ownerFor}
+            busy={busy === ownerFor.id}
+            onCancel={() => setOwnerFor(null)}
+            onCreate={(email, fullName) => createOwner(ownerFor, email, fullName)}
           />
         )}
 
@@ -278,6 +331,12 @@ export default function AdminPage() {
                             onClick={() => setEditing(editing === r.id ? null : r.id)}
                           >
                             {editing === r.id ? "Close" : "Edit"}
+                          </button>
+                          <button
+                            className="btn-quiet px-2 py-1 text-xs"
+                            onClick={() => setOwnerFor(r)}
+                          >
+                            Owner login
                           </button>
                           {/* The API refuses to delete an ACTIVE restaurant.
                               Hiding the button avoids offering a certain 409. */}
@@ -376,6 +435,75 @@ export default function AdminPage() {
  *  slug and status are shown read-only: slug is the tenant's public address
  *  and status belongs to activate/suspend, which enforce the readiness gate.
  */
+/** Issue the owner login for one restaurant.
+ *
+ *  One account per restaurant, with the ADMIN role. The owner adds their own
+ *  staff from the restaurant portal, so this is not a general user-creation
+ *  screen and deliberately offers no role choice.
+ */
+function OwnerForm({
+  restaurant,
+  busy,
+  onCancel,
+  onCreate,
+}: {
+  restaurant: Restaurant;
+  busy: boolean;
+  onCancel: () => void;
+  onCreate: (email: string, fullName: string) => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+
+  return (
+    <form
+      className="mb-4 border border-hairline bg-surface p-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onCreate(email.trim().toLowerCase(), fullName.trim());
+      }}
+    >
+      <h3 className="text-sm font-medium">Owner login for {restaurant.name}</h3>
+      <p className="mt-1 text-sm text-muted">
+        Creates one ADMIN account with a temporary password. They choose their
+        own at first sign-in, and add their staff themselves.
+      </p>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="text-xs text-muted">Owner email</span>
+          <input
+            className="field mt-1"
+            type="email"
+            required
+            autoFocus
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </label>
+        <label className="block">
+          <span className="text-xs text-muted">Full name (optional)</span>
+          <input
+            className="field mt-1"
+            value={fullName}
+            maxLength={160}
+            onChange={(e) => setFullName(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <button className="btn-primary px-3 py-1.5 text-sm" disabled={busy || !email}>
+          {busy ? "Creating…" : "Create login"}
+        </button>
+        <button type="button" className="btn-quiet px-3 py-1.5 text-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function EditForm({
   restaurant,
   busy,

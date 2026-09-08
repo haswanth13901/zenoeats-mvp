@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Empty, ErrorNote, Panel, Shell } from "@/components/Shell";
 import { ApiError, errorMessage } from "@/lib/api";
-import { useResource } from "@/lib/useApi";
+import { useStaffResource } from "@/lib/useStaffApi";
 import { MANAGE_NAV } from "../nav";
 
 type Member = {
@@ -26,7 +26,7 @@ const ROLE_HELP: Record<string, string> = {
 };
 
 export default function StaffPage() {
-  const staff = useResource<Member[]>("/restaurant/staff");
+  const staff = useStaffResource<Member[]>("/restaurant/staff");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<(typeof ROLES)[number]>("KITCHEN");
   const [error, setError] = useState<string | null>(null);

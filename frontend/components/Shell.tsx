@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
+import { usePathname, useRouter } from "next/navigation";
+import { api } from "@/lib/api";
 
 /** Operator chrome. Deliberately plainer than the customer portal: this is a
  *  tool people use all shift, not a storefront. */
@@ -42,7 +42,7 @@ export function Shell({
               );
             })}
           </nav>
-          {action ?? <UserButton afterSignOutUrl="/" />}
+          {action ?? <StaffSignOut />}
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-5 py-8">{children}</main>
@@ -84,5 +84,29 @@ export function ErrorNote({ message }: { message: string | null }) {
     <p className="mb-4 border-l-2 border-brick bg-brick/5 px-3 py-2 text-sm text-brick">
       {message}
     </p>
+  );
+}
+
+
+/** Default chrome action for the restaurant portal.
+ *
+ *  Was Clerk's UserButton, which is meaningless here: staff authenticate
+ *  against platform-issued credentials and have no Clerk session for it to
+ *  render. Ending the staff session server-side is what actually signs
+ *  someone out, since the cookie is httpOnly and unreachable from here.
+ */
+function StaffSignOut() {
+  const router = useRouter();
+  return (
+    <button
+      className="btn-quiet px-3 py-1.5 text-sm"
+      onClick={async () => {
+        await api("/restaurant/logout", { method: "POST" }).catch(() => {});
+        router.replace("/manage/login");
+        router.refresh();
+      }}
+    >
+      Sign out
+    </button>
   );
 }

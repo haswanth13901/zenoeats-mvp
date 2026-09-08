@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Empty, ErrorNote, Panel, Shell } from "@/components/Shell";
 import { ApiError, errorMessage } from "@/lib/api";
 import { money, signedMoney } from "@/lib/format";
-import { useResource } from "@/lib/useApi";
+import { useStaffResource } from "@/lib/useStaffApi";
 import type { Meal } from "@/lib/types";
 import { MANAGE_NAV } from "../nav";
 
@@ -23,8 +23,8 @@ const KINDS = ["FOOD", "BEVERAGE", "SAUCE"] as const;
 type Kind = (typeof KINDS)[number];
 
 export default function MenuBuilder() {
-  const menu = useResource<{ meals: Meal[] }>("/menu");
-  const groups = useResource<Group[]>("/restaurant/modifier-groups");
+  const menu = useStaffResource<{ meals: Meal[] }>("/menu");
+  const groups = useStaffResource<Group[]>("/restaurant/modifier-groups");
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"structure" | "groups">("structure");
 
