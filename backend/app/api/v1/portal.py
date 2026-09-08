@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import TenantContext, current_restaurant, resolve_tenant, tenant_db
 from app.config import settings
+from app.core.ratelimit import per_ip
 from app.models import (
     Category, Item, ItemModifierGroup, Meal, ModifierGroup, Restaurant,
     RestaurantPaymentAccount,
@@ -21,7 +22,11 @@ from app.schemas.api import (
 router = APIRouter(tags=["portal"])
 
 
-@router.get("/portal", response_model=PortalOut)
+@router.get(
+    "/portal",
+    response_model=PortalOut,
+    dependencies=[Depends(per_ip("portal", limit=240))],
+)
 def get_portal(
     tenant: TenantContext = Depends(resolve_tenant),
     restaurant: Restaurant = Depends(current_restaurant),
@@ -41,7 +46,11 @@ def get_portal(
     )
 
 
-@router.get("/menu", response_model=MenuOut)
+@router.get(
+    "/menu",
+    response_model=MenuOut,
+    dependencies=[Depends(per_ip("menu", limit=240))],
+)
 def get_menu(
     restaurant: Restaurant = Depends(current_restaurant),
     db: Session = Depends(tenant_db),

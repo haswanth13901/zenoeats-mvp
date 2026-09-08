@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # --- Redis / Celery ---------------------------------------------------
     CELERY_BROKER_URL: str = "redis://redis-broker:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://redis-broker:6379/1"
+    # Cache and rate limiting. A separate instance from the broker on
+    # purpose: this one evicts under pressure, the broker never does.
+    REDIS_RUNTIME_URL: str = "redis://redis-runtime:6379/0"
 
     # --- Clerk ------------------------------------------------------------
     CLERK_JWKS_URL: str = ""

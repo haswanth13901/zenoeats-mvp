@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.api.deps import current_restaurant, get_current_user, tenant_db
 from app.config import settings
 from app.core import errors, idempotency
+from app.core.ratelimit import per_ip, per_user
 from app.core.crypto import decrypt_field
 from app.db.base import utcnow
 from app.models import (
@@ -84,7 +85,11 @@ def _serialize(order: Order, payment: Payment | None, *, include_pin: bool) -> O
     )
 
 
-@router.post("/orders/quote", response_model=QuoteOut)
+@router.post(
+    "/orders/quote",
+    response_model=QuoteOut,
+    dependencies=[Depends(per_ip("quote", limit=120))],
+)
 def quote_cart(
     body: QuoteIn,
     restaurant: Restaurant = Depends(current_restaurant),
@@ -103,7 +108,12 @@ def quote_cart(
     )
 
 
-@router.post("/orders", response_model=OrderOut, status_code=201)
+@router.post(
+    "/orders",
+    response_model=OrderOut,
+    status_code=201,
+    dependencies=[Depends(per_user("create_order", limit=20))],
+)
 def create_order(
     body: CreateOrderIn,
     idempotency_key: str = Header(alias="Idempotency-Key"),
@@ -154,7 +164,11 @@ def create_order(
     return response
 
 
-@router.post("/orders/{order_id}/payment-intent", response_model=PaymentIntentOut)
+@router.post(
+    "/orders/{order_id}/payment-intent",
+    response_model=PaymentIntentOut,
+    dependencies=[Depends(per_user("payment_intent", limit=20))],
+)
 def create_payment_intent(
     order_id: UUID,
     idempotency_key: str = Header(alias="Idempotency-Key"),
