@@ -25,7 +25,9 @@ from app.models import (
     Restaurant, RestaurantOrderCounter, RestaurantPaymentAccount,
     RestaurantStatus, User,
 )
-from app.schemas.api import CreateRestaurantIn, RestaurantOut, RestaurantReportOut
+from app.schemas.api import (
+    CreateRestaurantIn, RestaurantOut, RestaurantReportOut, UpdateRestaurantIn,
+)
 from app.services import stripe_service
 
 log = logging.getLogger(__name__)
@@ -146,21 +148,31 @@ def _audit(session, actor: User, action: str, scope: dict):
 
 
 @router.get("/restaurants", response_model=list[RestaurantOut])
-def list_restaurants(admin: User = Depends(require_platform_admin)):
+def list_restaurants(
+    include_deleted: bool = False,
+    admin: User = Depends(require_platform_admin),
+):
+    """Deleted restaurants are hidden by default but reachable, because a
+    soft delete you cannot see is a soft delete you cannot undo."""
     with system_session() as session:
-        _audit(session, admin, "SUPER_ADMIN_LIST_RESTAURANTS", {"scope": "all"})
+        _audit(
+            session, admin, "SUPER_ADMIN_LIST_RESTAURANTS",
+            {"scope": "all", "include_deleted": include_deleted},
+        )
         rows = session.execute(
             text(
                 """
                 SELECT r.id, r.slug, r.name, r.status, r.currency, r.tax_rate_bps,
-                       r.accepting_orders, r.created_at,
+                       r.accepting_orders, r.created_at, r.tagline, r.timezone,
+                       r.deleted_at,
                        rpa.stripe_account_id, rpa.charges_enabled
                 FROM restaurants r
                 LEFT JOIN restaurant_payment_accounts rpa ON rpa.restaurant_id = r.id
-                WHERE r.deleted_at IS NULL
+                WHERE (:include_deleted OR r.deleted_at IS NULL)
                 ORDER BY r.created_at DESC
                 """
-            )
+            ),
+            {"include_deleted": include_deleted},
         ).mappings().all()
 
     return [
@@ -171,9 +183,125 @@ def list_restaurants(admin: User = Depends(require_platform_admin)):
             stripe_account_id=r["stripe_account_id"],
             charges_enabled=bool(r["charges_enabled"]),
             created_at=r["created_at"],
+            tagline=r["tagline"], timezone=r["timezone"],
+            deleted_at=r["deleted_at"],
         )
         for r in rows
     ]
+
+
+def _restaurant_out(session, restaurant: Restaurant) -> RestaurantOut:
+    account = session.execute(
+        text(
+            "SELECT stripe_account_id, charges_enabled FROM restaurant_payment_accounts "
+            "WHERE restaurant_id = :rid"
+        ),
+        {"rid": str(restaurant.id)},
+    ).mappings().one_or_none()
+    return RestaurantOut(
+        id=restaurant.id, slug=restaurant.slug, name=restaurant.name,
+        status=restaurant.status, currency=restaurant.currency,
+        tax_rate_bps=restaurant.tax_rate_bps,
+        accepting_orders=restaurant.accepting_orders,
+        stripe_account_id=account["stripe_account_id"] if account else None,
+        charges_enabled=bool(account["charges_enabled"]) if account else False,
+        created_at=restaurant.created_at, tagline=restaurant.tagline,
+        timezone=restaurant.timezone, deleted_at=restaurant.deleted_at,
+    )
+
+
+@router.patch("/restaurants/{restaurant_id}", response_model=RestaurantOut)
+def update_restaurant(
+    restaurant_id: UUID,
+    body: UpdateRestaurantIn,
+    admin: User = Depends(require_platform_admin),
+):
+    """Edit a restaurant profile.
+
+    exclude_unset is what makes this a real PATCH: only fields the caller
+    actually sent are applied, so clearing the tagline with null stays
+    distinguishable from omitting it, and two admins editing different fields
+    do not silently overwrite one another.
+    """
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise errors.validation_error("No fields to update.")
+
+    with system_session() as session:
+        restaurant = session.get(Restaurant, restaurant_id)
+        if restaurant is None or restaurant.deleted_at is not None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+
+        if changes.get("currency"):
+            changes["currency"] = changes["currency"].upper()
+
+        for field, value in changes.items():
+            setattr(restaurant, field, value)
+
+        _audit(
+            session, admin, "SUPER_ADMIN_UPDATE_RESTAURANT",
+            {"restaurant_id": str(restaurant_id), "fields": sorted(changes)},
+        )
+        session.flush()
+        return _restaurant_out(session, restaurant)
+
+
+@router.delete("/restaurants/{restaurant_id}", response_model=dict)
+def delete_restaurant(restaurant_id: UUID, admin: User = Depends(require_platform_admin)):
+    """Soft delete. The row stays and deleted_at is set; every query already
+    filters on it.
+
+    Never a hard delete. Orders, payments and audit rows hang off this record
+    and must survive for financial and tax retention. zenoeats_system is
+    granted SELECT, INSERT and UPDATE on restaurants but deliberately not
+    DELETE, so the database would refuse one anyway.
+
+    An ACTIVE restaurant has to be suspended first: removing one out from
+    under customers mid-checkout should not be a single click.
+
+    The slug stays occupied afterwards, on purpose. It is printed on tables
+    and saved in bookmarks, so handing that address to a different business
+    would silently inherit an existing customer base.
+    """
+    with system_session() as session:
+        restaurant = session.get(Restaurant, restaurant_id)
+        if restaurant is None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        if restaurant.deleted_at is not None:
+            raise errors.ApiError(409, "ALREADY_DELETED", "This restaurant is already deleted.")
+        if restaurant.status == RestaurantStatus.ACTIVE.value:
+            raise errors.ApiError(
+                409, "RESTAURANT_ACTIVE", "Suspend this restaurant before deleting it."
+            )
+
+        restaurant.deleted_at = utcnow()
+        _audit(
+            session, admin, "SUPER_ADMIN_DELETE_RESTAURANT",
+            {"restaurant_id": str(restaurant_id), "slug": restaurant.slug},
+        )
+
+    return {"restaurant_id": str(restaurant_id), "deleted": True}
+
+
+@router.post("/restaurants/{restaurant_id}/restore", response_model=dict)
+def restore_restaurant(restaurant_id: UUID, admin: User = Depends(require_platform_admin)):
+    """Undo a soft delete. Comes back SUSPENDED rather than ACTIVE, so
+    reactivating still has to pass the readiness gate."""
+    with system_session() as session:
+        restaurant = session.get(Restaurant, restaurant_id)
+        if restaurant is None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        if restaurant.deleted_at is None:
+            raise errors.ApiError(409, "NOT_DELETED", "This restaurant is not deleted.")
+
+        restaurant.deleted_at = None
+        restaurant.status = RestaurantStatus.SUSPENDED.value
+        _audit(
+            session, admin, "SUPER_ADMIN_RESTORE_RESTAURANT",
+            {"restaurant_id": str(restaurant_id), "slug": restaurant.slug},
+        )
+
+    return {"restaurant_id": str(restaurant_id), "status": RestaurantStatus.SUSPENDED.value}
 
 
 @router.post("/restaurants", response_model=RestaurantOut, status_code=201)

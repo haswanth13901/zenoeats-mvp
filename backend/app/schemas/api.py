@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------- Portal / menu ------------------------------------------------
@@ -157,6 +157,32 @@ class CreateRestaurantIn(BaseModel):
     admin_email: str | None = None
 
 
+class UpdateRestaurantIn(BaseModel):
+    """Every field optional: absent means "leave alone", which is what lets a
+    caller clear the tagline by sending null without also blanking the rest.
+
+    slug is deliberately absent. It is the tenant's public address -- it is in
+    QR codes on tables, in printed menus and in customers' bookmarks -- so it
+    is not an editable attribute. Moving a restaurant to a new subdomain is a
+    migration, not a text edit.
+
+    status is absent too: activate and suspend own that transition, and they
+    enforce the readiness gate that a plain field write would bypass.
+    """
+
+    # Reject unknown fields rather than ignoring them. Without this, sending
+    # slug or a mistyped key silently changes nothing and reports "No fields
+    # to update", which reads like a client bug rather than a rejected field.
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    tagline: str | None = Field(default=None, max_length=200)
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    tax_rate_bps: int | None = Field(default=None, ge=0, le=3000)
+    accepting_orders: bool | None = None
+
+
 class RestaurantOut(BaseModel):
     id: UUID
     slug: str
@@ -168,6 +194,11 @@ class RestaurantOut(BaseModel):
     stripe_account_id: str | None
     charges_enabled: bool
     created_at: datetime
+    # Needed so the admin edit form can show current values rather than
+    # making the operator retype them.
+    tagline: str | None = None
+    timezone: str | None = None
+    deleted_at: datetime | None = None
 
 
 class RestaurantReportOut(BaseModel):
