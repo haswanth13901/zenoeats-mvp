@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { Empty, ErrorNote, Shell } from "@/components/Shell";
 import { money } from "@/lib/format";
@@ -52,8 +52,11 @@ const STATUSES = [
 export default function AdminRestaurantOrdersPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  // Next 15 onwards makes params a Promise, and Next 16 errors on reading it
+  // synchronously rather than only warning.
+  const { id } = use(params);
   const [status, setStatus] = useState("");
   const [offset, setOffset] = useState(0);
 
@@ -64,7 +67,7 @@ export default function AdminRestaurantOrdersPage({
   if (status) query.set("status", status);
 
   const page = useAdminResource<OrderPage>(
-    `/admin/restaurants/${params.id}/orders?${query.toString()}`
+    `/admin/restaurants/${id}/orders?${query.toString()}`
   );
 
   const orders = page.data?.orders ?? [];

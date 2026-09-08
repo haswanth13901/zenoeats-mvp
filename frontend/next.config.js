@@ -19,6 +19,20 @@ if (typeof process.loadEnvFile === "function") {
 module.exports = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Next 16 blocks its own dev resources (/_next/hmr, the client bundle) when
+  // the browser's origin is not the dev server's own. Tenancy here is by
+  // subdomain, so every real URL is such an origin -- and the page then
+  // server-renders fine while never hydrating: no data fetch, no click
+  // handlers, just a permanent "Loading...". Development only; a production
+  // build serves these normally.
+  allowedDevOrigins: [
+    "zenoeats.local",
+    "admin.zenoeats.local",
+    "spicehouse.zenoeats.local",
+    // Wildcards are not supported, so a new restaurant subdomain has to be
+    // listed here before it can be browsed with `next dev`.
+    "*.zenoeats.local",
+  ],
   // Emits .next/standalone: a self-contained server with only the packages
   // actually imported, so the production image ships neither the full
   // node_modules tree nor the sources.
