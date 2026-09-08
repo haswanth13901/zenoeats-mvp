@@ -162,6 +162,23 @@ export default function AdminPage() {
     }
   }
 
+  async function resetOwnerPassword(restaurant: Restaurant, email: string) {
+    setBusy(restaurant.id);
+    setError(null);
+    try {
+      const res = await restaurants.call<{ email: string; temporary_password: string }>(
+        `/admin/restaurants/${restaurant.id}/owner/reset-password`,
+        { method: "POST", body: { email } }
+      );
+      setOwnerFor(null);
+      setIssued({ email: res.email, password: res.temporary_password });
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function onboard(id: string) {
     setBusy(id);
     setError(null);
@@ -239,10 +256,11 @@ export default function AdminPage() {
 
         {issued && (
           <div className="mb-4 border border-hairline bg-surface p-4">
-            <h3 className="text-sm font-medium">Owner login created</h3>
+            <h3 className="text-sm font-medium">Temporary password issued</h3>
             <p className="mt-1 text-sm text-muted">
               Give these to the owner now. The password is not stored and cannot
-              be shown again — only reissued.
+              be shown again — only reissued. They must replace it at first
+              sign-in before the portal will do anything else.
             </p>
             <dl className="mt-3 grid gap-1 text-sm">
               <div className="flex gap-2">
@@ -266,6 +284,7 @@ export default function AdminPage() {
             busy={busy === ownerFor.id}
             onCancel={() => setOwnerFor(null)}
             onCreate={(email, fullName) => createOwner(ownerFor, email, fullName)}
+            onReset={(email) => resetOwnerPassword(ownerFor, email)}
           />
         )}
 
@@ -517,11 +536,16 @@ function OwnerForm({
   busy,
   onCancel,
   onCreate,
+  onReset,
 }: {
   restaurant: Restaurant;
   busy: boolean;
   onCancel: () => void;
   onCreate: (email: string, fullName: string) => void;
+  /** Reissue a temporary password for an account that already exists. Stands
+   *  in for self-service reset until there is an email provider to send a
+   *  link through. */
+  onReset: (email: string) => void;
 }) {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
@@ -537,7 +561,8 @@ function OwnerForm({
       <h3 className="text-sm font-medium">Owner login for {restaurant.name}</h3>
       <p className="mt-1 text-sm text-muted">
         Creates one ADMIN account with a temporary password. They choose their
-        own at first sign-in, and add their staff themselves.
+        own at first sign-in, and add their staff themselves. If the account
+        already exists, reset its password instead.
       </p>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -563,9 +588,18 @@ function OwnerForm({
         </label>
       </div>
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex flex-wrap gap-2">
         <button className="btn-primary px-3 py-1.5 text-sm" disabled={busy || !email}>
-          {busy ? "Creating…" : "Create login"}
+          {busy ? "Working…" : "Create login"}
+        </button>
+        {/* type="button" so it does not submit the create form. */}
+        <button
+          type="button"
+          className="btn-quiet px-3 py-1.5 text-sm"
+          disabled={busy || !email}
+          onClick={() => onReset(email.trim().toLowerCase())}
+        >
+          Reset password
         </button>
         <button type="button" className="btn-quiet px-3 py-1.5 text-sm" onClick={onCancel}>
           Cancel
