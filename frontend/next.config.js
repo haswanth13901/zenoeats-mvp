@@ -29,8 +29,11 @@ module.exports = {
     "zenoeats.local",
     "admin.zenoeats.local",
     "spicehouse.zenoeats.local",
-    // Wildcards are not supported, so a new restaurant subdomain has to be
-    // listed here before it can be browsed with `next dev`.
+    "jr-corner.zenoeats.local",
+    // Wildcards are not supported here, so every new restaurant subdomain has
+    // to be added to this list AND to the machine's hosts file before it can
+    // be browsed with `next dev`. Production serves these normally and needs
+    // neither.
     "*.zenoeats.local",
   ],
   // Emits .next/standalone: a self-contained server with only the packages

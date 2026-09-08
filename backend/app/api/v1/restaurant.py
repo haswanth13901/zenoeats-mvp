@@ -13,8 +13,8 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import (
-    TenantContext, current_restaurant, current_staff_user, get_current_user,
-    require_staff, resolve_tenant, tenant_db,
+    TenantContext, current_restaurant_staff, current_staff_user, get_current_user,
+    require_staff, resolve_tenant_staff, tenant_db_staff,
 )
 from app.config import settings
 from app.core import errors, staff_auth
@@ -43,7 +43,7 @@ router = APIRouter(prefix="/restaurant", tags=["restaurant"])
 def staff_login(
     body: StaffLoginIn,
     response: Response,
-    tenant: TenantContext = Depends(resolve_tenant),
+    tenant: TenantContext = Depends(resolve_tenant_staff),
 ):
     """Sign in restaurant staff.
 
@@ -115,7 +115,7 @@ def staff_logout(response: Response):
 @router.get("/me", response_model=StaffMeOut)
 def staff_me(
     user: User = Depends(current_staff_user),
-    tenant: TenantContext = Depends(resolve_tenant),
+    tenant: TenantContext = Depends(resolve_tenant_staff),
 ):
     """Who the caller is, and whether they still owe a password change.
 
@@ -224,8 +224,8 @@ class ModifierGroupIn(BaseModel):
 @router.post("/meals", status_code=201)
 def create_meal(
     body: MealIn,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
     meal = Meal(restaurant_id=restaurant.id, name=body.name, sort_order=body.sort_order)
@@ -237,8 +237,8 @@ def create_meal(
 @router.post("/categories", status_code=201)
 def create_category(
     body: CategoryIn,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
     if db.get(Meal, body.meal_id) is None:
@@ -255,8 +255,8 @@ def create_category(
 @router.post("/modifier-groups", status_code=201)
 def create_modifier_group(
     body: ModifierGroupIn,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
     """Reusable across items. Define "Ice level" once, attach it to every
@@ -288,8 +288,8 @@ def create_modifier_group(
 @router.get("/modifier-groups")
 def list_modifier_groups(
     kind: CategoryKind | None = None,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
     """The reusable library. Filtered by kind so adding a beverage surfaces
@@ -318,8 +318,8 @@ def list_modifier_groups(
 @router.post("/items", status_code=201)
 def create_item(
     body: ItemIn,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
     if db.get(Category, body.category_id) is None:
@@ -350,8 +350,8 @@ def create_item(
 def set_item_availability(
     item_id: UUID,
     is_available: bool,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(KITCHEN),
 ):
     """Manual sold-out toggle. Overrides everything else."""
@@ -364,8 +364,8 @@ def set_item_availability(
 
 @router.get("/orders")
 def order_board(
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(KITCHEN),
 ):
     """The live board. Polled every few seconds by the kitchen screen.
@@ -414,8 +414,8 @@ def order_board(
 @router.post("/orders/{order_id}/ready")
 def mark_ready(
     order_id: UUID,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(KITCHEN),
 ):
     order = db.get(Order, order_id)
@@ -429,8 +429,8 @@ def mark_ready(
 def complete_order(
     order_id: UUID,
     pin: str,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(KITCHEN),
 ):
     """Hand the food over. PIN verified server side, five attempts then lock.
@@ -470,8 +470,8 @@ class StaffInviteIn(BaseModel):
 
 @router.get("/staff")
 def list_staff(
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(require_staff(StaffRole.ADMIN)),
 ):
     rows = db.execute(
@@ -502,8 +502,8 @@ def list_staff(
 @router.post("/staff", status_code=201)
 def invite_staff(
     body: StaffInviteIn,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     membership: RestaurantUser = Depends(require_staff(StaffRole.ADMIN)),
 ):
     """Create an INVITED membership.
@@ -554,8 +554,8 @@ def invite_staff(
 @router.post("/staff/accept")
 def accept_invitation(
     user: User = Depends(get_current_user),
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
 ):
     """The invitee accepts. This is the only path from INVITED to ACTIVE."""
     invite = db.execute(
@@ -575,8 +575,8 @@ def accept_invitation(
 @router.delete("/staff/{membership_id}")
 def revoke_staff(
     membership_id: UUID,
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(require_staff(StaffRole.ADMIN)),
 ):
     invite = db.get(RestaurantUser, membership_id)
@@ -591,8 +591,8 @@ def revoke_staff(
 
 @router.get("/reports")
 def restaurant_reports(
-    restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
     """This restaurant's own numbers. Tenant-scoped by RLS, so there is no

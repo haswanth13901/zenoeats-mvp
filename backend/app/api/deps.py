@@ -81,26 +81,67 @@ def resolve_tenant(request: Request) -> TenantContext:
         slug = request.headers.get("x-zenoeats-restaurant")
     if not slug:
         raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No restaurant for this address.")
+    return _resolve(slug, CUSTOMER_VISIBLE)
 
+
+# A DRAFT restaurant is invisible to customers -- there is nothing to order
+# yet -- but its own staff must be able to reach it, because activation
+# requires at least one available menu item and only staff can add one.
+# Without this split a new restaurant could never be activated: no menu
+# without signing in, no signing in without being ACTIVE, no ACTIVE without a
+# menu.
+#
+# SUSPENDED is staff-visible for the same reason: whatever caused the
+# suspension usually has to be fixed from inside the portal.
+#
+# ARCHIVED is terminal and deleted rows are gone, so neither audience sees
+# either.
+CUSTOMER_VISIBLE = frozenset({RestaurantStatus.ACTIVE.value})
+STAFF_VISIBLE = frozenset(
+    {
+        RestaurantStatus.ACTIVE.value,
+        RestaurantStatus.DRAFT.value,
+        RestaurantStatus.INACTIVE.value,
+        RestaurantStatus.SUSPENDED.value,
+    }
+)
+
+
+def _resolve(slug: str, allowed: frozenset[str]) -> TenantContext:
     with system_session() as session:
         row = session.execute(
             select(Restaurant.id, Restaurant.status)
             .where(Restaurant.slug == slug, Restaurant.deleted_at.is_(None))
         ).one_or_none()
 
-    if row is None:
-        raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No restaurant for this address.")
-    if row.status in (RestaurantStatus.ARCHIVED.value, RestaurantStatus.DRAFT.value):
+    # One message for "no such restaurant" and "not visible to you". The
+    # difference would let anyone enumerate which subdomains exist.
+    if row is None or row.status not in allowed:
         raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No restaurant for this address.")
 
     return TenantContext(restaurant_id=str(row.id), slug=slug)
 
 
-def tenant_db(tenant: TenantContext = Depends(resolve_tenant)) -> Iterator[Session]:
+def resolve_tenant_staff(request: Request) -> TenantContext:
+    """Tenant context for the restaurant portal.
+
+    Same host resolution as the customer surface, wider set of statuses. This
+    grants no access on its own: membership of this restaurant, read from
+    restaurant_users under RLS, still decides everything.
+    """
+    slug = extract_slug(request.headers.get("host"))
+    if slug is None:
+        slug = request.headers.get("x-zenoeats-restaurant")
+    if not slug:
+        raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No restaurant for this address.")
+    return _resolve(slug, STAFF_VISIBLE)
+
+
+def _open_tenant_session(tenant: TenantContext) -> Iterator[Session]:
     """A zenoeats_app transaction with SET LOCAL app.current_tenant.
 
-    Everything the endpoint reads or writes through this session is filtered
-    by FORCE ROW LEVEL SECURITY.
+    Everything read or written through this session is filtered by FORCE ROW
+    LEVEL SECURITY.
     """
     session = AppSessionLocal()
     try:
@@ -116,6 +157,32 @@ def tenant_db(tenant: TenantContext = Depends(resolve_tenant)) -> Iterator[Sessi
         raise
     finally:
         session.close()
+
+
+def tenant_db(tenant: TenantContext = Depends(resolve_tenant)) -> Iterator[Session]:
+    """Tenant session for the customer surface."""
+    yield from _open_tenant_session(tenant)
+
+
+def tenant_db_staff(tenant: TenantContext = Depends(resolve_tenant_staff)) -> Iterator[Session]:
+    """Tenant session for the restaurant portal.
+
+    Identical transaction and identical RLS. The only difference is which
+    restaurant statuses resolve at all, so a draft restaurant's staff can set
+    it up before it goes live.
+    """
+    yield from _open_tenant_session(tenant)
+
+
+def current_restaurant_staff(
+    tenant: TenantContext = Depends(resolve_tenant_staff),
+    db: Session = Depends(tenant_db_staff),
+) -> Restaurant:
+    """The restaurant behind the portal, including one still in draft."""
+    restaurant = db.get(Restaurant, tenant.restaurant_id)
+    if restaurant is None:
+        raise errors.tenant_scope_denied()
+    return restaurant
 
 
 def current_restaurant(
@@ -188,8 +255,8 @@ def require_staff(*roles: StaffRole):
 
     def _dep(
         user: User = Depends(current_staff_user_ready),
-        db: Session = Depends(tenant_db),
-        tenant: TenantContext = Depends(resolve_tenant),
+        db: Session = Depends(tenant_db_staff),
+        tenant: TenantContext = Depends(resolve_tenant_staff),
     ) -> RestaurantUser:
         membership = db.execute(
             select(RestaurantUser).where(
