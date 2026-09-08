@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Empty, ErrorNote, Panel, Shell } from "@/components/Shell";
 import { ApiError, errorMessage } from "@/lib/api";
@@ -18,6 +18,9 @@ type Restaurant = {
   stripe_account_id: string | null;
   charges_enabled: boolean;
   created_at: string;
+  tagline: string | null;
+  timezone: string | null;
+  deleted_at: string | null;
 };
 
 type Report = {
@@ -38,11 +41,17 @@ type Report = {
 const NAV = [{ href: "/admin", label: "Restaurants" }];
 
 export default function AdminPage() {
-  const restaurants = useAdminResource<Restaurant[]>("/admin/restaurants");
+  // Declared before the resource hooks: the query string is derived from it,
+  // so the state has to exist first.
+  const [showDeleted, setShowDeleted] = useState(false);
+  const restaurants = useAdminResource<Restaurant[]>(
+    `/admin/restaurants?include_deleted=${showDeleted}`
+  );
   const reports = useAdminResource<Report[]>("/admin/reports", 30_000);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const router = useRouter();
 
   async function signOut() {
@@ -56,6 +65,50 @@ export default function AdminPage() {
     try {
       await restaurants.call(`/admin/restaurants/${id}/${action}`, { method: "POST" });
       await Promise.all([restaurants.refresh(), reports.refresh()]);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function remove(r: Restaurant) {
+    // Reversible, but it still pulls a storefront offline, so it asks first
+    // and names which one.
+    if (!confirm(`Delete ${r.name}? It can be restored, and its subdomain stays reserved.`))
+      return;
+    setBusy(r.id);
+    setError(null);
+    try {
+      await restaurants.call(`/admin/restaurants/${r.id}`, { method: "DELETE" });
+      await restaurants.refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function restore(id: string) {
+    setBusy(id);
+    setError(null);
+    try {
+      await restaurants.call(`/admin/restaurants/${id}/restore`, { method: "POST" });
+      await restaurants.refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function save(id: string, changes: Record<string, unknown>) {
+    setBusy(id);
+    setError(null);
+    try {
+      await restaurants.call(`/admin/restaurants/${id}`, { method: "PATCH", body: changes });
+      setEditing(null);
+      await restaurants.refresh();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -111,9 +164,20 @@ export default function AdminPage() {
       <Panel
         title="Restaurants"
         action={
-          <button className="btn-quiet px-3 py-1.5" onClick={() => setShowForm((v) => !v)}>
-            {showForm ? "Cancel" : "Add restaurant"}
-          </button>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 accent-brick"
+                checked={showDeleted}
+                onChange={(e) => setShowDeleted(e.target.checked)}
+              />
+              Show deleted
+            </label>
+            <button className="btn-quiet px-3 py-1.5" onClick={() => setShowForm((v) => !v)}>
+              {showForm ? "Cancel" : "Add restaurant"}
+            </button>
+          </div>
         }
       >
         {showForm && (
@@ -143,9 +207,13 @@ export default function AdminPage() {
             </thead>
             <tbody className="divide-y divide-hairline">
               {restaurants.data.map((r) => (
-                <tr key={r.id}>
+                <Fragment key={r.id}>
+                <tr className={r.deleted_at ? "opacity-50" : undefined}>
                   <td className="py-3">
-                    <div>{r.name}</div>
+                    <div>
+                      {r.name}
+                      {r.deleted_at && <span className="ml-2 text-xs text-brick">deleted</span>}
+                    </div>
                     <a
                       href={`http://${r.slug}.${process.env.NEXT_PUBLIC_ROOT_DOMAIN ?? "zenoeats.local"}:8080`}
                       className="text-xs text-muted underline"
@@ -178,26 +246,68 @@ export default function AdminPage() {
                           Connect Stripe
                         </button>
                       )}
-                      {r.status !== "ACTIVE" ? (
+                      {r.deleted_at ? (
                         <button
                           className="btn-primary px-2 py-1 text-xs"
                           disabled={busy === r.id}
-                          onClick={() => act(r.id, "activate")}
+                          onClick={() => restore(r.id)}
                         >
-                          Activate
+                          Restore
                         </button>
                       ) : (
-                        <button
-                          className="btn-quiet px-2 py-1 text-xs"
-                          disabled={busy === r.id}
-                          onClick={() => act(r.id, "suspend")}
-                        >
-                          Suspend
-                        </button>
+                        <>
+                          {r.status !== "ACTIVE" ? (
+                            <button
+                              className="btn-primary px-2 py-1 text-xs"
+                              disabled={busy === r.id}
+                              onClick={() => act(r.id, "activate")}
+                            >
+                              Activate
+                            </button>
+                          ) : (
+                            <button
+                              className="btn-quiet px-2 py-1 text-xs"
+                              disabled={busy === r.id}
+                              onClick={() => act(r.id, "suspend")}
+                            >
+                              Suspend
+                            </button>
+                          )}
+                          <button
+                            className="btn-quiet px-2 py-1 text-xs"
+                            onClick={() => setEditing(editing === r.id ? null : r.id)}
+                          >
+                            {editing === r.id ? "Close" : "Edit"}
+                          </button>
+                          {/* The API refuses to delete an ACTIVE restaurant.
+                              Hiding the button avoids offering a certain 409. */}
+                          {r.status !== "ACTIVE" && (
+                            <button
+                              className="btn-quiet px-2 py-1 text-xs text-brick"
+                              disabled={busy === r.id}
+                              onClick={() => remove(r)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </td>
                 </tr>
+                {editing === r.id && (
+                  <tr>
+                    <td colSpan={4} className="bg-paper px-3 py-4">
+                      <EditForm
+                        restaurant={r}
+                        busy={busy === r.id}
+                        onCancel={() => setEditing(null)}
+                        onSave={(changes) => save(r.id, changes)}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -254,6 +364,104 @@ export default function AdminPage() {
         </p>
       </Panel>
     </Shell>
+  );
+}
+
+/** Inline editor for one restaurant.
+ *
+ *  Sends only what actually changed. A PATCH that resends every field would
+ *  clobber a concurrent edit by another admin, and would make "clear the
+ *  tagline" indistinguishable from "leave it alone".
+ *
+ *  slug and status are shown read-only: slug is the tenant's public address
+ *  and status belongs to activate/suspend, which enforce the readiness gate.
+ */
+function EditForm({
+  restaurant,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  restaurant: Restaurant;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (changes: Record<string, unknown>) => void;
+}) {
+  const [name, setName] = useState(restaurant.name);
+  const [tagline, setTagline] = useState(restaurant.tagline ?? "");
+  const [taxPct, setTaxPct] = useState((restaurant.tax_rate_bps / 100).toString());
+  const [accepting, setAccepting] = useState(restaurant.accepting_orders);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const changes: Record<string, unknown> = {};
+    if (name !== restaurant.name) changes.name = name;
+    // An empty box means "no tagline", which is null rather than "".
+    const nextTagline = tagline.trim() === "" ? null : tagline.trim();
+    if (nextTagline !== restaurant.tagline) changes.tagline = nextTagline;
+    const bps = Math.round(parseFloat(taxPct || "0") * 100);
+    if (Number.isFinite(bps) && bps !== restaurant.tax_rate_bps) changes.tax_rate_bps = bps;
+    if (accepting !== restaurant.accepting_orders) changes.accepting_orders = accepting;
+    if (Object.keys(changes).length === 0) {
+      onCancel();
+      return;
+    }
+    onSave(changes);
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="block">
+          <span className="text-xs text-muted">Name</span>
+          <input className="field mt-1" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="block">
+          <span className="text-xs text-muted">Tagline</span>
+          <input
+            className="field mt-1"
+            value={tagline}
+            maxLength={200}
+            placeholder="none"
+            onChange={(e) => setTagline(e.target.value)}
+          />
+        </label>
+        <label className="block">
+          <span className="text-xs text-muted">Tax rate %</span>
+          <input
+            className="field mt-1 tnum"
+            value={taxPct}
+            inputMode="decimal"
+            onChange={(e) => setTaxPct(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-brick"
+            checked={accepting}
+            onChange={(e) => setAccepting(e.target.checked)}
+          />
+          Accepting orders
+        </label>
+        <span className="text-xs text-muted">
+          Subdomain <code>{restaurant.slug}</code> and status{" "}
+          <code>{restaurant.status}</code> are not editable here.
+        </span>
+      </div>
+
+      <div className="flex gap-2">
+        <button className="btn-primary px-3 py-1.5 text-sm" disabled={busy}>
+          {busy ? "Saving…" : "Save changes"}
+        </button>
+        <button type="button" className="btn-quiet px-3 py-1.5 text-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
