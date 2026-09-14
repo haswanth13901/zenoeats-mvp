@@ -2056,9 +2056,15 @@ def invite_staff(
 
     Staff credentials are issued, not self-registered, so an address with no
     staff login gets one here: a temporary password, returned once for the
-    admin to pass on, which must be replaced at first sign-in. An address that
-    already has a staff login -- someone who also works at another restaurant
-    -- keeps using it, and nothing about that account changes.
+    admin to pass on, which must be replaced at first sign-in.
+
+    An address that already has a staff login is never given a password here,
+    whatever state that login is in. A restaurant cannot see the account's
+    memberships anywhere else -- RLS keeps them from it -- so it cannot know
+    whether an unused temporary password belongs to the owner of another
+    restaurant. Reissuing one used to hand that owner's account to whichever
+    restaurant typed their address first. Such a person signs in with the
+    password they have; a lost one is reset by the super admin.
 
     Customer accounts are a separate population and are never looked at: an
     email that orders lunch here is not thereby a candidate for the kitchen.
@@ -2067,18 +2073,29 @@ def invite_staff(
     if "@" not in email or len(email) < 3:
         raise errors.validation_error("Enter the person's email address.")
 
-    temp_password = None
     with system_session() as sys_db:
-        user = sys_db.execute(
-            select(User)
+        found = sys_db.execute(
+            select(User.id)
             .where(User.email == email, User.kind == UserKind.STAFF.value)
             # A real login before a leftover invite placeholder, if both exist.
             .order_by(User.password_hash.is_(None))
             .limit(1)
         ).scalar_one_or_none()
 
-        if user is None:
-            temp_password = staff_auth.generate_temp_password()
+    # Checked before any account is created, so a refusal leaves nothing behind.
+    existing = (
+        db.execute(
+            select(RestaurantUser).where(RestaurantUser.user_id == found)
+        ).scalar_one_or_none()
+        if found else None
+    )
+    if existing and existing.status == StaffStatus.ACTIVE.value:
+        raise errors.ApiError(409, "ALREADY_STAFF", "That person is already on the team.")
+
+    temp_password = None
+    if found is None:
+        temp_password = staff_auth.generate_temp_password()
+        with system_session() as sys_db:
             user = User(
                 kind=UserKind.STAFF.value,
                 email=email,
@@ -2088,22 +2105,9 @@ def invite_staff(
             )
             sys_db.add(user)
             sys_db.flush()
-        elif user.password_hash is None or user.must_change_password:
-            # A placeholder left by an invitation from before staff logins were
-            # issued here, or a login whose temporary password was never used
-            # and is presumably lost. Neither holds a password anyone chose, so
-            # issuing a fresh one takes nothing away from anybody.
-            temp_password = staff_auth.generate_temp_password()
-            user.password_hash = staff_auth.hash_password(temp_password)
-            user.must_change_password = True
-        target_user_id = user.id
-
-    existing = db.execute(
-        select(RestaurantUser).where(RestaurantUser.user_id == target_user_id)
-    ).scalar_one_or_none()
-
-    if existing and existing.status == StaffStatus.ACTIVE.value:
-        raise errors.ApiError(409, "ALREADY_STAFF", "That person is already on the team.")
+            target_user_id = user.id
+    else:
+        target_user_id = found
     if existing:
         existing.role_code = body.role_code.value
         existing.status = StaffStatus.INVITED.value

@@ -767,8 +767,14 @@ def reset_owner_password(
         restaurant = session.get(Restaurant, restaurant_id)
         if restaurant is None or restaurant.deleted_at is not None:
             raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        # Any staff account, including a placeholder with no password yet: a
+        # restaurant's invite never issues one to an existing account, so this
+        # is the only way such a person is ever given a login.
         user = session.execute(
-            select(User).where(User.email == email, User.password_hash.isnot(None))
+            select(User)
+            .where(User.email == email, User.kind == UserKind.STAFF.value)
+            .order_by(User.password_hash.is_(None))
+            .limit(1)
         ).scalar_one_or_none()
         if user is None:
             raise errors.ApiError(404, "USER_NOT_FOUND", "No login for that email.")

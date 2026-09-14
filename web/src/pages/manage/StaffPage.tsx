@@ -159,7 +159,8 @@ function IssuedInvite({ invite }: { invite: StaffInvite }) {
       ) : (
         <p className="mt-2 text-muted">
           We&apos;ve emailed them the sign-in link. They already have a Zenoeats staff login
-          and sign in with their own password.
+          and sign in with the password they have. If they&apos;ve lost it, Zenoeats
+          support can reset it; no new password is issued from here.
         </p>
       )}
       <p className="mt-2 select-all text-xs text-muted">{signIn}</p>
