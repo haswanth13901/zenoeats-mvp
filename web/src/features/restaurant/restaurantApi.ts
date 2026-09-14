@@ -228,8 +228,10 @@ export const restaurantApi = api.injectEndpoints({
 
     completeOrder: build.mutation<unknown, { orderId: string; pin: string }>({
       query: ({ orderId, pin }) => ({
-        url: `/restaurant/orders/${orderId}/complete?pin=${encodeURIComponent(pin)}`,
+        // In the body, not the query string: URLs are written to access logs.
+        url: `/restaurant/orders/${orderId}/complete`,
         method: "POST",
+        body: { pin },
       }),
       // Completing an order moves it off the board and into the day's takings.
       invalidatesTags: ["Board", "RestaurantReport"],

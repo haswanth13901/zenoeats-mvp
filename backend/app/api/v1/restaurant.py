@@ -20,7 +20,7 @@ from app.api.deps import (
 from app.config import settings
 from app.core import errors, staff_auth
 from app.core.logsafe import email_for_log
-from app.core.ratelimit import per_ip, per_staff_user
+from app.core.ratelimit import failures_exhausted, per_ip, per_staff_user, record_failure
 from app.db.base import utcnow
 from app.db.session import system_session, tenant_session
 from app.models import (
@@ -1967,32 +1967,75 @@ def mark_ready(
     return {"order_id": str(order.id), "status": order.status}
 
 
+PIN_ATTEMPTS = 5
+
+# Wrong PINs one staff member may enter across every order, per window. The
+# per-order lock stops a PIN being guessed; this stops one account -- a stolen
+# tablet, say -- spending five guesses on each of the day's orders. Only wrong
+# PINs count, so a cashier handing over order after order is never slowed.
+PIN_FAILURES_PER_STAFF = 20
+PIN_FAILURE_WINDOW_SECONDS = 600
+
+
+def _pin_locked() -> errors.ApiError:
+    return errors.ApiError(423, "PIN_LOCKED", "Too many attempts. A manager must override.")
+
+
+class CompleteOrderIn(BaseModel):
+    # In the body, never the URL: a query string is written to the nginx and
+    # uvicorn access logs, which put every customer's PIN on disk.
+    pin: str = Field(min_length=1, max_length=12)
+
+
 @router.post("/orders/{order_id}/complete")
 def complete_order(
     order_id: UUID,
-    pin: str,
+    body: CompleteOrderIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    _=Depends(KITCHEN),
+    membership: RestaurantUser = Depends(KITCHEN),
 ):
     """Hand the food over. PIN verified server side, five attempts then lock.
 
     Failed attempts are counted on the order row so the lock survives a page
     refresh or a different staff device.
     """
+    import hmac
+
     from app.core.crypto import decrypt_field
 
-    order = db.get(Order, order_id)
+    failures = f"pickup_pin_failures:staff:{membership.user_id}"
+    if failures_exhausted(failures, PIN_FAILURES_PER_STAFF, PIN_FAILURE_WINDOW_SECONDS):
+        raise errors.ApiError(
+            429, "RATE_LIMITED",
+            "Too many wrong PINs from this account. Wait a few minutes and try again.",
+        )
+
+    # FOR UPDATE, so two wrong guesses sent at once are counted one after the
+    # other rather than both reading the same count and writing back one more.
+    order = db.get(Order, order_id, with_for_update=True)
     if order is None:
         raise errors.order_not_found()
-    if order.pickup_pin_failed_attempts >= 5:
-        raise errors.ApiError(423, "PIN_LOCKED", "Too many attempts. A manager must override.")
+    if order.pickup_pin_failed_attempts >= PIN_ATTEMPTS:
+        raise _pin_locked()
     if order.pickup_pin_encrypted is None:
         raise errors.order_state_conflict("This order has no pickup PIN.")
 
-    if decrypt_field(order.pickup_pin_encrypted) != pin.strip():
+    if not hmac.compare_digest(decrypt_field(order.pickup_pin_encrypted), body.pin.strip()):
         order.pickup_pin_failed_attempts += 1
-        raise errors.ApiError(400, "PIN_INVALID", "That PIN does not match.")
+        attempts = order.pickup_pin_failed_attempts
+        # Committed here, before the refusal is raised. The request's session
+        # rolls back on any exception, and it used to take this count with it:
+        # the lock never engaged, and a PIN could be guessed without limit.
+        db.commit()
+        record_failure(failures, PIN_FAILURE_WINDOW_SECONDS)
+        if attempts >= PIN_ATTEMPTS:
+            raise _pin_locked()
+        left = PIN_ATTEMPTS - attempts
+        raise errors.ApiError(
+            400, "PIN_INVALID",
+            f"That PIN does not match. {left} {'attempt' if left == 1 else 'attempts'} left.",
+        )
 
     payment = db.execute(select(Payment).where(Payment.order_id == order.id)).scalar_one_or_none()
     if payment is None or payment.succeeded_at is None:

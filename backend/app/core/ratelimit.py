@@ -146,6 +146,35 @@ def consume(bucket: str, limit: int, window_seconds: int = 60) -> None:
     _consume(bucket, limit, window_seconds)
 
 
+def failures_exhausted(bucket: str, limit: int, window_seconds: int) -> bool:
+    """Whether a budget that counts only failures is already spent.
+
+    For endpoints where success must never be throttled -- a cashier handing
+    over order after order at the lunch rush -- but wrong answers should be.
+    Checked before the answer is looked at, so a throttled caller cannot keep
+    guessing; record_failure() spends from the budget afterwards. Fails open.
+    """
+    key = f"rl:{bucket}:{int(time.time()) // window_seconds}"
+    try:
+        count = runtime_redis().get(key)
+    except RedisError:
+        log.warning("rate limiter unavailable, allowing request on %s", bucket, exc_info=True)
+        return False
+    return count is not None and int(count) >= limit
+
+
+def record_failure(bucket: str, window_seconds: int) -> None:
+    """Spend one from a failures-only budget. See failures_exhausted."""
+    key = f"rl:{bucket}:{int(time.time()) // window_seconds}"
+    try:
+        pipe = runtime_redis().pipeline()
+        pipe.incr(key)
+        pipe.expire(key, window_seconds)
+        pipe.execute()
+    except RedisError:
+        log.warning("rate limiter unavailable, not counting failure on %s", bucket, exc_info=True)
+
+
 def per_ip(name: str, limit: int, window_seconds: int = 60) -> Callable:
     """Limit by client address. For endpoints reachable without a session."""
 
