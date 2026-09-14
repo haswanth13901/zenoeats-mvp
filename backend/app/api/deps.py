@@ -7,6 +7,7 @@ section 16.2:
         -> transaction with FORCE RLS -> audit
 """
 
+import time
 from dataclasses import dataclass
 from typing import Iterator
 
@@ -17,11 +18,13 @@ from sqlalchemy.orm import Session
 from app.core import errors
 from app.core.auth import AuthError, ClerkPrincipal, verify_clerk_token
 from app.core import platform_auth, staff_auth
-from app.core.tenant import extract_slug
+from app.core.tenant import admin_host, extract_slug, host_of
 from app.db.session import AppSessionLocal, system_session
 from app.models import (
     Restaurant, RestaurantStatus, RestaurantUser, StaffRole, StaffStatus, User,
+    UserKind,
 )
+from app.services import clerk_customers
 from sqlalchemy import text
 
 
@@ -42,30 +45,15 @@ def get_principal(authorization: str | None = Header(default=None)) -> ClerkPrin
 
 
 def get_current_user(principal: ClerkPrincipal = Depends(get_principal)) -> User:
-    """Resolve the local user row mirrored from Clerk.
+    """The customer behind a verified Clerk session.
 
-    If the Clerk webhook has not landed yet (a customer who signed up two
-    seconds ago), create the row on first use so checkout is not blocked by
-    webhook latency. The webhook remains the source of updates.
+    Created on first sight, with the email and name read from Clerk's Backend
+    API, so a customer who signed up seconds ago reaches checkout with a real
+    receipt address instead of waiting for the webhook.
     """
-    with system_session() as session:
-        user = session.execute(
-            select(User).where(User.clerk_user_id == principal.clerk_user_id)
-        ).scalar_one_or_none()
-
-        if user is None:
-            user = User(
-                clerk_user_id=principal.clerk_user_id,
-                email=principal.email or f"{principal.clerk_user_id}@pending.local",
-            )
-            session.add(user)
-            session.flush()
-
-        if not user.is_active or user.deleted_at is not None:
-            raise errors.ApiError(403, "ACCOUNT_INACTIVE", "This account is not active.")
-
-        session.expunge(user)
-        return user
+    return clerk_customers.customer_for_clerk_user(
+        principal.clerk_user_id, token_email=principal.email
+    )
 
 
 def resolve_tenant(request: Request) -> TenantContext:
@@ -85,11 +73,11 @@ def resolve_tenant(request: Request) -> TenantContext:
 
 
 # A DRAFT restaurant is invisible to customers -- there is nothing to order
-# yet -- but its own staff must be able to reach it, because activation
-# requires at least one available menu item and only staff can add one.
-# Without this split a new restaurant could never be activated: no menu
-# without signing in, no signing in without being ACTIVE, no ACTIVE without a
-# menu.
+# yet -- but its own staff must be able to reach it, because the whole point
+# of the draft period is building the menu, the staff list and the settings
+# before anyone can see them. Without this split the portal would only open
+# once the restaurant was already live, and every restaurant would go live
+# with an empty storefront.
 #
 # SUSPENDED is staff-visible for the same reason: whatever caused the
 # suspension usually has to be fixed from inside the portal.
@@ -107,19 +95,62 @@ STAFF_VISIBLE = frozenset(
 )
 
 
-def _resolve(slug: str, allowed: frozenset[str]) -> TenantContext:
+# Turning a hostname into a restaurant is on the path of every single request,
+# and it reads a row that changes a handful of times in a restaurant's whole
+# life. Asking Postgres each time cost a checkout from the narrow system pool
+# plus a round trip -- about 3ms against a database on the same machine, and
+# considerably more across a network -- to be told the same thing as a moment
+# ago.
+#
+# The entry holds the id and the status. It never holds the decision: which
+# statuses an audience may see is applied fresh below on every call, so the
+# customer and staff resolvers share one entry and neither can widen the
+# other.
+#
+# A TTL rather than explicit invalidation, because the API runs as several
+# worker processes and a suspension applied inside one of them cannot reach
+# another's memory. What matters is the bound: after activate, suspend or
+# delete, every worker agrees within this many seconds. Keep it short.
+_TENANT_TTL_SECONDS = 5.0
+_TENANT_CACHE_MAX = 512
+_tenant_cache: dict[str, tuple[float, tuple[str, str] | None]] = {}
+
+
+def _lookup_restaurant(slug: str) -> tuple[str, str] | None:
+    """(id, status) for a live restaurant on this slug, or None for no such
+    restaurant. Cached briefly; see the note above."""
+    now = time.monotonic()
+    cached = _tenant_cache.get(slug)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
     with system_session() as session:
         row = session.execute(
             select(Restaurant.id, Restaurant.status)
             .where(Restaurant.slug == slug, Restaurant.deleted_at.is_(None))
         ).one_or_none()
 
+    found = None if row is None else (str(row.id), row.status)
+
+    # Misses are cached too. A sweep of the wildcard domain is exactly what an
+    # unknown subdomain looks like, and those must not each cost a query. The
+    # cap keeps such a sweep from growing this dict without limit; dropping
+    # everything is fine, the next request simply re-reads.
+    if len(_tenant_cache) >= _TENANT_CACHE_MAX:
+        _tenant_cache.clear()
+    _tenant_cache[slug] = (now + _TENANT_TTL_SECONDS, found)
+    return found
+
+
+def _resolve(slug: str, allowed: frozenset[str]) -> TenantContext:
+    found = _lookup_restaurant(slug)
+
     # One message for "no such restaurant" and "not visible to you". The
     # difference would let anyone enumerate which subdomains exist.
-    if row is None or row.status not in allowed:
+    if found is None or found[1] not in allowed:
         raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No restaurant for this address.")
 
-    return TenantContext(restaurant_id=str(row.id), slug=slug)
+    return TenantContext(restaurant_id=found[0], slug=slug)
 
 
 def resolve_tenant_staff(request: Request) -> TenantContext:
@@ -220,8 +251,12 @@ def current_staff_user(request: Request) -> User:
         # password_hash is the marker of a credentialed account. A customer or
         # a platform admin has none, so a token naming one of them -- however
         # it arose -- is not a staff session.
-        if user is None or user.password_hash is None:
+        if user is None or user.password_hash is None or user.kind != UserKind.STAFF.value:
             raise errors.ApiError(401, "UNAUTHENTICATED", "Sign in to continue.")
+        if user.session_revoked(principal.issued_at):
+            # The password changed, or a super admin reset it, after this
+            # token was issued.
+            raise errors.ApiError(401, "UNAUTHENTICATED", "Your session has ended. Sign in again.")
         if not user.is_active or user.deleted_at is not None:
             raise errors.ApiError(403, "ACCOUNT_INACTIVE", "This account is not active.")
         session.expunge(user)
@@ -272,6 +307,38 @@ def require_staff(*roles: StaffRole):
     return _dep
 
 
+def require_admin_host(request: Request) -> None:
+    """The platform portal answers on admin.<root domain> and nowhere else.
+
+    Every restaurant is a subdomain of the same root, and a cookie set on one
+    subdomain counts as same-site on all of them: a session cookie still rides
+    a request made from a storefront page. Serving the super-admin API on
+    those hostnames too meant a script running on any storefront -- ours or
+    injected -- could drive it with a signed-in operator's session. The portal
+    now exists at exactly one address, and requests to any other are refused
+    before authentication is even attempted.
+    """
+    if host_of(request.headers.get("host")) != admin_host():
+        raise errors.ApiError(404, "NOT_FOUND", "No such endpoint.")
+
+
+def require_same_origin(request: Request) -> None:
+    """Refuse a cookie-authenticated request made from another origin.
+
+    Browsers send Origin on every cross-origin request and on same-origin
+    writes. Our portals are served from the same origin as the API they call,
+    so an Origin naming a different host is either a cross-site request or a
+    page on a neighbouring subdomain -- neither of which should be able to act
+    with an operator's session. Requests with no Origin at all (curl, a server,
+    a same-origin GET) are left to the session checks.
+    """
+    origin = request.headers.get("origin")
+    if origin is None or origin == "null":
+        return
+    if host_of(origin) != host_of(request.headers.get("host")):
+        raise errors.ApiError(403, "CROSS_ORIGIN_DENIED", "This request came from another site.")
+
+
 def require_platform_admin(request: Request) -> User:
     """Authorize a platform administrator from the environment-backed session.
 
@@ -293,10 +360,15 @@ def require_platform_admin(request: Request) -> User:
     if admin is None:
         raise errors.ApiError(401, "UNAUTHENTICATED", "Your session has expired. Sign in again.")
 
-    return _ensure_platform_admin_user(admin.email)
+    user = ensure_platform_admin_user(admin.email)
+    if admin.issued_at is not None and user.session_revoked(admin.issued_at):
+        # This admin signed out after the token was issued. Signing out ends
+        # every session, so a copied cookie is as dead as the deleted one.
+        raise errors.ApiError(401, "UNAUTHENTICATED", "Your session has ended. Sign in again.")
+    return user
 
 
-def _ensure_platform_admin_user(email: str) -> User:
+def ensure_platform_admin_user(email: str) -> User:
     """The users row backing an environment-declared administrator.
 
     is_platform_admin is re-asserted on every sign-in so the environment stays
@@ -305,12 +377,14 @@ def _ensure_platform_admin_user(email: str) -> User:
     """
     with system_session() as session:
         user = session.execute(
-            select(User).where(User.email == email, User.clerk_user_id.is_(None))
+            select(User).where(
+                User.email == email, User.kind == UserKind.PLATFORM_ADMIN.value
+            )
         ).scalar_one_or_none()
 
         if user is None:
             user = User(
-                clerk_user_id=None,
+                kind=UserKind.PLATFORM_ADMIN.value,
                 email=email,
                 full_name="Platform Administrator",
                 is_platform_admin=True,

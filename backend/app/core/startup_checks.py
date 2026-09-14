@@ -1,0 +1,88 @@
+"""Configuration that must be right before the API may serve anything.
+
+Checked once at import of app.main. In production a problem is fatal: an API
+that boots with an empty SESSION_SECRET hands out admin sessions anyone can
+forge, and one without Clerk configured turns every customer away -- both
+are better discovered as a failed deploy than as an incident. Outside
+production the same findings are logged, so development keeps working with a
+partial .env.
+"""
+
+import logging
+
+from cryptography.fernet import Fernet
+
+from app.config import Settings
+
+log = logging.getLogger(__name__)
+
+# 32 bytes of randomness, base64 encoded, is 44 characters. Anything much
+# shorter was typed by a person.
+MIN_SESSION_SECRET_LENGTH = 32
+
+
+def configuration_problems(settings: Settings) -> list[str]:
+    """Everything wrong with a production configuration, worst first."""
+    problems: list[str] = []
+
+    if settings.AUTH_DEV_BYPASS:
+        problems.append("AUTH_DEV_BYPASS must never be enabled in production.")
+
+    if settings.DATABASE_URL_MIGRATE:
+        problems.append(
+            "DATABASE_URL_MIGRATE is set in a runtime process. It carries the schema "
+            "owner's credentials; give it only to the migration job."
+        )
+
+    if len(settings.SESSION_SECRET) < MIN_SESSION_SECRET_LENGTH:
+        problems.append(
+            f"SESSION_SECRET must be at least {MIN_SESSION_SECRET_LENGTH} characters "
+            "(generate one with: openssl rand -base64 32). Admin and staff session "
+            "cookies are forgeable without it."
+        )
+
+    try:
+        Fernet(settings.FIELD_ENCRYPTION_KEY.encode())
+    except (ValueError, TypeError):
+        problems.append(
+            "FIELD_ENCRYPTION_KEY is not a valid Fernet key (generate one with: make key)."
+        )
+
+    for name in ("CLERK_JWKS_URL", "CLERK_ISSUER", "CLERK_SECRET_KEY"):
+        if not getattr(settings, name):
+            problems.append(f"{name} is not set; no customer can sign in.")
+
+    for name in ("STRIPE_SECRET_KEY", "STRIPE_CONNECT_WEBHOOK_SECRET"):
+        value = getattr(settings, name)
+        if not value or "replace_me" in value:
+            problems.append(f"{name} is not set; no order can be paid or confirmed.")
+
+    if not settings.ADMIN_USERS.strip():
+        problems.append("ADMIN_USERS is empty; nobody can sign in to the super admin portal.")
+
+    if settings.ROOT_DOMAIN.endswith(".local"):
+        problems.append(
+            f"ROOT_DOMAIN is {settings.ROOT_DOMAIN!r}, a development domain; "
+            "storefronts would resolve to no restaurant."
+        )
+
+    return problems
+
+
+def enforce(settings: Settings) -> None:
+    problems = configuration_problems(settings)
+    if not problems:
+        return
+
+    if settings.ENV == "production":
+        raise RuntimeError(
+            "Refusing to start with an unsafe production configuration:\n  - "
+            + "\n  - ".join(problems)
+        )
+
+    # Development routinely runs without Stripe or admin credentials. Say what
+    # production would refuse, once, and carry on.
+    log.info(
+        "configuration would not pass production checks: %s",
+        " | ".join(problems),
+    )

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Signing you in…</title>
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+    <!-- Runtime configuration (the Clerk publishable key), written by the web
+         container at startup. A classic script, so it runs before the module
+         entry below reads it. -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <main class="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-5 py-10 text-center">
+      <p class="text-muted">Signing you in…</p>
+    </main>
+
+    <script type="module" src="/login/customer-sso-callback.ts"></script>
+  </body>
+</html>

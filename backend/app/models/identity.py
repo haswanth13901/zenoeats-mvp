@@ -22,21 +22,37 @@ class StaffStatus(str, enum.Enum):
     REVOKED = "REVOKED"
 
 
-class User(Base, TimestampMixin):
-    """Global platform identity, mirrored from Clerk.
+class UserKind(str, enum.Enum):
+    """Which of the three identity systems a users row belongs to.
 
-    Clerk owns credentials, sessions, verification and MFA. This table exists
-    so orders can carry a real foreign key and so we can authorize without a
-    network call to Clerk on every request. Kept in sync by the Clerk webhook
-    inbox. No restaurant_id, no tenant RLS policy.
+    The populations never overlap. A person who orders lunch and also works a
+    restaurant's counter has two rows: one reached through Clerk, one through
+    the credentials the restaurant issued. Keeping them apart is what stops a
+    customer sign-in from ever opening a staff portal, and an email match from
+    ever merging the two.
+    """
+
+    CUSTOMER = "CUSTOMER"
+    STAFF = "STAFF"
+    PLATFORM_ADMIN = "PLATFORM_ADMIN"
+
+
+class User(Base, TimestampMixin):
+    """Global platform identity. No restaurant_id, no tenant RLS policy.
+
+    For customers, Clerk owns credentials, sessions, verification and Google
+    sign-in, and this row mirrors the parts we need: a real foreign key for
+    orders, and an email for receipts. Every permission is still resolved from
+    our own tables, never from a claim in a token.
     """
 
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = uuid_pk()
-    # Nullable: platform administrators authenticate against credentials in
-    # the environment and have no Clerk identity, but still need a row here
-    # because platform_audit_logs.actor_user_id is a NOT NULL FK to users.id.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Customers only. Platform administrators and restaurant staff have no
+    # Clerk identity, but still need a row here: platform_audit_logs and
+    # restaurant_users both carry NOT NULL foreign keys to users.id.
     clerk_user_id: Mapped[str | None] = mapped_column(
         String(255), nullable=True, unique=True, index=True
     )
@@ -52,15 +68,30 @@ class User(Base, TimestampMixin):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Admin and staff tokens issued before this moment are refused. Set by
+    # admin sign-out, a staff password change and a super-admin reset, so a
+    # copied token stops working then rather than when it would have expired.
+    sessions_valid_after: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    def session_revoked(self, issued_at: float) -> bool:
+        """Whether a token issued at `issued_at` (epoch seconds) predates the
+        last time this account's sessions were ended."""
+        return (
+            self.sessions_valid_after is not None
+            and issued_at < self.sessions_valid_after.timestamp()
+        )
 
 
 class RestaurantUser(Base, TimestampMixin):
     """Staff membership. Tenant owned, RLS enforced.
 
     Rule 27: a membership becomes ACTIVE only after the target account
-    explicitly accepts. An email match alone never grants tenant access.
-    Clerk Organizations drives invite and acceptance; this row is the
-    authoritative record we authorize against.
+    explicitly accepts. An email match alone never grants tenant access. The
+    invitee signs in to this restaurant's portal with their staff credentials
+    and accepts there; this row is the authoritative record we authorize
+    against.
     """
 
     __tablename__ = "restaurant_users"

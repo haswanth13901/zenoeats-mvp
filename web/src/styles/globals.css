@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* The Next build supplied --font-display and --font-body through next/font.
+   Nothing sets them now, and an undefined var() invalidates the entire
+   font-family declaration -- so every heading and every line of body text
+   silently fell back to the browser's default serif, ignoring the stacks in
+   tailwind.config.ts. Dropping in a webfont later means reassigning these two
+   variables and nothing else. */
+:root {
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+  }
+  /* Prices line up in a column, so figures must be tabular. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2.5
+           text-sm font-medium transition-colors
+           focus-visible:outline focus-visible:outline-2
+           focus-visible:outline-offset-2 focus-visible:outline-brick
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brick text-white hover:bg-brickDark;
+  }
+  .btn-quiet {
+    @apply btn border border-hairline bg-surface hover:bg-paper;
+  }
+  .field {
+    @apply w-full rounded-md border border-hairline bg-surface px-3 py-2 text-sm
+           focus:border-brick focus:outline-none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

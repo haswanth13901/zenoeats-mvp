@@ -1,7 +1,7 @@
 # Zenoeats MVP — pickup ordering through successful payment
 
 A working slice of the v3.0 architecture baseline: multi-tenant subdomain
-portals, Clerk identity, a Meal → Category → Item → Modifier menu, and Stripe
+portals, Clerk-backed customer sign-in on our own pages, an Item → Modifier menu served by meal periods, and Stripe
 Connect checkout that ends with a webhook-confirmed paid order on the kitchen
 board.
 
@@ -10,8 +10,8 @@ board.
 | Area | Included |
 |---|---|
 | Tenancy | Wildcard subdomain resolution, PostgreSQL RLS, three-role DB model |
-| Identity | Clerk for customers and staff, webhook mirror into `users` |
-| Menu | Meals, categories (FOOD / BEVERAGE / SAUCE), items, reusable modifier groups |
+| Identity | Customers: Clerk (email/password, Google) behind our own `/account` pages. Staff: platform-issued passwords. Admins: `ADMIN_USERS` |
+| Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
 | Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
 | Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
 | Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports |
@@ -64,7 +64,8 @@ after a refund.
 
 ## The three portals
 
-All three are the same Next.js app. Which one you get depends on the URL.
+All three are the same React app, built by Vite. Which one you get depends
+on the URL.
 
 | URL | Who | What |
 |---|---|---|
@@ -74,7 +75,8 @@ All three are the same Next.js app. Which one you get depends on the URL.
 
 The restaurant screens must be opened **on that restaurant's subdomain**. The
 tenant is resolved from the `Host` header and nothing else, so
-`localhost:3000/manage` will not work. Always browse through nginx on `:8080`.
+`localhost:3000/manage` will not work. Always browse through nginx on `:8080`,
+or through the Vite dev server on a `*.zenoeats.local` subdomain.
 
 `admin` is a reserved slug, so it never resolves as a tenant. The super admin
 endpoints do not use tenant context at all; they run through the audited
@@ -86,10 +88,14 @@ system read surface.
   Tickets show quantity, modifiers and notes, and turn the elapsed time red
   past fifteen minutes. "Collect with PIN" needs the customer's six digits;
   five wrong attempts locks that order until a manager overrides.
-- **Menu** has two tabs. *Meals and items* builds the
-  Meal → Category → Item tree and toggles sold-out. *Modifier library* creates
-  reusable groups. Options are entered one per line, with an optional price
-  change at the end: `Jalapenos +0.50`, `No cheese -0.50`.
+- **Menu** has four tabs. *Items* is everything the restaurant sells, each
+  with a type and the meal periods that serve it, plus the sold-out toggle.
+  *Meal periods* adds a period and chooses what it serves, pulling from that
+  item list. Item types are managed above the item list, on the Items tab. *Combos* bundles a period's items into meal deals with a
+  discount. *Modifier library* creates reusable groups, each shown on any
+  number of item types. Options are entered a row at a time, name beside
+  price change; a blank price means no change and a negative one is allowed,
+  like `-0.50` for no cheese.
 - **Staff** sends invitations. An invited person shows as "waiting to accept"
   and has no access until they sign in to this restaurant and accept.
 - **Reports** shows paid orders, gross, average order value, tax, top items,
@@ -98,10 +104,11 @@ system read surface.
 ### Super admin screen
 
 Create a restaurant (starts in draft), connect its Stripe account through
-hosted onboarding, then activate. Activation is gated: it refuses unless the
-connected account has charges enabled and at least one menu item is
-available. Every read on this page writes to `platform_audit_logs` with your
-user, the scope requested, and a correlation id.
+hosted onboarding, then activate. Activation is gated on payments only: it
+refuses unless the connected account has charges enabled. The menu is not
+part of the gate, so a restaurant can go live and fill its menu afterwards.
+Every read on this page writes to `platform_audit_logs` with your user, the
+scope requested, and a correlation id.
 
 ## Running it
 
@@ -127,13 +134,18 @@ make key            # prints a Fernet key -> FIELD_ENCRYPTION_KEY
 
 Then fill in `.env`:
 
-**Clerk.** Create one application. Under Domains, set the primary domain to
-the parent (`zenoeats.local` in dev, `zenoeats.com` in production) so the
-session cookie is scoped to `.zenoeats.com` and one login works across every
-restaurant subdomain. Copy the publishable key, secret key, JWKS URL and
-issuer. Add a webhook endpoint pointing at
-`https://api.yourdomain/api/v1/webhooks/clerk` subscribed to `user.created`,
-`user.updated` and `user.deleted`, and copy its signing secret.
+**Sessions.** Set `SESSION_SECRET` (`openssl rand -base64 32`). It signs the
+admin and staff session cookies.
+
+**Clerk (customers).** Create one application. Enable *Email address* +
+*Password*, and *Google* under social connections if you want the button
+(development instances use Clerk's shared Google credentials, so there is
+nothing to set up at Google). Copy the publishable key into
+`VITE_CLERK_PUBLISHABLE_KEY`, and the secret key, JWKS URL and issuer into the
+`CLERK_*` settings. For production, set the primary domain to the parent
+(`zenoeats.com`) so one sign-in covers every restaurant subdomain, and add a
+webhook endpoint at `https://yourdomain/api/v1/webhooks/clerk` for
+`user.created`, `user.updated` and `user.deleted`.
 
 **Stripe.** Enable Connect in test mode. Copy the secret and publishable
 keys. Create a webhook endpoint **on the Connect tab** (not the account tab)
@@ -193,6 +205,25 @@ role has `BYPASSRLS`, that no runtime role owns a table, and that
 If you change the migration, run these before merging. They are the only
 thing standing between you and a cross-tenant data leak.
 
+## Customer sign-in
+
+The pages are ours; the identity is Clerk's. `/account/sign-in`,
+`/account/sign-up` and `/account/forgot-password` are plain HTML entries
+styled like the rest of the storefront, and they call Clerk's JavaScript SDK
+directly -- no Clerk component is rendered.
+
+* **Sign-up** sends a 6-digit code, entered on the same page.
+* **Forgot password** sends a 6-digit code, entered with the new password.
+* **Google** goes through Clerk and returns to `/account/sso-callback`, which
+  finishes the sign-in (or sign-up) and continues to checkout.
+* **The API** verifies Clerk's session token on every order request, checks it
+  was minted for one of our own hosts, and keeps one `users` row per Clerk
+  user. A new customer's email and name are read from Clerk's Backend API the
+  first time they appear, so receipts do not wait for the webhook.
+
+The SDK is loaded from the Clerk instance at runtime (about 80 KB), not
+bundled, and only on customer pages.
+
 ## Development without Clerk
 
 For backend work you can skip Clerk entirely:
@@ -201,8 +232,8 @@ For backend work you can skip Clerk entirely:
 AUTH_DEV_BYPASS=true
 ```
 
-The `Authorization: Bearer` header is then read as a bare user id. The seed
-prints three: `user_dev_customer`, `user_dev_owner`, `user_dev_superadmin`.
+The `Authorization: Bearer` header is then read as a bare Clerk user id. The
+seed creates `user_dev_customer`.
 
 ```bash
 curl -H "Authorization: Bearer user_dev_customer" \
@@ -218,24 +249,76 @@ The app refuses to boot with `AUTH_DEV_BYPASS=true` and `ENV=production`.
 ## Menu model
 
 ```
-Meal                    "Lunch"
-  Category  kind=FOOD       "Burgers"
-    Item                      "Smash Burger"
-      ModifierGroup             "Veggies"      MULTI,  0-5, optional
-        ModifierOption            "Lettuce"    +$0.00
-        ModifierOption            "Jalapenos"  +$0.50
-  Category  kind=BEVERAGE   "Cold Drinks"
-    Item                      "Iced Tea"
-      ModifierGroup             "Ice level"    SINGLE, 1-1, required
-        ModifierOption            "Light" / "Regular" / "Heavy"
-  Category  kind=SAUCE      "Sides & Sauces"
-    Item                      "Garlic Aioli"
+ItemType                "Food"  "Drinks"  "Sides"  "Sauces"   <- the restaurant's own
+  ItemType                "Burgers"  parent=Food                <- optional, one level
+
+Item  type=Burgers      "Smash Burger"
+  ModifierGroup           "Veggies"      MULTI,  0-5, optional
+    ModifierOption          "Lettuce"    +$0.00
+    ModifierOption          "Jalapenos"  +$0.50
+Item  type=Drinks       "Iced Tea"
+  ModifierGroup           "Ice level"    SINGLE, 1-1, required
+    ModifierOption          "Light" / "Regular" / "Heavy"
+Item  type=Sides        "Fries"
+Item  type=Sauces       "Garlic Aioli"
+
+Meal                    "Lunch"     serves all four
+Meal                    "Dinner"    serves the burger, the tea and the fries
+
+Combo "Burger Meal"     sold during Lunch, 10% off
+  slot Food               Smash Burger
+  slot Drinks             Iced Tea
+  slot Sides              Fries
 ```
+
+Item types are rows, not an enum. Four hard-coded words meant a tiffin house
+filed tiffins, thalis and chaat under "Food" and read a stranger's vocabulary
+back on its own menu. A restaurant is created with Food, Drinks, Sides and
+Sauces as a starting point and renames, reorders, adds to or deletes them from
+the portal. `item_types.sort_order` is the order headings read down a
+storefront. Deleting a type still on items is refused rather than cascading,
+because the alternative is taking real menu items with it.
+
+A type may name a parent, which makes it a subcategory: Food holding Burgers
+and Nuggets, Drinks holding Hot Beverages. Two levels and no more, capped by a
+composite foreign key rather than by a rule the code has to remember, so
+nothing walks a tree. Leaving the parent blank is the ordinary case and the
+one most menus stay in.
+
+The nesting is a heading on the storefront and nothing else. Combos and the
+modifier-group filter read the top-level type, so a slot asking for a food
+offers burgers and nuggets together and a group offered for Food reaches every
+burger. Making Burgers and Nuggets top-level types instead would have split
+that one slot into two, each offering half the choice, and forced the group to
+be named against both. `sort_order` on a subcategory orders it among its
+siblings, not across the menu. A heading with subcategories under it cannot be
+deleted or filed under a third type while they are there.
+
+An item belongs to the restaurant, not to a meal period, and a period serves
+it through `meal_items`. So one item can be on breakfast and lunch alike, with
+one price and one sold-out toggle. The headings a customer reads inside a
+period are derived from the types of the items served, not stored. A
+subcategory becomes a block inside its parent's heading rather than a heading
+of its own, and what is filed on the heading itself reads before it.
+
+A combo is one item from each of several item types, sold together for less. It
+belongs to one meal period and may only offer items that period serves. Each
+slot takes exactly one item of one type and is always required. The discount is a
+percentage in basis points or a flat amount in minor units, and it is capped
+at what the chosen items cost.
+
+A combo is not an order line. It becomes one line per slot at each item's own
+price, tagged with `combo_id`, `combo_name_snapshot` and `combo_group`, and
+the saving lands in `orders.discount_minor`. So the subtotal is still what the
+food costs, the saving is a figure a receipt can show, and the kitchen sees
+the items it has to plate.
 
 Modifier groups belong to the restaurant, not to a single item, and attach
 through `item_modifier_groups`. Define "Ice level" once and reuse it on every
-drink. `applies_to_kind` filters the library in the menu builder so adding a
-beverage surfaces Ice level rather than Veggies.
+drink. The item types a group names filter the library in the menu builder, so
+adding a drink surfaces Ice level rather than Veggies. It is a list, so a
+"Size" group can be offered on drinks and sides at once; naming none means
+every type.
 
 `modifier_options.price_delta_minor` is the one money column without a
 non-negative constraint, because "no cheese −$0.50" is legitimate. Everything
@@ -253,12 +336,15 @@ backend/
   app/workers/      Celery app and tasks
   alembic/          schema, RLS policies, role grants
   tests/            unit tests plus the RLS gates
-frontend/
-  app/              customer: menu, checkout, order tracking
-  app/manage/       restaurant: kitchen, menu builder, staff, reports
-  app/admin/        platform: restaurants, onboarding, reports
-  components/       modifier sheet, cart bar, operator shell
-  lib/              API client, cart context, auth hooks, formatting
+web/
+  src/pages/storefront/   customer: menu, checkout, order tracking
+  src/pages/manage/       restaurant: kitchen, menu builder, staff, reports
+  src/pages/admin/        platform: restaurants, onboarding, reports
+  src/features/           cart and session state, one RTK Query API per portal
+  src/services/           HTTP client and the RTK Query base query
+  src/components/         modifier sheet, cart bar, operator shell, guards
+  login/                  the three sign-in pages, deliberately outside React
+  nginx.conf              static serving: SPA fallback, real files for /login
 infra/
   postgres/         role creation, runs on first boot
   nginx/            origin edge with subdomain routing
@@ -266,27 +352,12 @@ infra/
 
 ## Before real money
 
-Six things this build does not do that a production launch needs:
+`STEPS_BEFORE_PRODUCTION.md` is the checklist: every code change, account,
+infrastructure, legal and rehearsal step before launch, with what has been done
+and what is still open. Keep it current rather than a list here.
 
-1. **Tax.** `TaxService` uses one flat rate per restaurant. Texas prepared
-   food is state plus local jurisdiction and varies by address. Wire Stripe
-   Tax behind the same interface before launch.
-2. **Backups.** Nightly encrypted `pg_dump` copied off the VM, and one
-   timed restore drill. A backup you have never restored is not a backup.
-3. **TLS.** Let's Encrypt wildcard certificate via DNS validation, plus
-   monitoring on expiry. A lapsed wildcard cert takes down every portal.
-4. **Error tracking.** Wire Sentry or equivalent into the FastAPI handler and
-   the Celery tasks. Scrub tokens, card data and PINs.
-5. **Rate limiting.** `redis-runtime` is running and unused. Add limits on
-   auth, order creation and PaymentIntent creation.
-6. **Receipts.** No email is sent yet. Add a Celery task on the
-   `payment_intent.succeeded` path.
-
-Two smaller gaps worth knowing about. Staff invitations create the membership
-row but send no email; wire that to the same notification task as receipts, or
-use Clerk Organizations invitations if you would rather Clerk own the flow.
-And the invited person currently has to be told the URL to visit, since there
-is no invitation landing page yet.
+The production edge and deployment shape are in `docker-compose.prod.yml` and
+`infra/nginx/production/`.
 
 ## Adding delivery later
 

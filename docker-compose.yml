@@ -47,6 +47,31 @@ services:
       timeout: 3s
       retries: 5
 
+  # Schema migrations, as a one-off job: it runs `alembic upgrade head` and
+  # exits. It is the only service given the schema owner's credentials, and
+  # the only place a migration runs -- so several api replicas can never race
+  # to migrate the same database, and a compromised api container holds no
+  # credential that can drop a table or lift row-level security.
+  #
+  # In production, run the same image with the same command as a release step
+  # before rolling out new api and worker containers.
+  migrate:
+    build: ./backend
+    profiles: ["app"]
+    env_file: .env
+    environment:
+      DATABASE_URL_APP: ${DOCKER_DATABASE_URL_APP}
+      DATABASE_URL_SYSTEM: ${DOCKER_DATABASE_URL_SYSTEM}
+      DATABASE_URL_MIGRATE: ${DOCKER_DATABASE_URL_MIGRATE}
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+    command: alembic upgrade head
+    # The image's HEALTHCHECK polls /health, which a job that exits never
+    # serves.
+    healthcheck:
+      disable: true
+
   api:
     build: ./backend
     # Behind a profile: `docker compose up -d` starts infrastructure only.
@@ -61,18 +86,45 @@ services:
       # in-network equivalents. `environment:` wins over `env_file:`.
       DATABASE_URL_APP: ${DOCKER_DATABASE_URL_APP}
       DATABASE_URL_SYSTEM: ${DOCKER_DATABASE_URL_SYSTEM}
-      DATABASE_URL_MIGRATE: ${DOCKER_DATABASE_URL_MIGRATE}
+      # Blanked on purpose. env_file hands this container every line of
+      # .env, including the schema owner's URL (under both names) and the
+      # Postgres superuser password -- credentials only the migrate job and
+      # the postgres service may hold.
+      DATABASE_URL_MIGRATE: ""
+      DOCKER_DATABASE_URL_MIGRATE: ""
+      POSTGRES_PASSWORD: ""
       CELERY_BROKER_URL: ${DOCKER_CELERY_BROKER_URL}
       CELERY_RESULT_BACKEND: ${DOCKER_CELERY_RESULT_BACKEND}
       REDIS_RUNTIME_URL: ${DOCKER_REDIS_RUNTIME_URL}
+      # Not a DOCKER_ variable like the lines above. Those carry
+      # credentials that differ per environment; this is a fixed path
+      # inside the image, pointing at the bind mount below.
+      IMAGES_DIR: /srv/images
+      # Worker processes, and the proxies uvicorn believes forwarding
+      # headers from. See backend/Dockerfile for how to size and set them.
+      WEB_CONCURRENCY: ${API_WORKERS:-2}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
     depends_on:
       postgres: {condition: service_healthy}
       redis-broker: {condition: service_healthy}
+      # Code never starts against a schema older than itself.
+      migrate: {condition: service_completed_successfully}
+    volumes:
+      # Uploaded menu images, and the folder the API serves /images/
+      # from. A bind mount rather than a named volume on purpose: the
+      # api usually runs natively on the host (see the profile note
+      # above), and a named volume lives inside the Docker VM where a
+      # native process cannot reach it. Both read the same host folder
+      # this way, so an image uploaded under one is there under the
+      # other. Read-write: this is the only service that writes it.
+      - ./images:/srv/images
     ports:
       - "127.0.0.1:8000:8000"
+    # Migrations are the migrate service's job, not this one's. Workers and
+    # proxy trust come from WEB_CONCURRENCY and FORWARDED_ALLOW_IPS above.
     command: >
-      sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+      --timeout-keep-alive 30
 
   worker:
     build: ./backend
@@ -88,13 +140,21 @@ services:
       # in-network equivalents. `environment:` wins over `env_file:`.
       DATABASE_URL_APP: ${DOCKER_DATABASE_URL_APP}
       DATABASE_URL_SYSTEM: ${DOCKER_DATABASE_URL_SYSTEM}
-      DATABASE_URL_MIGRATE: ${DOCKER_DATABASE_URL_MIGRATE}
+      # Blanked on purpose. env_file hands this container every line of
+      # .env, including the schema owner's URL (under both names) and the
+      # Postgres superuser password -- credentials only the migrate job and
+      # the postgres service may hold.
+      DATABASE_URL_MIGRATE: ""
+      DOCKER_DATABASE_URL_MIGRATE: ""
+      POSTGRES_PASSWORD: ""
       CELERY_BROKER_URL: ${DOCKER_CELERY_BROKER_URL}
       CELERY_RESULT_BACKEND: ${DOCKER_CELERY_RESULT_BACKEND}
       REDIS_RUNTIME_URL: ${DOCKER_REDIS_RUNTIME_URL}
     depends_on:
       postgres: {condition: service_healthy}
       redis-broker: {condition: service_healthy}
+      # Code never starts against a schema older than itself.
+      migrate: {condition: service_completed_successfully}
     command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=2
     # The image's HEALTHCHECK curls /health, which only the api serves. A
     # worker has no HTTP surface, so it reported unhealthy forever and any
@@ -120,7 +180,13 @@ services:
       # in-network equivalents. `environment:` wins over `env_file:`.
       DATABASE_URL_APP: ${DOCKER_DATABASE_URL_APP}
       DATABASE_URL_SYSTEM: ${DOCKER_DATABASE_URL_SYSTEM}
-      DATABASE_URL_MIGRATE: ${DOCKER_DATABASE_URL_MIGRATE}
+      # Blanked on purpose. env_file hands this container every line of
+      # .env, including the schema owner's URL (under both names) and the
+      # Postgres superuser password -- credentials only the migrate job and
+      # the postgres service may hold.
+      DATABASE_URL_MIGRATE: ""
+      DOCKER_DATABASE_URL_MIGRATE: ""
+      POSTGRES_PASSWORD: ""
       CELERY_BROKER_URL: ${DOCKER_CELERY_BROKER_URL}
       CELERY_RESULT_BACKEND: ${DOCKER_CELERY_RESULT_BACKEND}
       REDIS_RUNTIME_URL: ${DOCKER_REDIS_RUNTIME_URL}
@@ -142,24 +208,17 @@ services:
     # them up only to rehearse production: docker compose --profile app up -d
     profiles: ["app"]
     build:
-      context: ./frontend
-      # NEXT_PUBLIC_* is inlined into the client bundle by `next build`, so
-      # these must be present as build args. Supplying them only at runtime
-      # leaves the bundle with no publishable key, and Clerk silently drops
-      # into keyless mode and mints throwaway credentials.
-      args:
-        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
-        NEXT_PUBLIC_ROOT_DOMAIN: ${NEXT_PUBLIC_ROOT_DOMAIN}
-        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-        # rewrites() is resolved by `next build` and baked into
-        # routes-manifest.json, so this is a build arg, not runtime env.
-        # Inside compose the API is reachable by service name; a native
-        # `npm run dev` evaluates next.config.js itself and falls back to
-        # the published port.
-        API_PROXY_ORIGIN: http://api:8000
-    env_file: .env
-    depends_on:
-      - api
+      context: ./web
+    # Read at container start, not at build: the entrypoint writes it into
+    # /config.js, so the same image runs against any Clerk instance.
+    environment:
+      CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
+      # Content-Security-Policy tuning; see web/docker-entrypoint.d.
+      CSP_EXTRA_IMG_SRC: ${CSP_EXTRA_IMG_SRC:-}
+      CSP_REPORT_ONLY: ${CSP_REPORT_ONLY:-false}
+    # No env_file and no depends_on. The image is static files behind nginx:
+    # there is no server-side code to configure, and no API call happens until
+    # a browser makes one. /api is routed by the edge, not from in here.
     ports:
       - "127.0.0.1:3000:3000"
 

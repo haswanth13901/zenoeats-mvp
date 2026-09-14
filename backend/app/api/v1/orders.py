@@ -30,7 +30,7 @@ from app.schemas.api import (
     AmountsOut, CreateOrderIn, OrderItemOut, OrderModifierOut, OrderOut,
     PaymentIntentOut, QuoteIn, QuoteOut,
 )
-from app.services import stripe_service
+from app.services import clerk_customers, stripe_service
 from app.services.orders import create_pending_order
 from app.services.pricing import price_cart
 
@@ -63,6 +63,8 @@ def _serialize(order: Order, payment: Payment | None, *, include_pin: bool) -> O
         items=[
             OrderItemOut(
                 name=i.name_snapshot,
+                combo_name=i.combo_name_snapshot,
+                combo_group=i.combo_group,
                 quantity=i.quantity,
                 unit_price_minor=i.unit_price_minor,
                 line_total_minor=i.line_total_minor,
@@ -96,7 +98,12 @@ def quote_cart(
     db: Session = Depends(tenant_db),
 ):
     """Authoritative pricing preview. Creates nothing."""
-    cart = price_cart(db, restaurant, [line.model_dump() for line in body.items])
+    cart = price_cart(
+        db,
+        restaurant,
+        [line.model_dump() for line in body.items],
+        [combo.model_dump() for combo in body.combos],
+    )
     return QuoteOut(
         currency=cart.currency,
         amounts=AmountsOut(
@@ -138,7 +145,12 @@ def create_order(
     if replay is not None:
         return OrderOut.model_validate(replay)
 
-    cart = price_cart(db, restaurant, [line.model_dump() for line in body.items])
+    cart = price_cart(
+        db,
+        restaurant,
+        [line.model_dump() for line in body.items],
+        [combo.model_dump() for combo in body.combos],
+    )
 
     if body.expected_total_minor is not None and body.expected_total_minor != cart.total_minor:
         # The menu changed between the quote and the confirm. Never silently
@@ -210,7 +222,9 @@ def create_payment_intent(
 
     # Stripe's own idempotency key is derived from the order id, so a retry
     # returns the same intent rather than creating a second one.
-    intent = stripe_service.create_payment_intent(order, account, receipt_email=user.email)
+    intent = stripe_service.create_payment_intent(
+        order, account, receipt_email=clerk_customers.receipt_address(user)
+    )
 
     payment.stripe_payment_intent_id = intent.id
     payment.stripe_client_secret = intent.client_secret

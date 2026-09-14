@@ -96,8 +96,22 @@ async def clerk_webhook(request: Request):
     payload = await request.body()
     headers = {k.lower(): v for k, v in request.headers.items()}
 
+    # Building the verifier and using it fail for different reasons and
+    # deserve different answers. svix base64-decodes the secret in its
+    # constructor and raises a plain binascii error there, not a
+    # WebhookVerificationError, so an unset or malformed secret used to
+    # escape the handler as an opaque 500.
     try:
-        verified = Webhook(settings.CLERK_WEBHOOK_SECRET).verify(payload, headers)
+        verifier = Webhook(settings.CLERK_WEBHOOK_SECRET)
+    except Exception:
+        # Our misconfiguration, not a bad request. 503 so Svix keeps the
+        # delivery and retries once the secret is actually set.
+        log.error("CLERK_WEBHOOK_SECRET is missing or malformed; cannot verify webhooks")
+        return Response(status_code=503, content='{"code":"WEBHOOK_NOT_CONFIGURED"}',
+                        media_type="application/json")
+
+    try:
+        verified = verifier.verify(payload, headers)
     except WebhookVerificationError:
         log.warning("rejected clerk webhook: bad signature")
         return Response(status_code=400, content='{"code":"INVALID_SIGNATURE"}',

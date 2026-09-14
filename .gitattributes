@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers. A Windows checkout that turned
+# their line endings into CRLF would make /bin/sh fail on the first line with
+# an error that names nothing useful.
+*.sh text eol=lf

@@ -1,11 +1,18 @@
 from app.models.catalog import (
-    Category,
-    CategoryKind,
+    Combo,
+    ComboSlot,
+    ComboSlotItem,
+    DiscountKind,
     Item,
+    ItemIncludedOption,
     ItemModifierGroup,
+    ItemType,
     Meal,
+    MealItem,
     ModifierGroup,
+    ModifierGroupItemType,
     ModifierOption,
+    STARTER_ITEM_TYPES,
     SelectionType,
 )
 from app.models.commerce import (
@@ -17,7 +24,7 @@ from app.models.commerce import (
     OrderStatus,
     RestaurantOrderCounter,
 )
-from app.models.identity import RestaurantUser, StaffRole, StaffStatus, User
+from app.models.identity import RestaurantUser, StaffRole, StaffStatus, User, UserKind
 from app.models.payments import (
     ClerkEvent,
     Payment,
@@ -27,13 +34,16 @@ from app.models.payments import (
     StripeEvent,
     StripeEventStatus,
 )
-from app.models.tenant import Restaurant, RestaurantStatus
+from app.models.tenant import DEFAULT_TAX_CODE, Restaurant, RestaurantStatus, TaxMode
 
 __all__ = [
-    "Restaurant", "RestaurantStatus",
-    "User", "RestaurantUser", "StaffRole", "StaffStatus",
-    "Meal", "Category", "CategoryKind", "Item",
+    "Restaurant", "RestaurantStatus", "TaxMode", "DEFAULT_TAX_CODE",
+    "User", "UserKind", "RestaurantUser", "StaffRole", "StaffStatus",
+    "Meal", "MealItem", "Item", "ItemType", "STARTER_ITEM_TYPES",
+    "Combo", "ComboSlot", "ComboSlotItem", "DiscountKind",
     "ModifierGroup", "ModifierOption", "ItemModifierGroup", "SelectionType",
+    "ItemIncludedOption",
+    "ModifierGroupItemType",
     "Order", "OrderItem", "OrderItemModifier", "OrderStatus",
     "RestaurantOrderCounter", "IdempotencyKey", "ALLOWED_TRANSITIONS",
     "Payment", "PaymentStatus", "PaymentMethod",

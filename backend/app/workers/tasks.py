@@ -22,8 +22,9 @@ from app.db.base import utcnow
 from app.db.session import system_session, tenant_session
 from app.models import (
     ClerkEvent, Order, OrderStatus, Payment, PaymentStatus,
-    RestaurantPaymentAccount, StripeEvent, StripeEventStatus, User,
+    RestaurantPaymentAccount, StripeEvent, StripeEventStatus, User, UserKind,
 )
+from app.services import stripe_tax
 from app.services.orders import transition
 from app.workers.celery_app import celery_app
 
@@ -125,19 +126,30 @@ def _handle_intent_succeeded(payload: dict, event_account_id: str | None):
         payment = session.get(Payment, payment_id)
         if payment is None:
             return
-        if payment.succeeded_at is not None:
-            return  # idempotent: already applied
+        order_id = payment.order_id
+        if payment.succeeded_at is None:
+            payment.status = PaymentStatus.PAID.value
+            payment.succeeded_at = utcnow()
+            payment.failure_message = None
 
-        payment.status = PaymentStatus.PAID.value
-        payment.succeeded_at = utcnow()
-        payment.failure_message = None
+            order = session.get(Order, order_id)
+            if order and order.status == OrderStatus.PENDING_PAYMENT.value:
+                # Only a verified webhook can do this. The client never can.
+                transition(order, OrderStatus.AUTO_ACCEPTED.value)
+                transition(order, OrderStatus.PREPARING.value)
+                log.info("order %s paid and now PREPARING", order.order_number)
 
-        order = session.get(Order, payment.order_id)
-        if order and order.status == OrderStatus.PENDING_PAYMENT.value:
-            # Only a verified webhook can do this. The client never can.
-            transition(order, OrderStatus.AUTO_ACCEPTED.value)
-            transition(order, OrderStatus.PREPARING.value)
-            log.info("order %s paid and now PREPARING", order.order_number)
+    # After the paid state has committed, and outside any transaction (rule
+    # 6). Reached on a redelivery too, not only the first delivery: if Stripe
+    # Tax failed last time, the order is already paid and this retry is what
+    # records its tax. A no-op for flat-rate restaurants and already-recorded
+    # orders.
+    stripe_tax.record_transaction(restaurant_id, order_id)
+
+    # The customer's confirmation, in its own task so a slow or failing email
+    # provider never holds up or fails the payment webhook. Safe to enqueue on
+    # every delivery: the task sends once per order.
+    send_order_confirmation.delay(str(restaurant_id), str(order_id))
 
 
 def _handle_intent_failed(payload: dict, event_account_id: str | None):
@@ -188,16 +200,21 @@ def _handle_charge_refunded(payload: dict, event_account_id: str | None):
         return
     restaurant_id, payment_id = resolved
 
+    refunded = charge.get("amount_refunded", 0)
+    total = charge.get("amount", 0)
     with tenant_session(restaurant_id) as session:
         payment = session.get(Payment, payment_id)
         if payment is None:
             return
-        refunded = charge.get("amount_refunded", 0)
-        total = charge.get("amount", 0)
+        order_id = payment.order_id
         payment.status = (
             PaymentStatus.REFUNDED.value if refunded >= total
             else PaymentStatus.PARTIALLY_REFUNDED.value
         )
+
+    # The restaurant's tax reports must show the refund too. Cumulative and
+    # idempotent, so redelivery is safe; a no-op for flat-rate restaurants.
+    stripe_tax.record_refund(restaurant_id, order_id, refunded)
 
 
 def _handle_account_updated(payload: dict, event_account_id: str | None):
@@ -233,7 +250,14 @@ def _handle_account_updated(payload: dict, event_account_id: str | None):
 
 @celery_app.task(bind=True, max_retries=3, name="app.workers.tasks.process_clerk_event")
 def process_clerk_event(self, event_row_id: str):
-    """Mirror Clerk users into the local users table."""
+    """Mirror Clerk users into the local users table.
+
+    The request path creates a customer's row on first sight; this keeps it
+    current afterwards -- a changed email or name, a deleted account. Both go
+    through clerk_customers, so they agree on what a customer row holds.
+    """
+    from app.services import clerk_customers
+
     with system_session() as session:
         event = session.get(ClerkEvent, UUID(event_row_id))
         if event is None or event.status == "PROCESSED":
@@ -244,36 +268,19 @@ def process_clerk_event(self, event_row_id: str):
 
     try:
         with system_session() as session:
-            if etype in ("user.created", "user.updated"):
-                clerk_id = data.get("id")
-                emails = data.get("email_addresses") or []
-                primary = data.get("primary_email_address_id")
-                email = next(
-                    (e.get("email_address") for e in emails if e.get("id") == primary),
-                    emails[0].get("email_address") if emails else None,
-                )
-                name = " ".join(
-                    p for p in [data.get("first_name"), data.get("last_name")] if p
-                ) or None
-
-                user = session.execute(
+            clerk_id = str(data.get("id") or "")
+            if etype in ("user.created", "user.updated") and clerk_id:
+                existing = session.execute(
                     select(User).where(User.clerk_user_id == clerk_id)
                 ).scalar_one_or_none()
-                if user is None:
-                    session.add(User(clerk_user_id=clerk_id, email=email or "", full_name=name))
-                else:
-                    user.email = email or user.email
-                    user.full_name = name or user.full_name
-
-            elif etype == "user.deleted":
-                user = session.execute(
-                    select(User).where(User.clerk_user_id == data.get("id"))
-                ).scalar_one_or_none()
-                if user:
-                    # Soft delete. Transactional and audit records are
-                    # retained per the retention policy.
-                    user.is_active = False
-                    user.deleted_at = utcnow()
+                # Never touch a row that is not a customer's, whatever the
+                # payload says.
+                if existing is None or existing.kind == UserKind.CUSTOMER.value:
+                    clerk_customers.upsert_customer(
+                        session, clerk_id, clerk_customers.profile_from_payload(data)
+                    )
+            elif etype == "user.deleted" and clerk_id:
+                clerk_customers.deactivate(session, clerk_id)
 
         with system_session() as session:
             row = session.get(ClerkEvent, UUID(event_row_id))
@@ -289,6 +296,44 @@ def process_clerk_event(self, event_row_id: str):
                 row.status = "FAILED"
                 row.error = str(exc)[:2000]
         raise self.retry(exc=exc)
+
+
+@celery_app.task(
+    bind=True, max_retries=6, default_retry_delay=60,
+    name="app.workers.tasks.send_order_confirmation",
+)
+def send_order_confirmation(self, restaurant_id: str, order_id: str):
+    """Email the customer that their paid order is confirmed. Retries while
+    the email provider is rate limiting or down; sends at most once."""
+    from app.services import email, notifications
+
+    try:
+        return notifications.send_order_confirmation(UUID(restaurant_id), UUID(order_id))
+    except email.RetryableEmailError as exc:
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+
+
+@celery_app.task(
+    bind=True, max_retries=6, default_retry_delay=60,
+    name="app.workers.tasks.send_staff_invitation",
+)
+def send_staff_invitation(self, restaurant_id: str, membership_id: str):
+    """Email someone that a restaurant has invited them to its team."""
+    from app.services import email, notifications
+
+    try:
+        return notifications.send_staff_invitation(UUID(restaurant_id), UUID(membership_id))
+    except email.RetryableEmailError as exc:
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+
+
+@celery_app.task(name="app.workers.tasks.sweep_retention")
+def sweep_retention():
+    """Remove expired idempotency keys and old settled webhook deliveries.
+    See services/retention for exactly what is and is not removed."""
+    from app.services import retention
+
+    return retention.sweep()
 
 
 @celery_app.task(name="app.workers.tasks.expire_pending_orders")

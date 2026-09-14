@@ -1,0 +1,43 @@
+{
+  "//": [
+    "This note is a string rather than a // comment on purpose. TypeScript reads",
+    "tsconfig.json as JSONC and accepts comments, but plenty of tooling reads it",
+    "with an ordinary JSON parser, and there a comment is a syntax error rather",
+    "than a warning. Keeping the file valid strict JSON costs nothing and means",
+    "every reader agrees about it. tsc ignores unknown top-level keys, so this",
+    "one changes no compiler behaviour.",
+    "",
+    "There is deliberately no baseUrl. Since TypeScript 5.0 a paths entry is",
+    "resolved relative to this file, so the '@/*' mapping below needs no anchor,",
+    "and setting one is not free: baseUrl makes every bare import resolvable",
+    "against that directory, so 'src/types' or 'login/staff-login' would quietly",
+    "resolve to a local folder instead of failing like the package import it",
+    "looks like. Vite does not read this mapping at all -- it has its own alias",
+    "in vite.config.ts -- so the two have to be kept in step by hand.",
+    "",
+    "On the include list: vite.config.ts and tailwind.config.ts are configuration",
+    "rather than application code, but they are still TypeScript. Leaving them out",
+    "gives the editor 'File is not listed within the file list of project', and",
+    "their own type errors would never reach the build."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["src", "login", "vite.config.ts", "tailwind.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Restaurant sign-in</title>
+    <!-- Render-blocking on purpose. Imported from JS the stylesheet was
+         injected only after the entry module and its whole import graph had
+         loaded, so every page painted unstyled for as long as that took. A
+         link in the head is fetched in parallel with the script and blocks
+         the first paint until it lands. Vite serves it compiled in dev and
+         emits one hashed, shared asset in the build. -->
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+  </head>
+  <body>
+    <main class="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-5">
+      <h1 class="font-display text-3xl">Restaurant sign-in</h1>
+      <p class="mt-2 text-sm text-muted">Staff access for this restaurant.</p>
+
+      <form id="login-form" class="mt-8 space-y-4" novalidate>
+        <label class="block">
+          <span class="text-sm font-medium">Email</span>
+          <input id="email" class="field mt-2" type="email" autocomplete="username" required autofocus />
+        </label>
+
+        <label class="block">
+          <span class="text-sm font-medium">Password</span>
+          <input id="password" class="field mt-2" type="password" autocomplete="current-password" required />
+        </label>
+
+        <p id="error" class="border-l-2 border-brick bg-brick/5 px-3 py-2 text-sm text-brick" hidden></p>
+
+        <button id="submit" class="btn-primary w-full" type="submit">Sign in</button>
+      </form>
+
+      <p class="mt-6 text-xs text-muted">
+        Administrators are configured in the deployment environment. Contact
+        whoever holds it if you need access.
+      </p>
+    </main>
+
+    <script type="module" src="/login/staff-login.ts"></script>
+  </body>
+</html>

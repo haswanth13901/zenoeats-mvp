@@ -110,6 +110,17 @@ class Order(Base, TimestampMixin):
     tax_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     total_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
+    # Stripe Tax, for restaurants on tax_mode STRIPE_TAX; all null or zero
+    # under a flat rate. The calculation is what tax_minor and total_minor
+    # came from; the transaction records the sale in the restaurant's tax
+    # reports once paid; the reversed amount is how much of any refund has
+    # already been recorded, so a redelivered refund never reverses twice.
+    tax_calculation_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tax_transaction_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tax_reversed_amount_minor: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0
+    )
+
     customer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Encrypted, not hashed: the authenticated customer must be able to read
@@ -121,6 +132,11 @@ class Order(Base, TimestampMixin):
 
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set once the "order confirmed" email is accepted by the provider, so a
+    # redelivered payment webhook never sends it twice.
+    confirmation_email_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
@@ -151,6 +167,23 @@ class OrderItem(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     line_total_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
     item_note: Mapped[str | None] = mapped_column(String(280), nullable=True)
+
+    # A combo is not a line of its own. It becomes one line per slot, priced
+    # at what the item costs, and the saving lands in Order.discount_minor --
+    # which is what that column was reserved for. These three columns are how
+    # those lines are known to belong together: the kitchen has to plate a
+    # meal deal as one thing, not as a burger and an unrelated drink.
+    #
+    # combo_group numbers the combos within one order, so ordering two
+    # identical meal deals stays two meal deals rather than one with doubled
+    # quantities. The name is snapshotted for the same reason every other
+    # name here is: a receipt has to still read correctly after the combo is
+    # renamed or withdrawn.
+    combo_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("combos.id"), nullable=True
+    )
+    combo_name_snapshot: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    combo_group: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     order: Mapped["Order"] = relationship(back_populates="items")
     modifiers: Mapped[list["OrderItemModifier"]] = relationship(

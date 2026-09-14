@@ -19,15 +19,17 @@ Design notes:
     is needed.
 """
 
+import ipaddress
 import logging
 import time
+from functools import lru_cache
 from typing import Callable
 
 from fastapi import Depends, Request
 from redis import Redis
 from redis.exceptions import RedisError
 
-from app.api.deps import get_current_user
+from app.api.deps import current_staff_user, get_current_user
 from app.config import settings
 from app.core import errors
 from app.models import User
@@ -51,17 +53,70 @@ def runtime_redis() -> Redis:
     return _client
 
 
-def _client_ip(request: Request) -> str:
-    """Left-most X-Forwarded-For entry, else the socket address.
+@lru_cache(maxsize=1)
+def _trusted_proxies(raw: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    networks = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            log.error("TRUSTED_PROXY_CIDRS entry %r is not a network; ignored", part)
+    return tuple(networks)
 
-    Only trustworthy because the origin is not directly reachable: nginx
-    rewrites this header and the firewall allows only the proxy (18.2). If
-    the app is ever exposed directly, this becomes spoofable.
+
+def _parse_ip(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
+def _is_trusted_proxy(address: str) -> bool:
+    ip = _parse_ip(address)
+    if ip is None:
+        return False
+    parsed = ipaddress.ip_address(ip)
+    return any(parsed in net for net in _trusted_proxies(settings.TRUSTED_PROXY_CIDRS))
+
+
+def _client_ip(request: Request) -> str:
+    """The address a request really came from, as far as it can be proven.
+
+    Forwarding headers are claims. Anyone can send
+    "X-Forwarded-For: 1.2.3.4", and every proxy on the way appends to that
+    header rather than replacing it -- so its left-most entry, which this used
+    to read, is whatever the attacker typed, and a per-IP limit keyed on it
+    was no limit at all.
+
+    So a header is believed only when the connection itself comes from a
+    proxy we run (TRUSTED_PROXY_CIDRS). From such a peer, X-Real-IP -- which
+    our nginx overwrites with the address it saw -- is taken first. Failing
+    that, X-Forwarded-For is walked from the right, skipping our own proxies,
+    and the first address that is not one of ours is the client. Anything
+    else, including a request reaching the API directly, is keyed on the
+    socket address, which cannot be forged.
     """
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    peer = request.client.host if request.client else None
+
+    if peer and _is_trusted_proxy(peer):
+        real_ip = _parse_ip(request.headers.get("x-real-ip"))
+        if real_ip:
+            return real_ip
+
+        forwarded = request.headers.get("x-forwarded-for") or ""
+        for hop in reversed([h.strip() for h in forwarded.split(",") if h.strip()]):
+            ip = _parse_ip(hop)
+            if ip is None:
+                break
+            if not _is_trusted_proxy(ip):
+                return ip
+
+    return _parse_ip(peer) or "unknown"
 
 
 def _consume(bucket: str, limit: int, window_seconds: int) -> None:
@@ -84,6 +139,13 @@ def _consume(bucket: str, limit: int, window_seconds: int) -> None:
         )
 
 
+def consume(bucket: str, limit: int, window_seconds: int = 60) -> None:
+    """Count one use of a named budget, for callers that are not a request
+    dependency -- a per-restaurant cap on billable Stripe calls, say. Raises
+    the usual 429 when the budget is spent; fails open like everything here."""
+    _consume(bucket, limit, window_seconds)
+
+
 def per_ip(name: str, limit: int, window_seconds: int = 60) -> Callable:
     """Limit by client address. For endpoints reachable without a session."""
 
@@ -103,5 +165,19 @@ def per_user(name: str, limit: int, window_seconds: int = 60) -> Callable:
 
     def dependency(user: User = Depends(get_current_user)) -> None:
         _consume(f"{name}:user:{user.id}", limit, window_seconds)
+
+    return dependency
+
+
+def per_staff_user(name: str, limit: int, window_seconds: int = 60) -> Callable:
+    """Limit by signed-in restaurant staff member.
+
+    The same idea as per_user, for the portal. Staff authenticate with a
+    session cookie rather than a Clerk token, so the customer dependency
+    would refuse every one of them before counting anything.
+    """
+
+    def dependency(user: User = Depends(current_staff_user)) -> None:
+        _consume(f"{name}:staff:{user.id}", limit, window_seconds)
 
     return dependency

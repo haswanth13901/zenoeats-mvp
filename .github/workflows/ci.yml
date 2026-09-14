@@ -39,6 +39,16 @@ jobs:
         working-directory: backend
         run: pip install -r requirements.txt
 
+      # A dependency with a published vulnerability fails the build here,
+      # rather than waiting for someone to remember to look. The pins in
+      # requirements.txt were last cleared against this check; when it fails,
+      # upgrade the named package and let the test suite below judge it.
+      - name: Dependency vulnerability audit
+        working-directory: backend
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --progress-spinner off
+
       - name: Create database roles
         run: psql -h localhost -U postgres -d zenoeats -f infra/postgres/01-roles.sql
 
@@ -64,22 +74,56 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - working-directory: frontend
-        run: npm ci
-      - working-directory: frontend
-        run: npx tsc --noEmit
-      - working-directory: frontend
-        env:
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk
-          CLERK_SECRET_KEY: sk_test_ci_placeholder
-        run: npm run build
+          cache-dependency-path: web/package-lock.json
+
+      # tsconfig.json has more readers than tsc, and they do not agree on what
+      # the file is. TypeScript parses it as JSONC and accepts // comments;
+      # plenty of other tooling reaches for an ordinary JSON parser, where a
+      # comment is a syntax error. So a comment here stays invisible to every
+      # command in this job and throws somewhere else entirely. Keep the
+      # configuration valid strict JSON and the question never comes up.
+      - name: Config files are valid strict JSON
+        run: node -e "for (const f of ['tsconfig.json','package.json','package-lock.json']) JSON.parse(require('fs').readFileSync(f,'utf8'))"
+
+      - run: npm ci
+      # Runtime dependencies only: they are what ships to browsers. Build
+      # tooling advisories (a dev server, a linter) do not reach customers and
+      # would otherwise fail builds over code that never runs in production.
+      - name: Dependency vulnerability audit
+        run: npm audit --omit=dev --audit-level=high
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      # No Clerk key: the bundle carries none. It is supplied to the web
+      # container at start and written to /config.js.
+      - run: npm run build
+
+      # Rollup once dead-code-eliminated the entire application, because an
+      # unset build-time key made a condition statically true. The build still
+      # succeeded and shipped only an error page. Assert the app is actually
+      # in the bundle rather than trusting the exit code.
+      - name: Bundle contains the application
+        run: |
+          test -f dist/index.html
+          test -f dist/login/admin-login.html
+          test -f dist/login/staff-login.html
+          test -f dist/login/change-password.html
+          test -f dist/login/customer-sign-in.html
+          test -f dist/login/customer-sign-up.html
+          test -f dist/login/customer-forgot-password.html
+          test -f dist/login/customer-sso-callback.html
+          test -f dist/config.js
+          grep -q '/config.js' dist/index.html
+          grep -rq "Waiting for the payment confirmation" dist/assets/
+          grep -rq "Zenoeats platform" dist/
 
   docker:
     runs-on: ubuntu-latest
@@ -91,4 +135,4 @@ jobs:
       - name: Build images
         run: |
           docker build -t ghcr.io/${{ github.repository }}/api:${{ github.sha }} ./backend
-          docker build -t ghcr.io/${{ github.repository }}/web:${{ github.sha }} ./frontend
+          docker build -t ghcr.io/${{ github.repository }}/web:${{ github.sha }} ./web

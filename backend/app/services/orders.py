@@ -83,6 +83,7 @@ def create_pending_order(
         discount_minor=cart.discount_minor,
         tax_minor=cart.tax_minor,
         total_minor=cart.total_minor,
+        tax_calculation_id=cart.tax_calculation_id,
         customer_note=customer_note,
         pickup_pin_encrypted=encrypt_field(generate_pickup_pin()),
         expires_at=now + timedelta(minutes=settings.PENDING_PAYMENT_TTL_MINUTES),
@@ -100,6 +101,12 @@ def create_pending_order(
             quantity=line.quantity,
             line_total_minor=line.line_total_minor,
             item_note=line.note,
+            # Null on an ordinary line. Set on the lines a combo produced, so
+            # the kitchen plates a meal deal as one thing and a receipt can
+            # show what the deal was even after it is withdrawn.
+            combo_id=line.combo_id,
+            combo_name_snapshot=line.combo_name,
+            combo_group=line.combo_group,
         )
         session.add(order_item)
         session.flush()

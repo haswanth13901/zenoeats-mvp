@@ -1,0 +1,176 @@
+================================================================================
+ ZENOEATS MVP - URL REFERENCE
+================================================================================
+
+ Local development. Replace "spicehouse" with any restaurant slug.
+ Production swaps "zenoeats.local:8080" for "zenoeats.com".
+
+ IMPORTANT: Browse through nginx on :8080 (or a *.zenoeats.local subdomain on
+ :3000). The restaurant is resolved from the Host header, so plain
+ localhost:3000/manage will NOT work.
+
+ Hosts file entries needed:
+   127.0.0.1  zenoeats.local
+   127.0.0.1  spicehouse.zenoeats.local
+   127.0.0.1  admin.zenoeats.local
+
+
+--------------------------------------------------------------------------------
+ 1. CUSTOMER STOREFRONT   (Clerk sign-in required where marked *)
+--------------------------------------------------------------------------------
+ Menu / storefront      http://spicehouse.zenoeats.local:8080/
+ Sign in                http://spicehouse.zenoeats.local:8080/account/sign-in
+ Create account         http://spicehouse.zenoeats.local:8080/account/sign-up
+ Forgot password        http://spicehouse.zenoeats.local:8080/account/forgot-password
+ Google return          http://spicehouse.zenoeats.local:8080/account/sso-callback   (Clerk redirects here)
+ Checkout *             http://spicehouse.zenoeats.local:8080/checkout
+ Payment *              http://spicehouse.zenoeats.local:8080/checkout/pay/{orderId}
+ Order tracking *       http://spicehouse.zenoeats.local:8080/orders/{orderId}
+
+
+--------------------------------------------------------------------------------
+ 2. RESTAURANT STAFF PORTAL   (must be on the restaurant's own subdomain)
+--------------------------------------------------------------------------------
+ Staff login            http://spicehouse.zenoeats.local:8080/manage/login
+ Change password        http://spicehouse.zenoeats.local:8080/manage/change-password
+ Kitchen board          http://spicehouse.zenoeats.local:8080/manage
+ Menu builder           http://spicehouse.zenoeats.local:8080/manage/menu
+ Staff                  http://spicehouse.zenoeats.local:8080/manage/staff
+ Reports                http://spicehouse.zenoeats.local:8080/manage/reports
+
+
+--------------------------------------------------------------------------------
+ 3. SUPER ADMIN PORTAL   (accounts from ADMIN_USERS in .env)
+--------------------------------------------------------------------------------
+ Admin login            http://admin.zenoeats.local:8080/admin/login
+ Restaurants            http://admin.zenoeats.local:8080/admin
+ Restaurant orders      http://admin.zenoeats.local:8080/admin/restaurants/{id}/orders
+
+
+--------------------------------------------------------------------------------
+ 4. LOCAL SERVICES & PORTS
+--------------------------------------------------------------------------------
+ nginx (main entry)     http://localhost:8080
+ Web (Vite dev server)  http://localhost:3000        (proxies /api, /images to :8000)
+ API (FastAPI)          http://localhost:8000
+ API docs (Swagger)     http://localhost:8000/docs           (not in production)
+ OpenAPI schema         http://localhost:8000/openapi.json   (not in production)
+ Health (liveness)      http://localhost:8000/health         (also :8080/health)
+ Health (readiness)     http://localhost:8000/health/ready
+ Menu images            http://localhost:8000/images/restaurants/{restaurant_id}/{items|options}/{file}.webp
+ PostgreSQL             postgresql://127.0.0.1:5433/zenoeats
+ Redis - Celery broker  redis://127.0.0.1:6379/0   (results: /1)
+ Redis - cache/limits   redis://127.0.0.1:6380/0
+
+
+--------------------------------------------------------------------------------
+ 5. API ENDPOINTS   (base: http://spicehouse.zenoeats.local:8080/api/v1)
+--------------------------------------------------------------------------------
+
+ Portal (public, tenant from Host)
+   GET     /api/v1/portal
+   GET     /api/v1/menu
+
+ Orders (customer; Authorization: Bearer <Clerk session token>)
+   POST    /api/v1/orders/quote
+   POST    /api/v1/orders
+   POST    /api/v1/orders/{order_id}/payment-intent
+   GET     /api/v1/orders/{order_id}
+   GET     /api/v1/orders
+
+ Restaurant - auth
+   POST    /api/v1/restaurant/login
+   POST    /api/v1/restaurant/logout
+   GET     /api/v1/restaurant/me
+   POST    /api/v1/restaurant/change-password
+
+ Restaurant - menu
+   GET     /api/v1/restaurant/menu
+
+ Restaurant - photos   (manager or admin; multipart field "file")
+   POST    /api/v1/restaurant/images?kind=items
+   POST    /api/v1/restaurant/images?kind=options
+
+ Restaurant - meal periods
+   POST    /api/v1/restaurant/meals
+   PATCH   /api/v1/restaurant/meals/{meal_id}
+   DELETE  /api/v1/restaurant/meals/{meal_id}
+   POST    /api/v1/restaurant/meals/{meal_id}/items
+   DELETE  /api/v1/restaurant/meals/{meal_id}/items/{item_id}
+
+ Restaurant - combos
+   GET     /api/v1/restaurant/combos
+   POST    /api/v1/restaurant/combos
+   PATCH   /api/v1/restaurant/combos/{combo_id}
+   DELETE  /api/v1/restaurant/combos/{combo_id}
+
+ Restaurant - modifiers
+   GET     /api/v1/restaurant/modifier-groups
+   POST    /api/v1/restaurant/modifier-groups
+   PATCH   /api/v1/restaurant/modifier-groups/{group_id}
+   DELETE  /api/v1/restaurant/modifier-groups/{group_id}
+   POST    /api/v1/restaurant/modifier-groups/{group_id}/options
+   PATCH   /api/v1/restaurant/modifier-options/{option_id}
+   DELETE  /api/v1/restaurant/modifier-options/{option_id}
+
+ Restaurant - item types
+   GET     /api/v1/restaurant/item-types
+   POST    /api/v1/restaurant/item-types
+   PATCH   /api/v1/restaurant/item-types/{type_id}
+   DELETE  /api/v1/restaurant/item-types/{type_id}
+
+ Restaurant - items
+   GET     /api/v1/restaurant/items
+   POST    /api/v1/restaurant/items
+   PATCH   /api/v1/restaurant/items/{item_id}
+   DELETE  /api/v1/restaurant/items/{item_id}
+   PATCH   /api/v1/restaurant/items/{item_id}/availability
+
+ Restaurant - orders (kitchen)
+   GET     /api/v1/restaurant/orders
+   POST    /api/v1/restaurant/orders/{order_id}/ready
+   POST    /api/v1/restaurant/orders/{order_id}/complete
+
+ Restaurant - staff & reports
+   GET     /api/v1/restaurant/staff
+   POST    /api/v1/restaurant/staff
+   POST    /api/v1/restaurant/staff/accept
+   DELETE  /api/v1/restaurant/staff/{membership_id}
+   GET     /api/v1/restaurant/reports
+
+ Super admin   (base: http://admin.zenoeats.local:8080/api/v1)
+   POST    /api/v1/admin/login
+   POST    /api/v1/admin/logout
+   GET     /api/v1/admin/me
+   GET     /api/v1/admin/restaurants
+   POST    /api/v1/admin/restaurants
+   PATCH   /api/v1/admin/restaurants/{restaurant_id}
+   DELETE  /api/v1/admin/restaurants/{restaurant_id}
+   DELETE  /api/v1/admin/restaurants/{restaurant_id}/permanent
+   POST    /api/v1/admin/restaurants/{restaurant_id}/restore
+   POST    /api/v1/admin/restaurants/{restaurant_id}/owner
+   POST    /api/v1/admin/restaurants/{restaurant_id}/owner/reset-password
+   POST    /api/v1/admin/restaurants/{restaurant_id}/stripe-onboarding
+   POST    /api/v1/admin/restaurants/{restaurant_id}/stripe-refresh
+   POST    /api/v1/admin/restaurants/{restaurant_id}/activate
+   POST    /api/v1/admin/restaurants/{restaurant_id}/suspend
+   GET     /api/v1/admin/restaurants/{restaurant_id}/orders
+   GET     /api/v1/admin/reports
+   GET     /api/v1/admin/reports.csv
+
+ Webhooks
+   POST    /api/v1/webhooks/stripe/connect
+   POST    /api/v1/webhooks/clerk
+
+
+--------------------------------------------------------------------------------
+ 6. EXTERNAL / THIRD-PARTY
+--------------------------------------------------------------------------------
+ Clerk JWKS             https://<your-instance>.clerk.accounts.dev/.well-known/jwks.json
+ Clerk issuer           https://<your-instance>.clerk.accounts.dev
+ Clerk webhook target   https://<yourdomain>/api/v1/webhooks/clerk
+ Stripe webhook target  https://<yourdomain>/api/v1/webhooks/stripe/connect
+                        (create on the Connect tab, not the account tab)
+ Stripe CLI forwarding  stripe listen --forward-connect-to localhost:8000/api/v1/webhooks/stripe/connect
+
+================================================================================

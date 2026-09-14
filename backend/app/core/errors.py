@@ -50,3 +50,36 @@ def restaurant_not_orderable(msg="This restaurant is not accepting orders."):
 
 def validation_error(msg: str):
     return ApiError(422, "VALIDATION_ERROR", msg)
+
+
+# Locations that say where in the request a field sits, not which field it is.
+# "body max select" reads worse than "max select" and tells the caller nothing.
+_CONTAINERS = {"body", "query", "path", "header", "cookie"}
+
+
+def request_validation_message(raw_errors) -> str:
+    """Turn FastAPI's list of validation errors into one readable sentence.
+
+    Without this the framework answers a schema violation with a list of
+    objects under `detail`, and every client that expects the usual
+    {code, message} envelope falls back to whatever it says when it cannot
+    read a response -- which in the portal was "Something went wrong.", for a
+    blank number field.
+
+    So the shape is normalised and the field is named. Three errors is enough
+    to act on; a form that has more will surface them again on the next try.
+    """
+    parts: list[str] = []
+    for error in list(raw_errors)[:3]:
+        location = [
+            f"#{part + 1}" if isinstance(part, int) else str(part)
+            for part in error.get("loc", ())
+            if part not in _CONTAINERS
+        ]
+        field = " ".join(location).replace("_", " ").strip()
+        detail = error.get("msg") or "is not valid"
+        parts.append(f"{field}: {detail}" if field else detail)
+
+    if not parts:
+        return "The request was not valid."
+    return "; ".join(parts)

@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, time
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 # ---------- Portal / menu ------------------------------------------------
@@ -10,8 +11,9 @@ class OptionOut(BaseModel):
     id: UUID
     name: str
     price_delta_minor: int
-    is_default: bool
     is_available: bool
+    # Where the browser loads the option's picture, or null when it has none.
+    image_url: str | None = None
 
 
 class ModifierGroupOut(BaseModel):
@@ -27,25 +29,109 @@ class ModifierGroupOut(BaseModel):
 class ItemOut(BaseModel):
     id: UUID
     name: str
+    # Which type, by id. The name is on the section or slot above it, so it is
+    # not repeated per item -- and a rename then reaches every item at once
+    # rather than needing a menu rebuild.
+    item_type_id: UUID
     description: str | None
     base_price_minor: int
     currency: str
     is_available: bool
-    image_path: str | None
+    # A URL ready for an img tag, or null. The storage key behind it stays on
+    # the server: a customer has no use for it, and handing out keys would
+    # tie the storefront to where the files happen to live today.
+    image_url: str | None = None
     modifier_groups: list[ModifierGroupOut]
+    # What this item comes with: chosen for the customer before they see it,
+    # and priced at nothing. The browser pre-selects these and leaves them out
+    # of its running total; the server does the same when it prices for real.
+    included_option_ids: list[UUID] = []
 
 
-class CategoryOut(BaseModel):
+class SubsectionOut(BaseModel):
+    """One subcategory block inside a section: Burgers, under Food.
+
+    The same shape as the section above it, minus the nesting, because there
+    is none: two levels is the whole of it.
+    """
+
+    item_type_id: UUID
+    label: str
+    items: list[ItemOut]
+
+
+class SectionOut(BaseModel):
+    """One heading inside a meal period.
+
+    Derived from the types of the items served in that period, not stored.
+    There is no such thing as an empty section and nothing can be added to
+    one directly -- an item of a new type creates its heading by existing.
+
+    `label` is the restaurant's own word for the type, and the order sections
+    appear in is the order it put its types in.
+
+    `items` are the ones filed on the heading itself, and they come first on
+    the page: a restaurant that subdivided only half its food still reads
+    top to bottom. `groups` are its subcategories, each with its own
+    subheading, in the order the restaurant put them in.
+
+    Both can be empty, but never both at once -- a section with nothing under
+    it either way is not built. Most menus will send groups as an empty list
+    forever, which is the case this was designed around rather than against.
+    """
+
+    item_type_id: UUID
+    label: str
+    items: list[ItemOut]
+    groups: list[SubsectionOut] = []
+
+
+class ComboSlotOut(BaseModel):
+    """One required choice inside a combo. Exactly one item, always."""
+
+    id: UUID
+    item_type_id: UUID
+    label: str
+    items: list[ItemOut]
+
+
+class ComboOut(BaseModel):
+    """A combo as a customer needs it: what to choose, and what it saves.
+
+    The discount is sent rather than a finished price because there is no
+    finished price until the choices are made. The browser previews a total
+    from these numbers; the server prices the real one from the database when
+    the order is placed, and only that one is charged.
+    """
+
     id: UUID
     name: str
-    kind: str
-    items: list[ItemOut]
+    description: str | None
+    discount_kind: str
+    discount_value: int
+    slots: list[ComboSlotOut]
 
 
 class MealOut(BaseModel):
     id: UUID
     name: str
-    categories: list[CategoryOut]
+    # The hours it is served, or both null where the restaurant has not said.
+    # Wall clock in its own day, for a customer to read: nothing is gated on
+    # them. An end at or before the start runs into the next day.
+    starts_at: time | None = None
+    ends_at: time | None = None
+    sections: list[SectionOut]
+    combos: list[ComboOut] = []
+
+    @field_serializer("starts_at", "ends_at")
+    def _hhmm(self, value: time | None) -> str | None:
+        """HH:MM, not HH:MM:SS.
+
+        The seconds are always zero -- nothing sets them -- and the browser's
+        time input round-trips the short form, so sending the long one would
+        have the builder echo back something nobody typed.
+        """
+        return None if value is None else value.strftime("%H:%M")
 
 
 class PortalOut(BaseModel):
@@ -78,13 +164,41 @@ class CartLineIn(BaseModel):
     modifiers: list[CartModifierIn] = Field(default_factory=list)
 
 
+class ComboSelectionIn(BaseModel):
+    """What fills one slot of one combo, and how it was changed."""
+
+    slot_id: UUID
+    menu_item_id: UUID
+    modifiers: list[CartModifierIn] = Field(default_factory=list)
+
+
+class CartComboIn(BaseModel):
+    """One combo in the cart, with a choice for every slot.
+
+    No price is sent, here or anywhere else. The client says which combo and
+    which choices; what that costs is the server's answer, recomputed on the
+    quote and again on the order.
+    """
+
+    combo_id: UUID
+    quantity: int = Field(ge=1, le=50)
+    note: str | None = Field(default=None, max_length=280)
+    selections: list[ComboSelectionIn] = Field(default_factory=list)
+
+
 class QuoteIn(BaseModel):
     """Preview pricing. No order is created and no money moves."""
-    items: list[CartLineIn]
+
+    # Both default to empty because either alone is a real cart: a customer
+    # can order nothing but a meal deal. Refusing an empty cart is pricing's
+    # job, once, rather than a rule each field states differently.
+    items: list[CartLineIn] = Field(default_factory=list)
+    combos: list[CartComboIn] = Field(default_factory=list)
 
 
 class CreateOrderIn(BaseModel):
-    items: list[CartLineIn]
+    items: list[CartLineIn] = Field(default_factory=list)
+    combos: list[CartComboIn] = Field(default_factory=list)
     customer_note: str | None = Field(default=None, max_length=500)
     # Client-computed total, echoed back for a consistency check only. The
     # server total always wins; a mismatch returns PRICE_CHANGED so the
@@ -112,7 +226,13 @@ class OrderModifierOut(BaseModel):
 
 
 class OrderItemOut(BaseModel):
+    """One line of an order. Lines that came from a combo carry its name and
+    a group number, so a receipt and a kitchen ticket can show a meal deal as
+    one thing rather than as unrelated food that happened to be cheap."""
+
     name: str
+    combo_name: str | None = None
+    combo_group: int | None = None
     quantity: int
     unit_price_minor: int
     line_total_minor: int
@@ -175,6 +295,25 @@ class StaffMeOut(BaseModel):
     full_name: str | None
     role_code: str
     must_change_password: bool
+    # Which restaurant this session is scoped to. The portal puts it in the
+    # header, where the page name used to sit: the name told an operator
+    # nothing the highlighted tab was not already saying, and on a phone with
+    # two restaurants open it is the one thing worth knowing at a glance.
+    restaurant_name: str
+    # ACTIVE, or INVITED for someone who has signed in but not yet accepted.
+    # An invited account can reach exactly two things -- this, and accepting --
+    # so the portal shows the invitation instead of a wall of refusals.
+    membership_status: str
+
+
+class StaffInviteOut(BaseModel):
+    id: UUID
+    email: str
+    status: str
+    # Set only when the invite created the person's login. Shown once to the
+    # restaurant admin to pass on, like an owner's; never retrievable again.
+    # Null means the address already has a staff login, which they keep using.
+    temporary_password: str | None = None
 
 
 class CreateOwnerIn(BaseModel):
@@ -186,10 +325,13 @@ class CreateOwnerIn(BaseModel):
 class CreateOwnerOut(BaseModel):
     user_id: UUID
     email: str
-    # Returned once, at creation, and never retrievable again -- only its
-    # argon2 hash is stored. The super admin passes it to the owner, who is
-    # forced to replace it at first sign-in.
-    temporary_password: str
+    # Returned once, when one is issued, and never retrievable again -- only
+    # its argon2 hash is stored. The super admin passes it to the owner, who
+    # is forced to replace it at first sign-in. None when the address already
+    # has a login in use: that person keeps their own password.
+    temporary_password: str | None
+    # ACTIVE, or INVITED for an existing login that has to accept first.
+    status: str = "ACTIVE"
 
 
 class UpdateRestaurantIn(BaseModel):
@@ -215,6 +357,16 @@ class UpdateRestaurantIn(BaseModel):
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     tax_rate_bps: int | None = Field(default=None, ge=0, le=3000)
+    # FLAT applies tax_rate_bps; STRIPE_TAX calculates per order on the
+    # restaurant's connected account, and needs the full pickup address.
+    tax_mode: Literal["FLAT", "STRIPE_TAX"] | None = None
+    tax_code: str | None = Field(default=None, pattern=r"^txcd_\d{8}$")
+    address_line1: str | None = Field(default=None, max_length=200)
+    address_line2: str | None = Field(default=None, max_length=200)
+    address_city: str | None = Field(default=None, max_length=100)
+    address_state: str | None = Field(default=None, max_length=100)
+    address_postal_code: str | None = Field(default=None, max_length=20)
+    address_country: str | None = Field(default=None, pattern=r"^[A-Za-z]{2}$")
     accepting_orders: bool | None = None
 
 
@@ -234,6 +386,14 @@ class RestaurantOut(BaseModel):
     tagline: str | None = None
     timezone: str | None = None
     deleted_at: datetime | None = None
+    tax_mode: str = "FLAT"
+    tax_code: str | None = None
+    address_line1: str | None = None
+    address_line2: str | None = None
+    address_city: str | None = None
+    address_state: str | None = None
+    address_postal_code: str | None = None
+    address_country: str | None = None
 
 
 class StripeSyncOut(BaseModel):

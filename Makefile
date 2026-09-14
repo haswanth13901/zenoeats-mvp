@@ -25,7 +25,7 @@ key:
 setup:
 	@test -f .env || cp .env.example .env
 	@echo "Created .env. Generate an encryption key with 'make key' and paste it"
-	@echo "into FIELD_ENCRYPTION_KEY, then add your Clerk and Stripe keys."
+	@echo "into FIELD_ENCRYPTION_KEY and SESSION_SECRET, then add your Clerk and Stripe keys."
 
 # Infrastructure only. The app services sit behind the "app" profile, so this
 # starts postgres, redis and nginx and builds nothing. Image builds are what
@@ -36,11 +36,15 @@ infra:
 	@echo "Now run 'make api' and 'make web' in their own terminals."
 
 # Each of these runs in the foreground in its own terminal.
+# --timeout-keep-alive 30: uvicorn idles a kept-alive connection out after 5s
+# by default, which is close enough to nginx's own idle timeout that the two
+# race and a request lands in a connection the other side just closed. The
+# edge is set to 3s, well under this.
 api:
-	cd backend && ../$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+	cd backend && ../$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 30
 
 web:
-	cd frontend && npm run dev
+	cd web && npm run dev
 
 # Only needed to test payments: an order cannot leave PENDING_PAYMENT without
 # a worker to process the Stripe webhook. --pool=solo because Celery's default

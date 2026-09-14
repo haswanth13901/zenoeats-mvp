@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in to order</title>
+    <!-- Render-blocking on purpose, as on the portal login pages: a link in the
+         head blocks first paint until the stylesheet lands, instead of
+         painting unstyled while the script graph loads. -->
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+    <!-- Runtime configuration (the Clerk publishable key), written by the web
+         container at startup. A classic script, so it runs before the module
+         entry below reads it. -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <main class="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-5 py-10">
+      <h1 id="heading" class="font-display text-3xl">Sign in to order</h1>
+      <p class="mt-2 text-sm text-muted">
+        Browsing is open to everyone. An account is how your order and its pickup PIN
+        find their way back to you.
+      </p>
+
+      <p id="error" class="mt-6 border-l-2 border-brick bg-brick/5 px-3 py-2 text-sm text-brick" hidden></p>
+
+      <section id="password-section">
+        <!-- One button per social sign-in switched on in Clerk (Google, Apple,
+             Facebook), rendered by customer-shared.ts. Hidden when there are none. -->
+        <section id="social-section" class="mt-8" hidden>
+          <div id="social-buttons" class="space-y-3"></div>
+          <div class="my-6 flex items-center gap-3 text-xs text-muted">
+            <span class="h-px flex-1 bg-hairline"></span>or<span class="h-px flex-1 bg-hairline"></span>
+          </div>
+        </section>
+
+        <form id="login-form" class="space-y-4" novalidate>
+          <label class="block">
+            <span class="text-sm font-medium">Email</span>
+            <input id="email" class="field mt-2" type="email" autocomplete="username" required />
+          </label>
+
+          <label class="block">
+            <span class="flex items-baseline justify-between text-sm font-medium">
+              Password
+              <a id="forgot" class="text-xs font-normal text-muted underline" href="/account/forgot-password">Forgot password?</a>
+            </span>
+            <input id="password" class="field mt-2" type="password" autocomplete="current-password" required />
+          </label>
+
+          <button id="submit" class="btn-primary w-full" type="submit" disabled>Sign in</button>
+        </form>
+
+        <p class="mt-6 text-sm text-muted">
+          New here?
+          <a id="sign-up" class="underline" href="/account/sign-up">Create an account</a>
+        </p>
+      </section>
+
+      <!-- The second step of signing in, when Clerk asks for one: an
+           authenticator app, a text message, an emailed code (also what a
+           new device is asked for), or a backup code. customer-sign-in.ts
+           fills in the wording for whichever it is, and offers the others. -->
+      <section id="code-section" hidden>
+        <p id="code-intro" class="mt-6 text-[15px]"></p>
+        <form id="code-form" class="mt-6 space-y-4" novalidate>
+          <label class="block">
+            <span id="code-label" class="text-sm font-medium">Verification code</span>
+            <input id="code" class="field mt-2 tracking-[0.3em]" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required />
+          </label>
+          <button id="code-submit" class="btn-primary w-full" type="submit">Continue</button>
+        </form>
+        <div id="code-alternatives" class="mt-6 space-y-2 text-sm text-muted"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/login/customer-sign-in.ts"></script>
+  </body>
+</html>

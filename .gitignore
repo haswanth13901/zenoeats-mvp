@@ -3,8 +3,15 @@
 __pycache__/
 .venv/
 node_modules/
-.next/
 *.egg-info/
 .pytest_cache/
 .DS_Store
 .clerk/
+# TLS certificates and keys for the production edge. Never committed.
+/infra/certs/
+dist/
+*.tsbuildinfo
+
+# Uploaded menu images. The folder is tracked, its contents are not.
+/images/*
+!/images/.gitkeep
