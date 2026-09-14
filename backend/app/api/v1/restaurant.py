@@ -20,14 +20,16 @@ from app.api.deps import (
 from app.config import settings
 from app.core import errors, staff_auth
 from app.core.logsafe import email_for_log
-from app.core.ratelimit import failures_exhausted, per_ip, per_staff_user, record_failure
+from app.core import ratelimit
+from app.core.ratelimit import per_ip, per_staff_user
 from app.db.base import utcnow
 from app.db.session import system_session, tenant_session
 from app.models import (
     Combo, ComboSlot, ComboSlotItem, DiscountKind, Item, ItemIncludedOption,
     ItemModifierGroup, ItemType, Meal, MealItem, ModifierGroup,
-    ModifierGroupItemType, ModifierOption, Order, OrderItem, OrderStatus,
-    Payment, Restaurant, RestaurantUser, SelectionType, StaffRole, StaffStatus,
+    ModifierGroupItemType, ModifierOption, Order, OrderEvent, OrderEventAction,
+    OrderItem, OrderStatus, Payment, PaymentStatus, Restaurant, RestaurantUser,
+    SelectionType, StaffRole, StaffStatus,
     User, UserKind,
 )
 from app.schemas.api import (
@@ -1909,6 +1911,13 @@ def order_board(
 
     PENDING_PAYMENT orders are deliberately excluded: nobody has paid, and
     showing them to the kitchen would start food on an unconfirmed order.
+
+    Each ticket carries its payment status. A refund from the restaurant's
+    Stripe Dashboard changes the payment and never the order (rule 26), so
+    without this a refunded order stayed on the board looking like any other,
+    and the kitchen made food nobody was paying for. pin_locked says the
+    counter cannot hand it over any more, so the screen can offer the manager
+    override instead of a PIN box that only answers "locked".
     """
     active = [
         OrderStatus.AUTO_ACCEPTED.value,
@@ -1922,6 +1931,14 @@ def order_board(
         .options(selectinload(Order.items).selectinload(OrderItem.modifiers))
     ).scalars().all()
 
+    payment_status = dict(
+        db.execute(
+            select(Payment.order_id, Payment.status).where(
+                Payment.order_id.in_([o.id for o in orders])
+            )
+        ).all()
+    ) if orders else {}
+
     return [
         {
             "order_id": str(o.id),
@@ -1931,6 +1948,8 @@ def order_board(
             "currency": o.currency,
             "created_at": o.created_at.isoformat(),
             "customer_note": o.customer_note,
+            "payment_status": payment_status.get(o.id),
+            "pin_locked": o.pickup_pin_failed_attempts >= PIN_ATTEMPTS,
             # combo_name and combo_group ride along so the screen can draw a
             # meal deal as one block. Without them a combo reads as three
             # unrelated items and gets plated as three separate orders.
@@ -1958,13 +1977,50 @@ def mark_ready(
     order_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    _=Depends(KITCHEN),
+    membership: RestaurantUser = Depends(KITCHEN),
 ):
-    order = db.get(Order, order_id)
+    order = db.get(Order, order_id, with_for_update=True)
     if order is None:
         raise errors.order_not_found()
     transition(order, OrderStatus.READY_FOR_PICKUP.value)
+    _record(db, order, membership, OrderEventAction.MARKED_READY)
     return {"order_id": str(order.id), "status": order.status}
+
+
+def _record(
+    db: Session, order: Order, membership: RestaurantUser, action: OrderEventAction,
+    reason: str | None = None,
+) -> None:
+    """Write down who did this to the order, in the same transaction as the
+    change itself, so there is never a transition without its record."""
+    db.add(
+        OrderEvent(
+            restaurant_id=order.restaurant_id, order_id=order.id,
+            actor_user_id=membership.user_id, action=action.value, reason=reason,
+        )
+    )
+
+
+class OrderReasonIn(BaseModel):
+    """Why a manager is doing something the ordinary flow would not allow.
+    Required: an override or a cancellation with no reason is one nobody can
+    review afterwards."""
+
+    reason: str = Field(min_length=1, max_length=200)
+
+
+def _reason(body: OrderReasonIn) -> str:
+    reason = body.reason.strip()
+    if len(reason) < 3:
+        raise errors.validation_error("Say why, in a few words. It is kept with the order.")
+    return reason
+
+
+def _require_paid(db: Session, order: Order) -> Payment:
+    payment = db.execute(select(Payment).where(Payment.order_id == order.id)).scalar_one_or_none()
+    if payment is None or payment.succeeded_at is None:
+        raise errors.payment_not_confirmed("This order has not been paid.")
+    return payment
 
 
 PIN_ATTEMPTS = 5
@@ -2005,7 +2061,7 @@ def complete_order(
     from app.core.crypto import decrypt_field
 
     failures = f"pickup_pin_failures:staff:{membership.user_id}"
-    if failures_exhausted(failures, PIN_FAILURES_PER_STAFF, PIN_FAILURE_WINDOW_SECONDS):
+    if ratelimit.failures_exhausted(failures, PIN_FAILURES_PER_STAFF, PIN_FAILURE_WINDOW_SECONDS):
         raise errors.ApiError(
             429, "RATE_LIMITED",
             "Too many wrong PINs from this account. Wait a few minutes and try again.",
@@ -2028,7 +2084,7 @@ def complete_order(
         # rolls back on any exception, and it used to take this count with it:
         # the lock never engaged, and a PIN could be guessed without limit.
         db.commit()
-        record_failure(failures, PIN_FAILURE_WINDOW_SECONDS)
+        ratelimit.record_failure(failures, PIN_FAILURE_WINDOW_SECONDS)
         if attempts >= PIN_ATTEMPTS:
             raise _pin_locked()
         left = PIN_ATTEMPTS - attempts
@@ -2037,13 +2093,84 @@ def complete_order(
             f"That PIN does not match. {left} {'attempt' if left == 1 else 'attempts'} left.",
         )
 
-    payment = db.execute(select(Payment).where(Payment.order_id == order.id)).scalar_one_or_none()
-    if payment is None or payment.succeeded_at is None:
-        raise errors.payment_not_confirmed("This order has not been paid.")
+    _require_paid(db, order)
 
     transition(order, OrderStatus.COMPLETED.value)
     order.completed_at = utcnow()
+    _record(db, order, membership, OrderEventAction.COMPLETED_WITH_PIN)
     return {"order_id": str(order.id), "status": order.status}
+
+
+@router.post("/orders/{order_id}/override-complete")
+def override_complete(
+    order_id: UUID,
+    body: OrderReasonIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
+    membership: RestaurantUser = Depends(MANAGE),
+):
+    """Hand an order over without the customer's PIN.
+
+    For the customer whose phone died, and for the order five wrong PINs
+    locked -- which before this could never leave the board. Managers only,
+    with a reason, and recorded against the manager who did it: it is the one
+    way food leaves the counter without proof the right person took it.
+
+    Still only from READY_FOR_PICKUP and only once paid, the same as the PIN
+    route. It skips the PIN, not the rest of the order's rules.
+    """
+    reason = _reason(body)
+    order = db.get(Order, order_id, with_for_update=True)
+    if order is None:
+        raise errors.order_not_found()
+    _require_paid(db, order)
+
+    transition(order, OrderStatus.COMPLETED.value)
+    order.completed_at = utcnow()
+    _record(db, order, membership, OrderEventAction.COMPLETED_BY_OVERRIDE, reason)
+    return {"order_id": str(order.id), "status": order.status}
+
+
+@router.post("/orders/{order_id}/cancel")
+def cancel_order(
+    order_id: UUID,
+    body: OrderReasonIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
+    membership: RestaurantUser = Depends(MANAGE),
+):
+    """Take a paid order off the board: a no-show, a refund, a mistake.
+
+    This does not move money. Refunds are issued from the restaurant's own
+    Stripe Dashboard, where disputes also live, and the refund webhook
+    reconciles the payment. The response says whether that is still to do,
+    so the screen can tell the manager rather than leaving them to assume a
+    cancelled order was refunded.
+
+    An unpaid order is refused. It never reached the board, it expires by
+    itself, and cancelling one while the customer is still on the card step
+    would leave a payment landing on an order that no longer exists.
+    """
+    reason = _reason(body)
+    order = db.get(Order, order_id, with_for_update=True)
+    if order is None:
+        raise errors.order_not_found()
+    if order.status == OrderStatus.PENDING_PAYMENT.value:
+        raise errors.order_state_conflict(
+            "This order has not been paid. It expires on its own if payment never arrives."
+        )
+    payment = _require_paid(db, order)
+
+    transition(order, OrderStatus.CANCELLED.value, reason="CANCELLED_BY_RESTAURANT")
+    _record(db, order, membership, OrderEventAction.CANCELLED, reason)
+    return {
+        "order_id": str(order.id),
+        "status": order.status,
+        "payment_status": payment.status,
+        "refund_needed": payment.status not in (
+            PaymentStatus.REFUNDED.value, PaymentStatus.REFUND_PENDING.value
+        ),
+    }
 
 
 # ---------------------------------------------------------------- staff ----

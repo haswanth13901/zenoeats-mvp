@@ -401,6 +401,8 @@ def delete_restaurant(restaurant_id: UUID, admin: User = Depends(require_platfor
 _PURGE_ORDER = [
     "order_item_modifiers",
     "order_items",
+    # Before orders: an event names the order it happened to.
+    "order_events",
     # Before orders: a payment points at the order it paid for.
     "payments",
     "orders",

@@ -140,7 +140,7 @@ def counter(admin_user, cleanup):
             session.flush()
             session.add(Payment(
                 restaurant_id=restaurant.id, order_id=order.id, method="STRIPE",
-                status="SUCCEEDED", amount_minor=1000, currency="USD", succeeded_at=now,
+                status="PAID", amount_minor=1000, currency="USD", succeeded_at=now,
             ))
             return str(order.id)
 

@@ -8,6 +8,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base, TimestampMixin, uuid_pk
 
@@ -188,6 +189,37 @@ class OrderItem(Base):
     order: Mapped["Order"] = relationship(back_populates="items")
     modifiers: Mapped[list["OrderItemModifier"]] = relationship(
         back_populates="order_item", cascade="all, delete-orphan"
+    )
+
+
+class OrderEventAction(str, enum.Enum):
+    MARKED_READY = "MARKED_READY"
+    COMPLETED_WITH_PIN = "COMPLETED_WITH_PIN"
+    # Handed over without the customer's PIN, on a manager's say-so.
+    COMPLETED_BY_OVERRIDE = "COMPLETED_BY_OVERRIDE"
+    CANCELLED = "CANCELLED"
+
+
+class OrderEvent(Base):
+    """One staff action on an order: who, what, when, and for the exceptional
+    ones, why. Written alongside the transition it records, never updated."""
+
+    __tablename__ = "order_events"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False, index=True
+    )
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False
+    )
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

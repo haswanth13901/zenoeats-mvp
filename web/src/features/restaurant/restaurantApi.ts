@@ -32,6 +32,12 @@ export type BoardOrder = {
   currency: string;
   created_at: string;
   customer_note: string | null;
+  /** PAID, or REFUNDED / PARTIALLY_REFUNDED after a refund from the Stripe
+   *  Dashboard. A refund never moves the order itself, so this is how the
+   *  board knows to say so. */
+  payment_status: string | null;
+  /** Five wrong PINs. Only a manager override can hand it over now. */
+  pin_locked: boolean;
   items: {
     name: string;
     quantity: number;
@@ -42,6 +48,15 @@ export type BoardOrder = {
     combo_name: string | null;
     combo_group: number | null;
   }[];
+};
+
+/** Cancelling never moves money; refund_needed says the refund is still to
+ *  be issued from the restaurant's Stripe Dashboard. */
+export type CancelledOrder = {
+  order_id: string;
+  status: string;
+  payment_status: string;
+  refund_needed: boolean;
 };
 
 export type StaffMember = {
@@ -234,6 +249,24 @@ export const restaurantApi = api.injectEndpoints({
         body: { pin },
       }),
       // Completing an order moves it off the board and into the day's takings.
+      invalidatesTags: ["Board", "RestaurantReport"],
+    }),
+
+    overrideComplete: build.mutation<unknown, { orderId: string; reason: string }>({
+      query: ({ orderId, reason }) => ({
+        url: `/restaurant/orders/${orderId}/override-complete`,
+        method: "POST",
+        body: { reason },
+      }),
+      invalidatesTags: ["Board", "RestaurantReport"],
+    }),
+
+    cancelOrder: build.mutation<CancelledOrder, { orderId: string; reason: string }>({
+      query: ({ orderId, reason }) => ({
+        url: `/restaurant/orders/${orderId}/cancel`,
+        method: "POST",
+        body: { reason },
+      }),
       invalidatesTags: ["Board", "RestaurantReport"],
     }),
 
@@ -557,6 +590,8 @@ export const {
   useOrderBoardQuery,
   useMarkReadyMutation,
   useCompleteOrderMutation,
+  useOverrideCompleteMutation,
+  useCancelOrderMutation,
   useMenuQuery,
   useItemTypesQuery,
   useCreateItemTypeMutation,
