@@ -221,8 +221,18 @@ def change_password(
     )
 
 
+# Who may call what. Every endpoint below depends on exactly one of these,
+# apart from the few sign-in endpoints that come before a role can exist, and
+# tests/test_role_coverage.py fails if a new endpoint forgets. The portal
+# mirrors these lists in web/src/features/restaurant/nav.ts.
+#
+# ANY_STAFF is every role, the floor included. It used to be called KITCHEN,
+# which read as "kitchen staff only" to anyone adding an endpoint.
 MANAGE = require_staff(StaffRole.ADMIN, StaffRole.MANAGER)
-KITCHEN = require_staff(StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.KITCHEN, StaffRole.CASHIER)
+ANY_STAFF = require_staff(
+    StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.KITCHEN, StaffRole.CASHIER
+)
+STAFF_ADMIN = require_staff(StaffRole.ADMIN)
 
 
 class MealIn(BaseModel):
@@ -1885,17 +1895,66 @@ def delete_item(
     return {"id": str(item.id), "deleted": True}
 
 
+@router.get("/stock")
+def stock(
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
+    _=Depends(ANY_STAFF),
+):
+    """What is in stock, for the people who run out of it.
+
+    The sold-out toggle has always been open to the whole floor, but the only
+    screen with one read /items, which is menu editing and managers only -- so
+    the kitchen staff the toggle exists for could not reach it. This is the
+    same list cut down to what flipping it needs: no prices, no modifier
+    groups, nothing a kitchen login has no business reading.
+
+    In menu order, headings first, so the list reads the way the menu does.
+    `type` is named with its heading when it is a subcategory, since this
+    screen shows it away from the heading it sits under.
+    """
+    types = load_item_types(db)
+    position = {t.id: index for index, t in enumerate(types)}
+    by_id = {t.id: t for t in types}
+
+    def label(type_id) -> str:
+        item_type = by_id.get(type_id)
+        if item_type is None:
+            return "No type"
+        parent = by_id.get(item_type.parent_id) if item_type.parent_id else None
+        return f"{parent.name} / {item_type.name}" if parent else item_type.name
+
+    items = db.execute(
+        select(Item)
+        .where(Item.deleted_at.is_(None))
+        .order_by(Item.sort_order, Item.created_at, Item.id)
+    ).scalars().all()
+    # A stable sort on the type's place in the menu keeps the item order above
+    # within each type. Items of a type since deleted go last.
+    items = sorted(items, key=lambda i: position.get(i.item_type_id, len(types)))
+
+    return [
+        {
+            "id": str(item.id),
+            "name": item.name,
+            "type": label(item.item_type_id),
+            "is_available": item.is_available,
+        }
+        for item in items
+    ]
+
+
 @router.patch("/items/{item_id}/availability")
 def set_item_availability(
     item_id: UUID,
     is_available: bool,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    _=Depends(KITCHEN),
+    _=Depends(ANY_STAFF),
 ):
     """Manual sold-out toggle. Overrides everything else."""
     item = db.get(Item, item_id)
-    if item is None:
+    if item is None or item.deleted_at is not None:
         raise errors.validation_error("No such item.")
     item.is_available = is_available
     return {"id": str(item.id), "is_available": is_available}
@@ -1905,7 +1964,7 @@ def set_item_availability(
 def order_board(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    _=Depends(KITCHEN),
+    _=Depends(ANY_STAFF),
 ):
     """The live board. Polled every few seconds by the kitchen screen.
 
@@ -1977,7 +2036,7 @@ def mark_ready(
     order_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    membership: RestaurantUser = Depends(KITCHEN),
+    membership: RestaurantUser = Depends(ANY_STAFF),
 ):
     order = db.get(Order, order_id, with_for_update=True)
     if order is None:
@@ -2049,7 +2108,7 @@ def complete_order(
     body: CompleteOrderIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    membership: RestaurantUser = Depends(KITCHEN),
+    membership: RestaurantUser = Depends(ANY_STAFF),
 ):
     """Hand the food over. PIN verified server side, five attempts then lock.
 
@@ -2184,7 +2243,7 @@ class StaffInviteIn(BaseModel):
 def list_staff(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    _=Depends(require_staff(StaffRole.ADMIN)),
+    _=Depends(STAFF_ADMIN),
 ):
     rows = db.execute(
         select(RestaurantUser).where(RestaurantUser.revoked_at.is_(None))
@@ -2217,7 +2276,7 @@ def invite_staff(
     background: BackgroundTasks,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    membership: RestaurantUser = Depends(require_staff(StaffRole.ADMIN)),
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
     """Invite someone to this restaurant's team.
 
@@ -2354,7 +2413,7 @@ def revoke_staff(
     membership_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    _=Depends(require_staff(StaffRole.ADMIN)),
+    _=Depends(STAFF_ADMIN),
 ):
     invite = db.get(RestaurantUser, membership_id)
     if invite is None:

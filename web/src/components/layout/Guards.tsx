@@ -10,6 +10,7 @@ import {
 } from "@/features/restaurant/restaurantApi";
 import { ApiError, errorMessage } from "@/services/apiClient";
 import { clerkConfigured, getClerk } from "@/services/clerk";
+import { ManageShell } from "@/features/restaurant/components/ManageShell";
 
 /**
  * Route guards for the two credentialed portals and the customer checkout.
@@ -49,7 +50,14 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export function RequireStaff({ children }: { children: ReactNode }) {
+export function RequireStaff({
+  children,
+  roles,
+}: {
+  children: ReactNode;
+  /** Roles this page is for. Left out, every active member may open it. */
+  roles?: string[];
+}) {
   const dispatch = useAppDispatch();
   const { data, error, isLoading } = useStaffMeQuery();
 
@@ -83,6 +91,10 @@ export function RequireStaff({ children }: { children: ReactNode }) {
   // Signed in, but not yet on the team. Every other staff endpoint refuses
   // this session, so the invitation is the only thing worth showing.
   if (data?.membership_status === "INVITED") return <AcceptInvitation me={data} />;
+  // Reached by a bookmark or a typed address rather than the tabs, which
+  // already leave this page out. Every call the page makes would be refused,
+  // so say why once instead of showing a screen of errors.
+  if (data && roles && !roles.includes(data.role_code)) return <NotForYourRole me={data} />;
   return <>{children}</>;
 }
 
@@ -184,6 +196,21 @@ function AcceptInvitation({ me }: { me: StaffMe }) {
         Not now — sign out
       </button>
     </main>
+  );
+}
+
+function NotForYourRole({ me }: { me: StaffMe }) {
+  return (
+    <ManageShell>
+      <div className="mx-auto max-w-md py-16 text-center">
+        <h1 className="font-display text-2xl">Not part of your role</h1>
+        <p className="mt-3 text-sm text-muted">
+          You&apos;re signed in to {me.restaurant_name} as{" "}
+          <span className="font-medium text-ink">{me.role_code.toLowerCase()}</span>, which
+          doesn&apos;t include this page. An admin at the restaurant can change your role.
+        </p>
+      </div>
+    </ManageShell>
   );
 }
 

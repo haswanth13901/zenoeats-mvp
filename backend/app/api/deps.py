@@ -304,6 +304,9 @@ def require_staff(*roles: StaffRole):
             raise errors.tenant_scope_denied()
         return membership
 
+    # Readable, so a test can prove every endpoint carries a role check and
+    # say which roles each one admits.
+    _dep.staff_roles = frozenset(allowed)
     return _dep
 
 

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useAppSelector } from "@/app/hooks";
 import { Shell } from "@/components/layout/Shell";
 import { selectSession } from "@/features/session/sessionSlice";
-import { MANAGE_NAV } from "../nav";
+import { navFor } from "../nav";
 import { StaffSignOut } from "./StaffSignOut";
 
 /**
@@ -21,13 +21,13 @@ import { StaffSignOut } from "./StaffSignOut";
  * seen if a page mounts outside one.
  */
 export function ManageShell({ children }: { children: ReactNode }) {
-  const { restaurantName } = useAppSelector(selectSession);
+  const { restaurantName, roleCode } = useAppSelector(selectSession);
 
   return (
     <Shell
       title={restaurantName ?? "Restaurant"}
       titleHref="/manage"
-      nav={MANAGE_NAV}
+      nav={navFor(roleCode)}
       action={<StaffSignOut />}
     >
       {children}

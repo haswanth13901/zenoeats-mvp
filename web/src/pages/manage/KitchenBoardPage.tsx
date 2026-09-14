@@ -10,12 +10,9 @@ import {
   useOverrideCompleteMutation,
   type BoardOrder,
 } from "@/features/restaurant/restaurantApi";
+import { canManage as roleCanManage } from "@/features/restaurant/nav";
 import { selectSession } from "@/features/session/sessionSlice";
 import { ApiError, errorMessage } from "@/services/apiClient";
-
-/** The roles the API lets override a PIN or cancel a paid order. The server
- *  decides regardless; this only avoids offering a button that would 403. */
-const MANAGER_ROLES = ["ADMIN", "MANAGER"];
 
 type Acting = { orderId: string; kind: "override" | "cancel" };
 
@@ -29,7 +26,9 @@ export function KitchenBoardPage() {
   const [overrideComplete] = useOverrideCompleteMutation();
   const [cancelOrder] = useCancelOrderMutation();
   const { roleCode } = useAppSelector(selectSession);
-  const canManage = !!roleCode && MANAGER_ROLES.includes(roleCode);
+  // Override and cancel are managers only. The server decides regardless;
+  // this only avoids offering a button that would 403.
+  const canManage = roleCanManage(roleCode);
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

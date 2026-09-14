@@ -14,9 +14,9 @@ type Role = (typeof ROLES)[number];
 
 const ROLE_HELP: Record<Role, string> = {
   ADMIN: "Everything, including staff and reports.",
-  MANAGER: "Orders, menu, reports. No staff changes.",
+  MANAGER: "Orders, menu, reports, and handing over or cancelling orders. No staff changes.",
   KITCHEN: "The order board and sold-out toggles.",
-  CASHIER: "The counter: collect orders and verify PINs.",
+  CASHIER: "The counter: collect orders with PINs, and sold-out toggles.",
 };
 
 export function StaffPage() {

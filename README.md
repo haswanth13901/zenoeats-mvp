@@ -87,7 +87,12 @@ system read surface.
 - **Kitchen** polls every five seconds. Unpaid orders never appear here.
   Tickets show quantity, modifiers and notes, and turn the elapsed time red
   past fifteen minutes. "Collect with PIN" needs the customer's six digits;
-  five wrong attempts locks that order until a manager overrides.
+  five wrong attempts locks that order. A manager can hand an order over
+  without the PIN or cancel a paid one, each with a reason; cancelling does
+  not refund, which stays in the restaurant's Stripe Dashboard. A ticket
+  refunded there is marked "refunded".
+- **Stock** is the sold-out toggle for everyone on the floor: sold-out items
+  first, a search box, one button per item.
 - **Menu** has four tabs. *Items* is everything the restaurant sells, each
   with a type and the meal periods that serve it, plus the sold-out toggle.
   *Meal periods* adds a period and chooses what it serves, pulling from that
@@ -100,6 +105,66 @@ system read surface.
   and has no access until they sign in to this restaurant and accept.
 - **Reports** shows paid orders, gross, average order value, tax, top items,
   and how many checkouts expired unpaid.
+
+### Staff roles
+
+Every member of a restaurant's team has one of four roles. The same person
+can hold a different role at another restaurant.
+
+| Role | Kitchen | Stock | Menu | Staff | Reports |
+|---|---|---|---|---|---|
+| Admin | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Manager | ✓ | ✓ | ✓ | | ✓ |
+| Kitchen | ✓ | ✓ | | | |
+| Cashier | ✓ | ✓ | | | |
+
+Within the Kitchen screen, the actions split further:
+
+| Action | Admin | Manager | Kitchen | Cashier |
+|---|---|---|---|---|
+| See the board, mark ready, collect with PIN | ✓ | ✓ | ✓ | ✓ |
+| Mark items sold out or back in stock | ✓ | ✓ | ✓ | ✓ |
+| Hand over without the PIN | ✓ | ✓ | | |
+| Cancel a paid order | ✓ | ✓ | | |
+| Edit the menu, read reports | ✓ | ✓ | | |
+| Invite and remove staff | ✓ | | | |
+
+### How roles are enforced
+
+The API decides; the portal only follows. Every restaurant endpoint runs
+these checks in order, and any one of them refuses the request:
+
+1. **Who you are.** The staff session cookie is a signed token naming a
+   person, never a restaurant. It is refused if expired, if it was issued
+   before a password change or reset (`users.sessions_valid_after`), or if
+   the account is inactive. An account still holding a temporary password can
+   only ask who it is, sign out, and change that password.
+2. **Which restaurant.** The tenant comes from the `Host` header and nothing
+   else, so a request cannot name a restaurant it is not on.
+3. **Your role there.** `require_staff(...)` in `app/api/deps.py` reads your
+   `restaurant_users` row for that restaurant, under row-level security, and
+   requires it to be `ACTIVE` with a role in the endpoint's list. It is read
+   on every request, so removing someone or changing their role takes effect
+   on their next click. The lists live at the top of the staff API in
+   `app/api/v1/restaurant.py`: `MANAGE` (Admin, Manager), `ANY_STAFF` (all
+   four) and `STAFF_ADMIN` (Admin alone).
+4. **Row-level security.** The query itself runs with
+   `app.current_tenant` set, so even a wrong role check could not read or
+   write another restaurant's rows.
+5. **Origin pinning.** A request whose `Origin` is another hostname is
+   refused, so a page on a neighbouring subdomain cannot use a signed-in
+   operator's cookie.
+
+The portal mirrors the role lists in `web/src/features/restaurant/nav.ts` to
+decide which tabs and buttons to show, and a page opened outside your role
+says so instead of loading. That is a convenience: removing it would change
+what people see, not what they can do.
+
+`tests/test_role_coverage.py` holds the whole map of endpoint to roles. It
+fails if an endpoint is added without a role check, or if an endpoint's roles
+change without the map changing with it. So adding an endpoint, or widening
+one, means editing that table on purpose. When you do, update the tables above
+and `nav.ts` to match.
 
 ### Super admin screen
 

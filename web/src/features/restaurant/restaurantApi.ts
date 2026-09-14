@@ -130,6 +130,15 @@ export type BuilderCombo = {
  *  ticked is a kind the combo does not include. */
 export type ComboSlotDraft = { item_type_id: string; item_ids: string[] };
 
+/** An item as the sold-out screen needs it, and nothing more. */
+export type StockItem = {
+  id: string;
+  name: string;
+  /** The type's name, with its heading when it is a subcategory. */
+  type: string;
+  is_available: boolean;
+};
+
 /** One of the restaurant's item types, with how many items would be
  *  orphaned by deleting it.
  *
@@ -416,6 +425,13 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Item", "ItemType", "Menu"],
     }),
 
+    // Every staff role may read this; /items is managers only. Tagged Item so
+    // a toggle here or an edit in the menu builder refreshes both screens.
+    stock: build.query<StockItem[], void>({
+      query: () => ({ url: "/restaurant/stock" }),
+      providesTags: ["Item"],
+    }),
+
     setItemAvailability: build.mutation<unknown, { itemId: string; is_available: boolean }>({
       // is_available is a query parameter, not a body. FastAPI treats a bare
       // bool argument as a query param, so sending it as JSON would leave the
@@ -612,6 +628,7 @@ export const {
   useUpdateComboMutation,
   useDeleteComboMutation,
   useSetItemAvailabilityMutation,
+  useStockQuery,
   useCreateModifierGroupMutation,
   useUpdateModifierGroupMutation,
   useDeleteModifierGroupMutation,
