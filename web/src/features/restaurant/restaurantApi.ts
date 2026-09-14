@@ -67,6 +67,8 @@ export type StaffMember = {
   status: string;
   invited_at: string | null;
   accepted_at: string | null;
+  /** The signed-in admin's own row. Removing yourself is refused. */
+  is_you: boolean;
 };
 
 /**

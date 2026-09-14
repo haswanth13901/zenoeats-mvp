@@ -15,3 +15,6 @@ dist/
 # Uploaded menu images. The folder is tracked, its contents are not.
 /images/*
 !/images/.gitkeep
+
+# Design-system snapshot for importing into Claude Design. Local only.
+/DESIGN_CONTEXT.md

@@ -2243,7 +2243,7 @@ class StaffInviteIn(BaseModel):
 def list_staff(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    _=Depends(STAFF_ADMIN),
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
     rows = db.execute(
         select(RestaurantUser).where(RestaurantUser.revoked_at.is_(None))
@@ -2265,6 +2265,8 @@ def list_staff(
             "status": r.status,
             "invited_at": r.invited_at.isoformat() if r.invited_at else None,
             "accepted_at": r.accepted_at.isoformat() if r.accepted_at else None,
+            # The caller's own row, which the portal does not offer to remove.
+            "is_you": r.user_id == membership.user_id,
         }
         for r in rows
     ]
@@ -2413,14 +2415,52 @@ def revoke_staff(
     membership_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
-    _=Depends(STAFF_ADMIN),
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
-    invite = db.get(RestaurantUser, membership_id)
-    if invite is None:
-        raise errors.validation_error("No such membership.")
-    invite.status = StaffStatus.REVOKED.value
-    invite.revoked_at = utcnow()
-    return {"id": str(invite.id), "status": invite.status}
+    """Take someone off the team, or withdraw an invitation.
+
+    Two removals are refused, because either can leave a restaurant nobody
+    can administer -- and the only way back from that is the platform's
+    support, for a restaurant that may be mid-service:
+
+    Removing yourself. It is the removal most likely to be a slip, and there
+    is always another way: a second admin removes you.
+
+    Removing the last active admin. With self-removal refused this can only
+    be reached by two admins removing each other at the same moment, which
+    is exactly the case a count read without a lock gets wrong: each sees the
+    other still there and both go through. So every active admin row is
+    locked before counting, and the second request waits and then sees the
+    first one's removal.
+    """
+    # Locked first and in one statement, so concurrent removals queue here.
+    active_admins = db.execute(
+        select(RestaurantUser)
+        .where(
+            RestaurantUser.role_code == StaffRole.ADMIN.value,
+            RestaurantUser.status == StaffStatus.ACTIVE.value,
+        )
+        .with_for_update()
+    ).scalars().all()
+
+    target = db.get(RestaurantUser, membership_id)
+    if target is None or target.status == StaffStatus.REVOKED.value:
+        raise errors.validation_error("No such team member.")
+    if target.user_id == membership.user_id:
+        raise errors.ApiError(
+            409, "CANNOT_REMOVE_SELF",
+            "You can't remove yourself. Ask another admin to do it.",
+        )
+    if target in active_admins and len(active_admins) == 1:
+        raise errors.ApiError(
+            409, "LAST_ADMIN",
+            "This is the restaurant's only admin. Invite another admin, and once "
+            "they have accepted, try again.",
+        )
+
+    target.status = StaffStatus.REVOKED.value
+    target.revoked_at = utcnow()
+    return {"id": str(target.id), "status": target.status}
 
 
 # --------------------------------------------------------------- reports ---

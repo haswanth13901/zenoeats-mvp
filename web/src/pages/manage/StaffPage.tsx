@@ -31,6 +31,9 @@ export function StaffPage() {
   // The last invitation sent. Held only in this component: a temporary
   // password is shown once, and leaving the page is how it goes away.
   const [issued, setIssued] = useState<StaffInvite | null>(null);
+  // The row asking "are you sure", and whether its removal is in flight.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   async function invite() {
     setBusy(true);
@@ -48,12 +51,22 @@ export function StaffPage() {
 
   async function revoke(id: string) {
     setError(null);
+    setRemoving(true);
     try {
       await revokeStaff(id).unwrap();
+      setConfirming(null);
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setRemoving(false);
     }
   }
+
+  // The API refuses removing the last active admin; the row says so up front
+  // rather than offering a button that can only fail.
+  const activeAdmins = (staff.data ?? []).filter(
+    (m) => m.role_code === "ADMIN" && m.status === "ACTIVE",
+  ).length;
 
   return (
     <ManageShell>
@@ -110,27 +123,70 @@ export function StaffPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-hairline">
-              {staff.data.map((m) => (
-                <tr key={m.id}>
-                  <td className="py-3">
-                    {m.full_name ?? m.email}
-                    {m.full_name && <div className="text-xs text-muted">{m.email}</div>}
-                  </td>
-                  <td>{m.role_code.toLowerCase()}</td>
-                  <td>
-                    {m.status === "ACTIVE" ? (
-                      <span className="text-xs">active</span>
-                    ) : (
-                      <span className="text-xs text-brick">waiting to accept</span>
-                    )}
-                  </td>
-                  <td className="text-right">
-                    <button className="text-xs text-muted underline" onClick={() => revoke(m.id)}>
-                      remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {staff.data.map((m) => {
+                const invited = m.status !== "ACTIVE";
+                const onlyAdmin = !invited && m.role_code === "ADMIN" && activeAdmins === 1;
+                const name = m.full_name ?? m.email;
+                return confirming === m.id ? (
+                  <tr key={m.id} className="bg-brick/5">
+                    <td colSpan={4} className="px-3 py-3">
+                      <p className="text-sm">
+                        {invited
+                          ? `Cancel ${name}'s invitation? The invitation stops working.`
+                          : `Remove ${name} from the team? They lose access to this restaurant straight away.`}
+                      </p>
+                      <div className="mt-2 flex items-center gap-4">
+                        <button
+                          className="btn-primary px-3 py-1.5 text-sm"
+                          disabled={removing}
+                          onClick={() => void revoke(m.id)}
+                        >
+                          {removing ? "Removing…" : invited ? "Cancel invitation" : "Remove"}
+                        </button>
+                        <button
+                          className="text-xs underline"
+                          disabled={removing}
+                          onClick={() => setConfirming(null)}
+                        >
+                          keep
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={m.id}>
+                    <td className="py-3">
+                      {name}
+                      {m.full_name && <div className="text-xs text-muted">{m.email}</div>}
+                    </td>
+                    <td>{m.role_code.toLowerCase()}</td>
+                    <td>
+                      {invited ? (
+                        <span className="text-xs text-brick">waiting to accept</span>
+                      ) : (
+                        <span className="text-xs">active</span>
+                      )}
+                    </td>
+                    <td className="text-right">
+                      {m.is_you ? (
+                        <span className="text-xs text-muted">you</span>
+                      ) : onlyAdmin ? (
+                        <span className="text-xs text-muted">only admin</span>
+                      ) : (
+                        <button
+                          className="text-xs text-muted underline"
+                          onClick={() => {
+                            setError(null);
+                            setConfirming(m.id);
+                          }}
+                        >
+                          {invited ? "cancel invitation" : "remove"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
