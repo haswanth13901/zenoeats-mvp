@@ -438,6 +438,15 @@ class ModifierGroupUpdateIn(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=180)
     applies_to_type_ids: list[UUID] | None = None
+    # The rules. Any of them may be sent alone; the group they add up to, with
+    # what is stored for the rest, is checked as a whole.
+    selection_type: SelectionType | None = None
+    is_required: bool | None = None
+    min_select: int | None = Field(default=None, ge=0)
+    max_select: int | None = Field(default=None, ge=1)
+
+
+RULE_FIELDS = ("selection_type", "is_required", "min_select", "max_select")
 
 
 class ModifierOptionUpdateIn(BaseModel):
@@ -1153,11 +1162,19 @@ def update_modifier_group(
     db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
-    """Correct a group's name, or which item kinds it is offered for.
+    """Correct a group's name, which item kinds it is offered for, or its rules.
 
-    Both reach every item that opted into the group, which is the point of a
-    library. Orders already placed keep the group name they were shown,
-    because order_item_modifiers snapshots it.
+    All of it reaches every item that opted into the group, which is the point
+    of a library. Orders already placed keep the group name they were shown,
+    because order_item_modifiers snapshots it, and were priced under the rules
+    of the moment.
+
+    The rules -- pick one or several, required or not, how many -- used to be
+    fixed at creation, so correcting "up to 2" to "up to 3" meant deleting the
+    group and attaching a new one to every item. They are checked the way a
+    new group is, against the options the group has now, and refused where an
+    item already comes with more of the group's options than the new maximum
+    allows: its default choice would be one checkout refuses.
 
     Narrowing the types does not detach the group from items that already
     carry it. The types are a filter on what the builder offers, not a rule
@@ -1179,11 +1196,70 @@ def update_modifier_group(
     if sent.get("applies_to_type_ids") is not None:
         _set_group_types(db, restaurant, group, sent["applies_to_type_ids"])
 
+    if any(sent.get(field) is not None for field in RULE_FIELDS):
+        _change_group_rules(db, group, sent)
+
     return {
         "id": str(group.id),
         "name": group.name,
         "applies_to_type_ids": [str(link.item_type_id) for link in group.type_links],
+        "selection_type": group.selection_type,
+        "is_required": group.is_required,
+        "min_select": group.min_select,
+        "max_select": group.max_select,
     }
+
+
+def _change_group_rules(db: Session, group: ModifierGroup, sent: dict) -> None:
+    """Apply new rules to a group, if the group they make is one a customer can
+    still complete on every item that offers it."""
+    def pick(field):
+        return sent[field] if sent.get(field) is not None else getattr(group, field)
+
+    selection_type = pick("selection_type")
+    selection_type = getattr(selection_type, "value", selection_type)
+    is_required, min_select, max_select = (
+        pick("is_required"), pick("min_select"), pick("max_select")
+    )
+
+    live_options = db.execute(
+        select(ModifierOption).where(
+            ModifierOption.group_id == group.id, ModifierOption.deleted_at.is_(None)
+        )
+    ).scalars().all()
+    _check_group_rules(
+        group.name, selection_type, is_required, min_select, max_select,
+        option_count=len(live_options),
+    )
+
+    # An included option counts towards the maximum at checkout, because the
+    # customer is choosing it. So an item that comes with three toppings from
+    # a group now allowing two would open with a choice checkout refuses.
+    over = db.execute(
+        select(Item.name, func.count(ItemIncludedOption.option_id))
+        .join(Item, Item.id == ItemIncludedOption.item_id)
+        .join(ModifierOption, ModifierOption.id == ItemIncludedOption.option_id)
+        .where(
+            ModifierOption.group_id == group.id,
+            ModifierOption.deleted_at.is_(None),
+            Item.deleted_at.is_(None),
+        )
+        .group_by(Item.id, Item.name)
+        .having(func.count(ItemIncludedOption.option_id) > max_select)
+        .order_by(Item.name)
+    ).all()
+    if over:
+        name, count = over[0]
+        others = f" and {len(over) - 1} more" if len(over) > 1 else ""
+        raise errors.validation_error(
+            f"{name}{others} comes with {count} options from {group.name}, more than "
+            f"a maximum of {max_select} allows. Change what it comes with first."
+        )
+
+    group.selection_type = selection_type
+    group.is_required = is_required
+    group.min_select = min_select
+    group.max_select = max_select
 
 
 @router.delete("/modifier-groups/{group_id}")

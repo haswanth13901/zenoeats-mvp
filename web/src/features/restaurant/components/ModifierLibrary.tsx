@@ -11,6 +11,7 @@ import {
   useUpdateModifierGroupMutation,
   useUpdateModifierOptionMutation,
   type ItemTypeRow,
+  type ModifierGroupChanges,
   type ModifierGroupSummary,
 } from "../restaurantApi";
 import { topLevel } from "../itemTypes";
@@ -493,6 +494,10 @@ type OptionEdit = { name: string; delta: string; image: ImageDraft };
 type GroupDraft = {
   name: string;
   typeIds: string[];
+  selection: "SINGLE" | "MULTI";
+  required: boolean;
+  /** As typed. Read only for a pick-several group. */
+  max: string;
   options: Record<string, OptionEdit>;
 };
 
@@ -504,12 +509,51 @@ function optionEdit(option: ModifierGroupSummary["options"][number]): OptionEdit
   };
 }
 
+/**
+ * The rule fields to send for this draft, only where they differ from the
+ * group; or, if the draft cannot be read, what to tell the manager.
+ *
+ * The minimum follows "customer must choose" the way the create form sets it,
+ * 1 or 0, but only when that answer or the choice type changes. A group made
+ * with a larger minimum keeps it through an edit that did not touch either.
+ */
+function ruleChanges(
+  group: ModifierGroupSummary,
+  draft: GroupDraft,
+): Omit<ModifierGroupChanges, "name" | "applies_to_type_ids"> | string {
+  let max = 1;
+  if (draft.selection === "MULTI") {
+    max = Number(draft.max.trim());
+    if (!draft.max.trim() || !Number.isInteger(max) || max < 1) {
+      return "Enter Max choices as a whole number, 1 or more.";
+    }
+  }
+
+  const reshaped =
+    draft.required !== group.is_required || draft.selection !== group.selection_type;
+  const min = reshaped ? (draft.required ? 1 : 0) : group.min_select;
+
+  const out: Omit<ModifierGroupChanges, "name" | "applies_to_type_ids"> = {};
+  if (draft.selection !== group.selection_type) out.selection_type = draft.selection;
+  if (draft.required !== group.is_required) out.is_required = draft.required;
+  if (max !== group.max_select) out.max_select = max;
+  if (min !== group.min_select) out.min_select = min;
+  return out;
+}
+
 function seed(group: ModifierGroupSummary): GroupDraft {
   const options: GroupDraft["options"] = {};
   for (const option of group.options) {
     options[option.id] = optionEdit(option);
   }
-  return { name: group.name, typeIds: [...group.applies_to_type_ids], options };
+  return {
+    name: group.name,
+    typeIds: [...group.applies_to_type_ids],
+    selection: group.selection_type,
+    required: group.is_required,
+    max: String(group.max_select),
+    options,
+  };
 }
 
 /**
@@ -586,6 +630,10 @@ function GroupEditor({
 
   async function save() {
     const jobs: (() => Promise<unknown>)[] = [];
+    // The group's own edit goes first and alone. Its rules decide whether an
+    // option may be deleted -- a required "choose 2" needs two left -- so
+    // sending both at once would check each against the other's old state.
+    let groupJob: (() => Promise<unknown>) | null = null;
 
     if (removingGroup) {
       // Its options go with it, so nothing else is worth sending.
@@ -597,11 +645,11 @@ function GroupEditor({
         return;
       }
 
-      // Name and kinds are one PATCH, and only the halves that changed are
-      // sent. Comparing as sorted text rather than by reference, because
-      // ticking a kind off and back on rebuilds the array with the same
-      // contents and would otherwise read as an edit.
-      const changes: { name?: string; applies_to_type_ids?: string[] } = {};
+      // Name, kinds and rules are one PATCH, and only what changed is sent.
+      // Comparing as sorted text rather than by reference, because ticking a
+      // kind off and back on rebuilds the array with the same contents and
+      // would otherwise read as an edit.
+      const changes: ModifierGroupChanges = {};
       if (name !== group.name) changes.name = name;
       if (
         [...draft.typeIds].sort().join() !==
@@ -609,8 +657,16 @@ function GroupEditor({
       ) {
         changes.applies_to_type_ids = draft.typeIds;
       }
+
+      const rules = ruleChanges(group, draft);
+      if (typeof rules === "string") {
+        onError(rules);
+        return;
+      }
+      Object.assign(changes, rules);
+
       if (Object.keys(changes).length) {
-        jobs.push(() => updateGroup({ groupId: group.id, changes }).unwrap());
+        groupJob = () => updateGroup({ groupId: group.id, changes }).unwrap();
       }
 
       // Every option gone is a group that offers nothing, which the storefront
@@ -658,7 +714,7 @@ function GroupEditor({
       }
     }
 
-    if (!jobs.length) {
+    if (!jobs.length && !groupJob) {
       onError(null);
       onDone();
       return;
@@ -666,6 +722,7 @@ function GroupEditor({
 
     setSaving(true);
     try {
+      if (groupJob) await groupJob();
       await Promise.all(jobs.map((run) => run()));
       onError(null);
       onDone();
@@ -699,12 +756,51 @@ function GroupEditor({
         <span className="text-xs text-muted">{rules(group)}</span>
       </div>
 
-      {/* How many a customer may pick and whether they must are read-only:
-          they change how the storefront renders every item that opted in, and
-          belong with the group's definition rather than a quick edit here.
-          Which kinds it shows on is not the same sort of decision -- it only
-          filters what the item forms offer, changes nothing already attached,
-          and is the thing most likely to need widening later. */}
+      {/* The rules reach every item offering the group, on the storefront and
+          at checkout, the moment this saves. The server refuses rules the
+          group's options cannot meet, and a maximum below what an item already
+          comes with, so a mistake here is refused rather than shipped. */}
+      {!removingGroup && (
+        <div className="mt-2 flex flex-wrap items-end gap-3">
+          <label>
+            <span className="text-xs text-muted">Choice</span>
+            <select
+              className="field mt-1 py-1 text-sm"
+              value={draft.selection}
+              disabled={saving}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, selection: e.target.value as "SINGLE" | "MULTI" }))
+              }
+            >
+              <option value="MULTI">Pick several</option>
+              <option value="SINGLE">Pick one</option>
+            </select>
+          </label>
+          {draft.selection === "MULTI" && (
+            <label>
+              <span className="text-xs text-muted">Max choices</span>
+              <input
+                className="field mt-1 w-20 py-1 text-sm"
+                inputMode="numeric"
+                value={draft.max}
+                disabled={saving}
+                onChange={(e) => setDraft((d) => ({ ...d, max: e.target.value }))}
+              />
+            </label>
+          )}
+          <label className="flex items-center gap-2 pb-1.5 text-sm">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-brick"
+              checked={draft.required}
+              disabled={saving}
+              onChange={(e) => setDraft((d) => ({ ...d, required: e.target.checked }))}
+            />
+            Customer must choose
+          </label>
+        </div>
+      )}
+
       {removingGroup ? (
         <p className="mt-0.5 text-xs text-muted">
           {showsOn(group.applies_to_type_ids, types)}

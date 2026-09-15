@@ -166,6 +166,17 @@ export type ItemTypeRow = {
   items: number;
 };
 
+/** What a group edit may send. Only what changed is sent; the server checks the
+ *  rules it adds up to against the group's options and the items using it. */
+export type ModifierGroupChanges = {
+  name?: string;
+  applies_to_type_ids?: string[];
+  selection_type?: "SINGLE" | "MULTI";
+  is_required?: boolean;
+  min_select?: number;
+  max_select?: number;
+};
+
 export type ModifierGroupSummary = {
   id: string;
   name: string;
@@ -540,7 +551,7 @@ export const restaurantApi = api.injectEndpoints({
     // everywhere" -- so it must not be dropped from the body when empty.
     updateModifierGroup: build.mutation<
       unknown,
-      { groupId: string; changes: { name?: string; applies_to_type_ids?: string[] } }
+      { groupId: string; changes: ModifierGroupChanges }
     >({
       query: ({ groupId, changes }) => ({
         url: `/restaurant/modifier-groups/${groupId}`,
@@ -549,7 +560,7 @@ export const restaurantApi = api.injectEndpoints({
       }),
       // The kinds decide which items are offered the group, so the item forms
       // re-read too.
-      invalidatesTags: ["ModifierGroup", "Item"],
+      invalidatesTags: ["ModifierGroup", "Item", "Menu"],
     }),
 
     // A group is attached to items, so the menu has to be re-read too: every

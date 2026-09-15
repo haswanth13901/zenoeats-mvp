@@ -151,3 +151,77 @@ def test_the_last_option_of_a_group_cannot_be_deleted(manager):
     res = manager.delete(f"/api/v1/restaurant/modifier-options/{option['id']}")
     assert res.status_code == 422
     assert "last option" in _message(res)
+
+
+# ------------------------------------------------------- editing rules ---
+#
+# A group's rules used to be fixed at creation: correcting "up to 2" meant
+# deleting the group and attaching a new one to every item.
+
+
+def _edit(client, group_id, **changes):
+    return client.patch(f"/api/v1/restaurant/modifier-groups/{group_id}", json=changes)
+
+
+def _only_group(client):
+    return client.get("/api/v1/restaurant/modifier-groups").json()[0]
+
+
+def test_a_groups_rules_can_be_changed(manager):
+    group_id = _group(manager).json()["id"]  # optional, up to 3
+
+    res = _edit(manager, group_id, max_select=2, is_required=True, min_select=1)
+    assert res.status_code == 200, res.text
+    stored = _only_group(manager)
+    assert (stored["is_required"], stored["min_select"], stored["max_select"]) == (True, 1, 2)
+
+    res = _edit(manager, group_id, selection_type="SINGLE", max_select=1)
+    assert res.status_code == 200, res.text
+    assert _only_group(manager)["selection_type"] == "SINGLE"
+
+
+def test_a_rule_change_is_checked_as_the_group_it_makes(manager):
+    group_id = _group(manager).json()["id"]  # optional, min 0, up to 3
+
+    # Required on its own leaves the minimum at 0, which is not a required group.
+    alone = _edit(manager, group_id, is_required=True)
+    assert alone.status_code == 422 and "is required" in _message(alone)
+
+    single = _edit(manager, group_id, selection_type="SINGLE")  # max still 3
+    assert single.status_code == 422 and "is pick-one" in _message(single)
+
+    too_many = _edit(manager, group_id, is_required=True, min_select=4, max_select=4)
+    assert too_many.status_code == 422 and "has only 3 options" in _message(too_many)
+
+    stored = _only_group(manager)
+    assert (stored["selection_type"], stored["is_required"], stored["min_select"],
+            stored["max_select"]) == ("MULTI", False, 0, 3)
+
+
+def test_the_maximum_cannot_drop_below_what_an_item_comes_with(manager):
+    group_id = _group(manager).json()["id"]
+    options = [o["id"] for o in _only_group(manager)["options"]]
+    food = _types(manager)["Food"]
+    item = manager.post(
+        "/api/v1/restaurant/items",
+        json={"name": "Loaded Burger", "item_type_id": food, "base_price_minor": 900,
+              "modifier_group_ids": [group_id], "included_option_ids": options},
+    )
+    assert item.status_code == 201, item.text
+
+    res = _edit(manager, group_id, max_select=2)
+    assert res.status_code == 422
+    assert _message(res).startswith("Loaded Burger comes with 3 options from Veggies")
+    assert _only_group(manager)["max_select"] == 3
+
+    # Once it comes with fewer, the lower maximum is fine.
+    manager.patch(f"/api/v1/restaurant/items/{item.json()['id']}",
+                  json={"included_option_ids": options[:2]})
+    assert _edit(manager, group_id, max_select=2).status_code == 200
+
+
+def test_renaming_alone_leaves_the_rules_untouched(manager):
+    group_id = _group(manager, is_required=True, min_select=2, max_select=3).json()["id"]
+    assert _edit(manager, group_id, name="Toppings").status_code == 200
+    stored = _only_group(manager)
+    assert (stored["name"], stored["min_select"], stored["max_select"]) == ("Toppings", 2, 3)
