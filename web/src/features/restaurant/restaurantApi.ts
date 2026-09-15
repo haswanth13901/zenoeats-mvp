@@ -216,15 +216,42 @@ export function uploadImage(kind: ImageKind, file: Blob, filename: string) {
   });
 }
 
+/** A range of the restaurant's own days, as YYYY-MM-DD, both inclusive.
+ *  Left out, the report is for today where the restaurant is. */
+export type ReportRange = { from?: string; to?: string };
+
 export type RestaurantReport = {
   currency: string;
+  /** The restaurant's timezone, which decides where each day starts. */
+  timezone: string;
+  /** Today's date there, so the page can offer "yesterday" and "this month"
+   *  without trusting the browser's clock or timezone. */
+  today: string;
+  from: string;
+  to: string;
   orders_paid: number;
   orders_completed: number;
+  orders_cancelled: number;
+  orders_refunded: number;
+  /** What was taken, before refunds. */
+  gross_sales_minor: number;
+  /** What has since been refunded on those same orders. */
+  refunds_minor: number;
+  net_sales_minor: number;
+  /** Net of the tax returned with refunds. */
+  tax_collected_minor: number;
+  combo_discounts_minor: number;
+  average_order_value_minor: number;
+  /** Right now, whatever the range. */
   orders_pending_payment: number;
   orders_expired: number;
-  gross_revenue_minor: number;
-  tax_collected_minor: number;
-  average_order_value_minor: number;
+  by_day: {
+    date: string;
+    orders: number;
+    gross_minor: number;
+    refunds_minor: number;
+    net_minor: number;
+  }[];
   top_items: { name: string; units: number; revenue_minor: number }[];
 };
 
@@ -618,8 +645,14 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Staff"],
     }),
 
-    restaurantReports: build.query<RestaurantReport, void>({
-      query: () => ({ url: "/restaurant/reports" }),
+    restaurantReports: build.query<RestaurantReport, ReportRange>({
+      query: ({ from, to }) => {
+        const params = new URLSearchParams();
+        if (from) params.set("from", from);
+        if (to) params.set("to", to);
+        const qs = params.toString();
+        return { url: `/restaurant/reports${qs ? `?${qs}` : ""}` };
+      },
       providesTags: ["RestaurantReport"],
     }),
   }),

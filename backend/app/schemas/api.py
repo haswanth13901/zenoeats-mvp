@@ -2,7 +2,7 @@ from datetime import datetime, time
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 # ---------- Portal / menu ------------------------------------------------
@@ -267,6 +267,23 @@ class PaymentIntentOut(BaseModel):
 
 # ---------- Admin --------------------------------------------------------
 
+def _known_timezone(value: str | None) -> str | None:
+    """An IANA timezone name, like America/Chicago, or a refusal.
+
+    Stored unchecked, a typo only surfaced as a restaurant whose reports could
+    not say what "today" was.
+    """
+    if value is None:
+        return value
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValueError(f"{value} is not a timezone. Use a name like America/Chicago.")
+    return value
+
+
 class CreateRestaurantIn(BaseModel):
     slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str = Field(min_length=1, max_length=160)
@@ -275,6 +292,8 @@ class CreateRestaurantIn(BaseModel):
     tax_rate_bps: int = Field(default=0, ge=0, le=3000)
     tagline: str | None = None
     admin_email: str | None = None
+
+    _timezone = field_validator("timezone")(_known_timezone)
 
 
 class StaffLoginIn(BaseModel):
@@ -363,6 +382,7 @@ class UpdateRestaurantIn(BaseModel):
     tagline: str | None = Field(default=None, max_length=200)
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
+    _timezone = field_validator("timezone")(_known_timezone)
     tax_rate_bps: int | None = Field(default=None, ge=0, le=3000)
     # FLAT applies tax_rate_bps; STRIPE_TAX calculates per order on the
     # restaurant's connected account, and needs the full pickup address.

@@ -5,10 +5,11 @@ were removed, RLS would return zero rows for another restaurant's data.
 """
 
 import logging
-from datetime import time
+from datetime import date, datetime, time, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
@@ -2612,26 +2613,94 @@ def reset_staff_password(
 
 @router.get("/reports")
 def restaurant_reports(
+    from_: date | None = Query(default=None, alias="from"),
+    to: date | None = None,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
-    """This restaurant's own numbers. Tenant-scoped by RLS, so there is no
-    way for this query to reach another restaurant's orders even if the
-    WHERE clause were dropped."""
+    """This restaurant's numbers for a range of its own days.
+
+    It used to answer one question, "everything ever", in a way no restaurant
+    asks it: no today, no this week, and every refunded order counted as full
+    revenue, tax included. Now:
+
+    Days are the restaurant's, not the server's. `from` and `to` are local
+    dates, inclusive, and an order belongs to the day it was paid there -- a
+    Chicago order paid at 11.30pm is that day's, though it is tomorrow in UTC.
+    Both default to today.
+
+    Refunds come off. Gross is what was taken; refunds are what has since been
+    given back on those same orders (from the refund webhook); net is the
+    difference. Tax is net of refunds too, in proportion, since a refund
+    returns the tax with the food. Top items leave out cancelled and fully
+    refunded orders, which sold nothing.
+
+    Tenant-scoped by RLS, so no query here can reach another restaurant's
+    orders even without a WHERE clause.
+    """
+    zone = _zone(restaurant.timezone)
+    today = datetime.now(zone).date()
+    start_day = from_ or today
+    end_day = to or start_day
+    if end_day < start_day:
+        raise errors.validation_error("The end date is before the start date.")
+    if (end_day - start_day).days >= REPORT_MAX_DAYS:
+        raise errors.validation_error(
+            f"Choose a range of at most {REPORT_MAX_DAYS} days."
+        )
+
+    # Local midnights, as instants. zoneinfo gets the daylight-saving days
+    # right: a range across the clock change is 23 or 25 hours long, not 24.
+    window = {
+        "start": datetime.combine(start_day, time(0), tzinfo=zone),
+        "end": datetime.combine(end_day + timedelta(days=1), time(0), tzinfo=zone),
+        "tz": zone.key,
+    }
+
+    # One succeeded payment per order at most -- a partial unique index holds
+    # that -- so the join never counts an order twice.
+    paid_in_range = """
+        FROM orders o
+        LEFT JOIN payments p ON p.order_id = o.id AND p.succeeded_at IS NOT NULL
+        WHERE o.paid_at >= :start AND o.paid_at < :end
+    """
+
     totals = db.execute(
         text(
+            f"""
+            SELECT count(*)                                   AS orders_paid,
+                   COALESCE(sum(o.total_minor), 0)            AS gross,
+                   COALESCE(sum(p.refunded_minor), 0)         AS refunds,
+                   COALESCE(sum(o.tax_minor), 0)              AS tax,
+                   COALESCE(sum(CASE WHEN o.total_minor > 0
+                       THEN round(o.tax_minor::numeric * COALESCE(p.refunded_minor, 0)
+                                  / o.total_minor)
+                       ELSE 0 END), 0)                        AS tax_refunded,
+                   COALESCE(sum(o.discount_minor), 0)         AS discounts,
+                   count(*) FILTER (WHERE o.status = 'COMPLETED')  AS completed,
+                   count(*) FILTER (WHERE o.status = 'CANCELLED')  AS cancelled,
+                   count(*) FILTER (WHERE p.refunded_minor > 0)    AS refunded
+            {paid_in_range}
             """
-            SELECT count(*) FILTER (WHERE paid_at IS NOT NULL)        AS orders_paid,
-                   COALESCE(sum(total_minor) FILTER (WHERE paid_at IS NOT NULL), 0) AS gross,
-                   COALESCE(sum(tax_minor)   FILTER (WHERE paid_at IS NOT NULL), 0) AS tax,
-                   count(*) FILTER (WHERE status = 'PENDING_PAYMENT') AS pending,
-                   count(*) FILTER (WHERE status = 'EXPIRED')         AS expired,
-                   count(*) FILTER (WHERE status = 'COMPLETED')       AS completed
-            FROM orders
-            """
-        )
+        ),
+        window,
     ).mappings().one()
+
+    by_day = db.execute(
+        text(
+            f"""
+            SELECT (o.paid_at AT TIME ZONE :tz)::date         AS day,
+                   count(*)                                   AS orders,
+                   COALESCE(sum(o.total_minor), 0)            AS gross,
+                   COALESCE(sum(p.refunded_minor), 0)         AS refunds
+            {paid_in_range}
+            GROUP BY 1
+            ORDER BY 1
+            """
+        ),
+        window,
+    ).mappings().all()
 
     top_items = db.execute(
         text(
@@ -2641,27 +2710,82 @@ def restaurant_reports(
                    sum(oi.line_total_minor) AS revenue
             FROM order_items oi
             JOIN orders o ON o.id = oi.order_id
-            WHERE o.paid_at IS NOT NULL
+            LEFT JOIN payments p ON p.order_id = o.id AND p.succeeded_at IS NOT NULL
+            WHERE o.paid_at >= :start AND o.paid_at < :end
+              AND o.status <> 'CANCELLED'
+              AND COALESCE(p.status, '') <> 'REFUNDED'
             GROUP BY oi.name_snapshot
-            ORDER BY units DESC
+            ORDER BY units DESC, name
             LIMIT 10
             """
-        )
+        ),
+        window,
     ).mappings().all()
 
+    # Expired checkouts were never paid, so they have no paid day: counted by
+    # when they were started. Pending is right now, whatever the range.
+    unpaid = db.execute(
+        text(
+            """
+            SELECT count(*) FILTER (WHERE status = 'PENDING_PAYMENT') AS pending,
+                   count(*) FILTER (WHERE status = 'EXPIRED'
+                                    AND created_at >= :start AND created_at < :end) AS expired
+            FROM orders
+            """
+        ),
+        window,
+    ).mappings().one()
+
     paid = totals["orders_paid"] or 0
-    gross = int(totals["gross"] or 0)
+    gross = int(totals["gross"])
+    refunds = int(totals["refunds"])
     return {
         "currency": restaurant.currency,
+        "timezone": zone.key,
+        "today": today.isoformat(),
+        "from": start_day.isoformat(),
+        "to": end_day.isoformat(),
         "orders_paid": paid,
         "orders_completed": totals["completed"],
-        "orders_pending_payment": totals["pending"],
-        "orders_expired": totals["expired"],
-        "gross_revenue_minor": gross,
-        "tax_collected_minor": int(totals["tax"] or 0),
+        "orders_cancelled": totals["cancelled"],
+        "orders_refunded": totals["refunded"],
+        "gross_sales_minor": gross,
+        "refunds_minor": refunds,
+        "net_sales_minor": gross - refunds,
+        "tax_collected_minor": int(totals["tax"]) - int(totals["tax_refunded"]),
+        "combo_discounts_minor": int(totals["discounts"]),
         "average_order_value_minor": gross // paid if paid else 0,
+        "orders_pending_payment": unpaid["pending"],
+        "orders_expired": unpaid["expired"],
+        "by_day": [
+            {
+                "date": row["day"].isoformat(),
+                "orders": row["orders"],
+                "gross_minor": int(row["gross"]),
+                "refunds_minor": int(row["refunds"]),
+                "net_minor": int(row["gross"]) - int(row["refunds"]),
+            }
+            for row in by_day
+        ],
         "top_items": [
             {"name": r["name"], "units": r["units"], "revenue_minor": int(r["revenue"])}
             for r in top_items
         ],
     }
+
+
+REPORT_MAX_DAYS = 366
+
+
+def _zone(name: str | None) -> ZoneInfo:
+    """The restaurant's timezone, or UTC if what is stored is not one.
+
+    Timezones are checked when they are set, but a row from before that check
+    should still produce a report -- in UTC, and saying so in the response --
+    rather than a 500.
+    """
+    try:
+        return ZoneInfo(name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        log.warning("restaurant timezone %r is not a timezone; reporting in UTC", name)
+        return ZoneInfo("UTC")

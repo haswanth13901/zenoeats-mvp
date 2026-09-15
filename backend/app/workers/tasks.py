@@ -211,6 +211,9 @@ def _handle_charge_refunded(payload: dict, event_account_id: str | None):
             PaymentStatus.REFUNDED.value if refunded >= total
             else PaymentStatus.PARTIALLY_REFUNDED.value
         )
+        # Stripe's figure is cumulative, so a redelivered or out-of-order
+        # event writes the same total rather than adding to it.
+        payment.refunded_minor = min(max(refunded, 0), payment.amount_minor)
 
     # The restaurant's tax reports must show the refund too. Cumulative and
     # idempotent, so redelivery is safe; a no-op for flat-rate restaurants.

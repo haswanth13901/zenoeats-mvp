@@ -109,8 +109,12 @@ system read surface.
   role, or leave the restaurant without an active admin. Resets are refused
   for another admin, and for a login that also works at another Zenoeats
   restaurant; Zenoeats support resets those.
-- **Reports** shows paid orders, gross, average order value, tax, top items,
-  and how many checkouts expired unpaid.
+- **Reports** covers today, yesterday, the last 7 days, this month or chosen
+  dates -- the restaurant's own days, in its timezone, with each order counted
+  on the day it was paid there. It shows net sales (gross less refunds made
+  from the Stripe Dashboard), paid orders, average order, tax net of refunds,
+  combo discounts, cancelled orders, a by-day breakdown, top items (leaving out
+  cancelled and fully refunded orders), and checkouts that expired unpaid.
 
 ### Staff roles
 

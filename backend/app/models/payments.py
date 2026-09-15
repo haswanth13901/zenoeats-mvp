@@ -89,6 +89,9 @@ class Payment(Base, TimestampMixin):
     # cleared by a later refund, which is what makes the partial unique
     # index a durable guarantee.
     succeeded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Cumulative, as Stripe reports it on the charge, and never more than the
+    # payment. The status says whether a refund happened; this says how much.
+    refunded_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
 
 class StripeEvent(Base):
