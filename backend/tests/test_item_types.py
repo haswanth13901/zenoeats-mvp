@@ -144,6 +144,20 @@ class FakeDb:
             if ids:
                 rows = [t for t in rows if t.id not in set(ids)]
             return FakeResult(rows)
+        # The live combos with a slot asking for one type, by name: what stops
+        # a heading being demoted. A deleted combo's slots stay behind and must
+        # not count.
+        if model == "Combo":
+            wanted = next(
+                (v for v in statement.compile().params.values()
+                 if isinstance(v, uuid.UUID)), None
+            )
+            live = {c.id: c for c in self._of("combo")}
+            return FakeResult(sorted({
+                live[slot.combo_id].name
+                for slot in self._of("slot")
+                if slot.item_type_id == wanted and getattr(slot, "combo_id", None) in live
+            }))
         # Slots and links are read two ways: counted, to refuse demoting a
         # heading something is built on, and listed, to take them with a
         # deletion. Both filter on one type, which is the only uuid in play.
@@ -578,7 +592,8 @@ def test_a_heading_a_combo_asks_for_cannot_become_a_subcategory():
     """Combos are built from top-level types. Demoting one would leave a slot
     asking for something a combo may not ask for."""
     food, _burgers, drinks, db = _nested()
-    db.rows.append(FakeRow("slot", item_type_id=drinks.id))
+    combo = FakeRow("combo", name="Burger Meal")
+    db.rows += [combo, FakeRow("slot", item_type_id=drinks.id, combo_id=combo.id)]
 
     with pytest.raises(errors.ApiError) as caught:
         update_item_type(
@@ -586,8 +601,23 @@ def test_a_heading_a_combo_asks_for_cannot_become_a_subcategory():
             restaurant=FakeRestaurant(), db=db,
         )
 
-    assert "combo" in str(caught.value.detail).lower()
+    assert "a choice in 1 combo (Burger Meal)" in str(caught.value.detail)
     assert drinks.parent_id is None
+
+
+def test_a_deleted_combos_leftover_slot_does_not_hold_a_heading_back():
+    """A deleted combo keeps its slots. Counting them made a type that had ever
+    been in a combo impossible to file under anything."""
+    from datetime import datetime, timezone
+
+    food, _burgers, drinks, db = _nested()
+    gone = FakeRow("combo", name="Old Meal", deleted_at=datetime.now(timezone.utc))
+    db.rows += [gone, FakeRow("slot", item_type_id=drinks.id, combo_id=gone.id)]
+
+    update_item_type(
+        drinks.id, ItemTypeUpdateIn(parent_id=food.id), restaurant=FakeRestaurant(), db=db,
+    )
+    assert drinks.parent_id == food.id
 
 
 def test_a_heading_a_modifier_group_is_offered_for_cannot_become_a_subcategory():

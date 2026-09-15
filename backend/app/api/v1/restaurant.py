@@ -1651,14 +1651,22 @@ def _refile(db: Session, item_type: ItemType, parent_id: UUID | None) -> None:
             "menu goes two levels deep. Move those out first."
         )
 
-    slots = db.execute(
-        select(func.count(ComboSlot.id)).where(ComboSlot.item_type_id == item_type.id)
-    ).scalar_one()
-    if slots:
+    # Live combos only. A deleted combo keeps its slots -- nothing reads them
+    # once it is hidden -- and counting those made a type that had ever been in
+    # a combo impossible to file under anything, with a message pointing at
+    # combos nobody could see or edit.
+    combos = db.execute(
+        select(Combo.name)
+        .join(ComboSlot, ComboSlot.combo_id == Combo.id)
+        .where(ComboSlot.item_type_id == item_type.id, Combo.deleted_at.is_(None))
+        .distinct()
+        .order_by(Combo.name)
+    ).scalars().all()
+    if combos:
         raise errors.validation_error(
-            f"{item_type.name} is a choice in {slots} "
-            f"{'combo' if slots == 1 else 'combos'}. Combos are built from "
-            "top-level types, so take it out of those first."
+            f"{item_type.name} is a choice in {len(combos)} "
+            f"{'combo' if len(combos) == 1 else 'combos'} ({', '.join(combos)}). Combos "
+            "are built from top-level types, so take it out of those first."
         )
 
     links = db.execute(

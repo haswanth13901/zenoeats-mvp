@@ -225,3 +225,48 @@ def test_renaming_alone_leaves_the_rules_untouched(manager):
     assert _edit(manager, group_id, name="Toppings").status_code == 200
     stored = _only_group(manager)
     assert (stored["name"], stored["min_select"], stored["max_select"]) == ("Toppings", 2, 3)
+
+
+# ------------------------------------------------------ refiling types ---
+
+
+def _lunch_combo(client, types):
+    """A Lunch combo asking for one of each of Food and Sides."""
+    lunch = client.post("/api/v1/restaurant/meals", json={"name": "Lunch"}).json()["id"]
+    ids = {}
+    for name, type_name in (("Smash Burger", "Food"), ("Fries", "Sides")):
+        ids[type_name] = client.post(
+            "/api/v1/restaurant/items",
+            json={"name": name, "item_type_id": types[type_name], "base_price_minor": 500,
+                  "meal_ids": [lunch]},
+        ).json()["id"]
+    combo = client.post(
+        "/api/v1/restaurant/combos",
+        json={"meal_id": lunch, "name": "Burger Meal",
+              "slots": [{"item_type_id": types[t], "item_ids": [ids[t]]} for t in ("Food", "Sides")]},
+    )
+    assert combo.status_code == 201, combo.text
+    return combo.json()["id"]
+
+
+def test_a_type_in_a_live_combo_cannot_become_a_subcategory(manager):
+    types = _types(manager)
+    _lunch_combo(manager, types)
+
+    res = manager.patch(f"/api/v1/restaurant/item-types/{types['Sides']}",
+                        json={"parent_id": types["Food"]})
+    assert res.status_code == 422
+    assert "is a choice in 1 combo (Burger Meal)" in _message(res)
+
+
+def test_a_deleted_combo_no_longer_holds_its_types_back(manager):
+    """Sides was once in a combo. The combo is gone, and the type used to stay
+    stuck as a heading for good, blamed on a combo nobody could see."""
+    types = _types(manager)
+    combo = _lunch_combo(manager, types)
+    assert manager.delete(f"/api/v1/restaurant/combos/{combo}").status_code == 200
+
+    res = manager.patch(f"/api/v1/restaurant/item-types/{types['Sides']}",
+                        json={"parent_id": types["Food"]})
+    assert res.status_code == 200, res.text
+    assert res.json()["parent_id"] == types["Food"]
