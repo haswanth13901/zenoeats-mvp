@@ -15,6 +15,14 @@ const STATUS_COPY: Record<string, { title: string; detail: string }> = {
     title: "Ready to collect",
     detail: "Give your PIN to the counter to pick it up.",
   },
+  READY_FOR_DELIVERY: {
+    title: "Ready, waiting for the driver",
+    detail: "The restaurant is sending this one out to you.",
+  },
+  OUT_FOR_DELIVERY: {
+    title: "On its way",
+    detail: "The driver has your order.",
+  },
   COMPLETED: { title: "Collected", detail: "Thanks for ordering." },
   CANCELLED: { title: "Cancelled", detail: "This order was cancelled." },
   EXPIRED: {

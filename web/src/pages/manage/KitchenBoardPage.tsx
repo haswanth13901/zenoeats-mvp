@@ -3,10 +3,12 @@ import { useAppSelector } from "@/app/hooks";
 import { Empty, ErrorNote } from "@/components/common/Feedback";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import {
+  useAssignDriverMutation,
   useCancelOrderMutation,
   useCompleteOrderMutation,
   useMarkReadyMutation,
   useOrderBoardQuery,
+  useDriversQuery,
   useOrderHistoryQuery,
   useOverrideCompleteMutation,
   type BoardOrder,
@@ -17,7 +19,7 @@ import { canManage as roleCanManage } from "@/features/restaurant/nav";
 import { selectSession } from "@/features/session/sessionSlice";
 import { ApiError, errorMessage } from "@/services/apiClient";
 
-type Acting = { orderId: string; kind: "override" | "cancel" };
+type Acting = { orderId: string; kind: "override" | "cancel" | "assign" };
 
 export function KitchenBoardPage() {
   // Polling stands in for WebSockets at MVP volume. Five seconds is well inside
@@ -32,6 +34,7 @@ export function KitchenBoardPage() {
   const [completeOrder] = useCompleteOrderMutation();
   const [overrideComplete] = useOverrideCompleteMutation();
   const [cancelOrder] = useCancelOrderMutation();
+  const [assignDriver] = useAssignDriverMutation();
   const { roleCode } = useAppSelector(selectSession);
   // Override and cancel are managers only. The server decides regardless;
   // this only avoids offering a button that would 403.
@@ -122,12 +125,41 @@ export function KitchenBoardPage() {
   }
 
   const orders = board.data ?? [];
-  const preparing = orders.filter((o) => o.status !== "READY_FOR_PICKUP");
-  const waiting = orders.filter((o) => o.status === "READY_FOR_PICKUP");
+  const cooking = ["AUTO_ACCEPTED", "PREPARING"];
+  const preparing = orders.filter((o) => cooking.includes(o.status));
+  // Ready: at the counter for a collection, with or waiting for a driver on a
+  // delivery. One column, because to the kitchen they are all "done, gone soon".
+  const waiting = orders.filter((o) => !cooking.includes(o.status));
 
-  /** The reason form, when a manager action is open on this ticket. */
+  /** The form for whichever manager action is open on this ticket. */
   function actionFor(order: BoardOrder): ReactNode {
     if (acting?.orderId !== order.order_id) return null;
+    if (acting.kind === "assign") {
+      return (
+        <AssignDriverForm
+          order={order}
+          busy={busy === order.order_id}
+          onBack={() => setActing(null)}
+          onAssign={async (membership_id, delivery_address) => {
+            setBusy(order.order_id);
+            clearMessages();
+            try {
+              const out = await assignDriver({
+                orderId: order.order_id,
+                membership_id,
+                delivery_address,
+              }).unwrap();
+              setNotice(`#${order.order_number} is ${out.driver}'s delivery.`);
+              setActing(null);
+            } catch (e) {
+              setError(errorMessage(e));
+            } finally {
+              setBusy(null);
+            }
+          }}
+        />
+      );
+    }
     return (
       <ReasonForm
         kind={acting.kind}
@@ -148,6 +180,17 @@ export function KitchenBoardPage() {
         onClick={() => openAction(order.order_id, "cancel")}
       >
         cancel order
+      </button>
+    );
+
+  /** Hand the order to a driver, or hand it to a different one. */
+  const driverLink = (order: BoardOrder) =>
+    canManage && (
+      <button
+        className="text-xs text-muted underline"
+        onClick={() => openAction(order.order_id, "assign")}
+      >
+        {order.fulfillment_type === "DELIVERY" ? "change driver" : "assign driver"}
       </button>
     );
 
@@ -190,17 +233,22 @@ export function KitchenBoardPage() {
                     disabled={busy === o.order_id}
                     onClick={() => ready(o.order_id)}
                   >
-                    Mark ready for pickup
+                    {o.fulfillment_type === "DELIVERY"
+                      ? "Mark ready for the driver"
+                      : "Mark ready for pickup"}
                   </button>
-                  <div className="mt-2 text-right">{cancelLink(o)}</div>
+                  <div className="mt-2 flex justify-end gap-3">
+                    {driverLink(o)}
+                    {cancelLink(o)}
+                  </div>
                 </>
               )}
             </Ticket>
           ))}
         </Column>
 
-        <Column title={`Waiting for collection (${waiting.length})`}>
-          {!waiting.length && <Empty>Nothing waiting at the counter.</Empty>}
+        <Column title={`Ready (${waiting.length})`}>
+          {!waiting.length && <Empty>Nothing ready for the counter or a driver.</Empty>}
           {waiting.map((o) => (
             <Ticket
               key={o.order_id}
@@ -209,7 +257,21 @@ export function KitchenBoardPage() {
               onSeen={() => alert.acknowledge(o.order_id)}
             >
               {actionFor(o) ??
-                (o.pin_locked ? (
+                (o.fulfillment_type === "DELIVERY" ? (
+                  <div>
+                    <p className="text-sm">
+                      {o.status === "OUT_FOR_DELIVERY"
+                        ? `On the road with ${o.driver ?? "a driver"}.`
+                        : o.driver
+                          ? `Waiting for ${o.driver} to pick it up.`
+                          : "Ready, but no driver assigned yet."}
+                    </p>
+                    <div className="mt-2 flex justify-end gap-3">
+                      {driverLink(o)}
+                      {cancelLink(o)}
+                    </div>
+                  </div>
+                ) : o.pin_locked ? (
                   <div>
                     <p className="text-sm text-brick">
                       Locked after five wrong PINs.
@@ -261,14 +323,17 @@ export function KitchenBoardPage() {
                       Collect with PIN
                     </button>
                     {canManage && (
-                      <div className="mt-2 flex justify-between">
+                      <div className="mt-2 flex flex-wrap justify-between gap-3">
                         <button
                           className="text-xs text-muted underline"
                           onClick={() => openAction(o.order_id, "override")}
                         >
                           no PIN? hand over without it
                         </button>
-                        {cancelLink(o)}
+                        <span className="flex gap-3">
+                          {driverLink(o)}
+                          {cancelLink(o)}
+                        </span>
                       </div>
                     )}
                   </>
@@ -285,6 +350,83 @@ export function KitchenBoardPage() {
         confirms the payment by webhook.
       </p>
     </ManageShell>
+  );
+}
+
+/**
+ * Give an order to one of the restaurant's drivers, with the address.
+ *
+ * The address is typed here because a customer cannot order a delivery in this
+ * build: it is what the restaurant was told on the phone. Assigning is what
+ * makes the order a delivery, so the same form serves "assign" and "change
+ * driver", starting from whatever the order already says.
+ */
+function AssignDriverForm({
+  order,
+  busy,
+  onAssign,
+  onBack,
+}: {
+  order: BoardOrder;
+  busy: boolean;
+  onAssign: (membershipId: string, address: string) => void;
+  onBack: () => void;
+}) {
+  const drivers = useDriversQuery();
+  const [membershipId, setMembershipId] = useState("");
+  const [address, setAddress] = useState(order.delivery_address ?? "");
+
+  const options = drivers.data ?? [];
+
+  return (
+    <div className="border-t border-hairline pt-3">
+      <p className="text-sm">
+        Send <span className="font-medium">#{order.order_number}</span> out with a driver.
+        They see this order and its address, and nothing else of the portal.
+      </p>
+      {drivers.isLoading ? (
+        <p className="mt-3 text-sm text-muted">Loading drivers…</p>
+      ) : !options.length ? (
+        <p className="mt-3 text-sm text-brick">
+          No drivers on the team yet. An admin can invite one from the Staff page.
+        </p>
+      ) : (
+        <>
+          <select
+            className="field mt-3 text-sm"
+            value={membershipId}
+            aria-label="Driver"
+            onChange={(e) => setMembershipId(e.target.value)}
+          >
+            <option value="">Choose a driver…</option>
+            {options.map((driver) => (
+              <option key={driver.membership_id} value={driver.membership_id}>
+                {driver.name}
+              </option>
+            ))}
+          </select>
+          <input
+            className="field mt-2 text-sm"
+            value={address}
+            maxLength={300}
+            placeholder="Delivery address, as the customer gave it"
+            onChange={(e) => setAddress(e.target.value)}
+          />
+        </>
+      )}
+      <div className="mt-3 flex items-center gap-4">
+        <button
+          className="btn-primary px-3 py-1.5 text-sm"
+          disabled={busy || !membershipId || address.trim().length < 3}
+          onClick={() => onAssign(membershipId, address.trim())}
+        >
+          {busy ? "Saving…" : "Assign"}
+        </button>
+        <button className="text-xs underline" disabled={busy} onClick={onBack}>
+          back
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -392,6 +534,9 @@ function Ticket({
         {fresh && (
           <span className="rounded bg-brick px-2 py-0.5 text-xs font-medium text-white">new</span>
         )}
+        {order.fulfillment_type === "DELIVERY" && (
+          <span className="rounded bg-ink px-2 py-0.5 text-xs text-white">delivery</span>
+        )}
         {/* A refund in the Stripe Dashboard never moves the order, so this is
             the only sign on the board that nobody is paying for it now. */}
         {(order.payment_status === "REFUNDED" ||
@@ -443,6 +588,13 @@ function Ticket({
           ),
         )}
       </ul>
+
+      {order.fulfillment_type === "DELIVERY" && (
+        <p className="mt-3 border-t border-hairline pt-3 text-sm">
+          {order.delivery_address}
+          <span className="text-muted"> · {order.driver ?? "no driver yet"}</span>
+        </p>
+      )}
 
       {order.customer_note && (
         <p className="mt-3 border-t border-hairline pt-3 text-sm text-brick">

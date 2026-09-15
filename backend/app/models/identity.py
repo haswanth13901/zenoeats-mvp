@@ -14,6 +14,9 @@ class StaffRole(str, enum.Enum):
     MANAGER = "MANAGER"
     KITCHEN = "KITCHEN"
     CASHIER = "CASHIER"
+    # Runs deliveries. Sees the orders assigned to them and nothing else --
+    # not the board, the menu, stock, reports or the team.
+    DRIVER = "DRIVER"
 
 
 class StaffStatus(str, enum.Enum):

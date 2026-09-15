@@ -8,14 +8,18 @@ import type { NavItem } from "@/components/layout/Shell";
  * offers each person the screens their role can use: a kitchen login used to
  * see every tab and meet "Not authorized" on three of the four.
  */
+// The floor: everyone who works in the restaurant. A driver is not one of
+// them -- they see the orders assigned to them and nothing else of the portal.
 export const ALL_STAFF_ROLES = ["ADMIN", "MANAGER", "KITCHEN", "CASHIER"];
 export const MANAGER_ROLES = ["ADMIN", "MANAGER"];
 export const ADMIN_ROLES = ["ADMIN"];
+export const DELIVERY_ROLES = ["ADMIN", "MANAGER", "DRIVER"];
 
 export type ManageNavItem = NavItem & { roles: string[] };
 
 export const MANAGE_NAV: ManageNavItem[] = [
   { href: "/manage", label: "Kitchen", roles: ALL_STAFF_ROLES },
+  { href: "/manage/deliveries", label: "Deliveries", roles: DELIVERY_ROLES },
   { href: "/manage/stock", label: "Stock", roles: ALL_STAFF_ROLES },
   { href: "/manage/menu", label: "Menu", roles: MANAGER_ROLES },
   { href: "/manage/staff", label: "Staff", roles: ADMIN_ROLES },
@@ -23,12 +27,19 @@ export const MANAGE_NAV: ManageNavItem[] = [
 ];
 
 /** The tabs this role can use. No role yet -- the guard has not answered --
- *  shows only what every role has, so nothing flashes and disappears. */
+ *  shows only what the floor has, so nothing flashes and disappears. */
 export function navFor(roleCode: string | null): NavItem[] {
-  const role = roleCode ?? "";
-  return MANAGE_NAV.filter(
-    (item) => item.roles.includes(role) || item.roles === ALL_STAFF_ROLES,
-  );
+  if (!roleCode) return MANAGE_NAV.filter((item) => item.roles === ALL_STAFF_ROLES);
+  return MANAGE_NAV.filter((item) => item.roles.includes(roleCode));
+}
+
+/** Where this role starts, which for a driver is not the kitchen board. */
+export function homeFor(roleCode: string | null): string {
+  return navFor(roleCode)[0]?.href ?? "/manage";
+}
+
+export function isDriver(roleCode: string | null): boolean {
+  return roleCode === "DRIVER";
 }
 
 export function canManage(roleCode: string | null): boolean {

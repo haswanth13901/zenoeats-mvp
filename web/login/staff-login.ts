@@ -13,6 +13,14 @@ type StaffMe = {
   must_change_password: boolean;
 };
 
+/** Where this person lands. A driver has no kitchen board -- the portal would
+ *  only tell them the page is not part of their role. */
+function home(me: StaffMe): string {
+  const next = nextPath();
+  if (next === "/manage" && me.role_code === "DRIVER") return "/manage/deliveries";
+  return next;
+}
+
 function nextPath(): string {
   const raw = new URLSearchParams(window.location.search).get("next");
   // Same-origin paths only. An absolute URL here would be an open redirect.
@@ -63,7 +71,7 @@ form.addEventListener("submit", async (event) => {
     // other staff endpoint until it is replaced, so going anywhere else would
     // only bounce.
     window.location.assign(
-      me.must_change_password ? "/manage/change-password" : nextPath(),
+      me.must_change_password ? "/manage/change-password" : home(me),
     );
   } catch (e) {
     showError(errorMessage(e));

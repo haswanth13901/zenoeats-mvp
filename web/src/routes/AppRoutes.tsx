@@ -7,7 +7,13 @@ import { MenuPage } from "@/pages/manage/MenuPage";
 import { StaffPage } from "@/pages/manage/StaffPage";
 import { ReportsPage } from "@/pages/manage/ReportsPage";
 import { StockPage } from "@/pages/manage/StockPage";
-import { ADMIN_ROLES, MANAGER_ROLES } from "@/features/restaurant/nav";
+import { DeliveriesPage } from "@/pages/manage/DeliveriesPage";
+import {
+  ADMIN_ROLES,
+  ALL_STAFF_ROLES,
+  DELIVERY_ROLES,
+  MANAGER_ROLES,
+} from "@/features/restaurant/nav";
 import { StorefrontPage } from "@/pages/storefront/StorefrontPage";
 import { CheckoutPage } from "@/pages/storefront/CheckoutPage";
 import { PaymentPage } from "@/pages/storefront/PaymentPage";
@@ -60,8 +66,18 @@ export function AppRoutes() {
         />
 
         {/* Restaurant portal. Credentials issued by the platform. */}
-        <Route path="/manage" element={<RequireStaff><KitchenBoardPage /></RequireStaff>} />
-        <Route path="/manage/stock" element={<RequireStaff><StockPage /></RequireStaff>} />
+        <Route
+          path="/manage"
+          element={<RequireStaff roles={ALL_STAFF_ROLES}><KitchenBoardPage /></RequireStaff>}
+        />
+        <Route
+          path="/manage/deliveries"
+          element={<RequireStaff roles={DELIVERY_ROLES}><DeliveriesPage /></RequireStaff>}
+        />
+        <Route
+          path="/manage/stock"
+          element={<RequireStaff roles={ALL_STAFF_ROLES}><StockPage /></RequireStaff>}
+        />
         <Route
           path="/manage/menu"
           element={<RequireStaff roles={MANAGER_ROLES}><MenuPage /></RequireStaff>}

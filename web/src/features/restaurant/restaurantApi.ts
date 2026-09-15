@@ -40,6 +40,12 @@ export type BoardOrder = {
   payment_status: string | null;
   /** Five wrong PINs. Only a manager override can hand it over now. */
   pin_locked: boolean;
+  /** PICKUP until a manager hands the order to one of the restaurant's
+   *  drivers; customers cannot order a delivery. */
+  fulfillment_type: "PICKUP" | "DELIVERY";
+  delivery_address: string | null;
+  /** The driver's name, once one is assigned. */
+  driver: string | null;
   items: {
     name: string;
     quantity: number;
@@ -62,6 +68,8 @@ export type HistoryOrder = {
   paid_at: string | null;
   finished_at: string;
   payment_status: string | null;
+  fulfillment_type: "PICKUP" | "DELIVERY";
+  delivery_address: string | null;
   items: { name: string; quantity: number; combo_name: string | null }[];
   /** The last staff action on it, from the order's history. Null for an order
    *  finished before that history was kept. */
@@ -71,6 +79,26 @@ export type HistoryOrder = {
     reason: string | null;
   } | null;
 };
+
+/** One delivery, as its driver needs it: what to take and where to. */
+export type Delivery = {
+  order_id: string;
+  order_number: number;
+  status: string;
+  total_minor: number;
+  currency: string;
+  created_at: string;
+  paid_at: string | null;
+  delivery_address: string | null;
+  customer_note: string | null;
+  driver: string | null;
+  /** Assigned to whoever is reading. A manager sees every delivery. */
+  mine: boolean;
+  items: BoardOrder["items"];
+};
+
+/** A driver a manager may hand an order to. */
+export type DriverOption = { membership_id: string; name: string };
 
 export type OrderHistory = {
   /** Today where the restaurant is. */
@@ -332,6 +360,40 @@ export const restaurantApi = api.injectEndpoints({
     orderHistory: build.query<OrderHistory, void>({
       query: () => ({ url: "/restaurant/orders/history" }),
       providesTags: ["Board"],
+    }),
+
+    // Tagged with the board: assigning, picking up and delivering move an
+    // order between the two screens, and both refresh together.
+    deliveries: build.query<Delivery[], void>({
+      query: () => ({ url: "/restaurant/deliveries" }),
+      providesTags: ["Board"],
+    }),
+
+    drivers: build.query<DriverOption[], void>({
+      query: () => ({ url: "/restaurant/drivers" }),
+      providesTags: ["Staff"],
+    }),
+
+    assignDriver: build.mutation<
+      { driver: string; delivery_address: string },
+      { orderId: string; membership_id: string; delivery_address: string }
+    >({
+      query: ({ orderId, ...body }) => ({
+        url: `/restaurant/orders/${orderId}/assign-driver`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["Board"],
+    }),
+
+    pickedUp: build.mutation<unknown, string>({
+      query: (orderId) => ({ url: `/restaurant/orders/${orderId}/picked-up`, method: "POST" }),
+      invalidatesTags: ["Board"],
+    }),
+
+    delivered: build.mutation<unknown, string>({
+      query: (orderId) => ({ url: `/restaurant/orders/${orderId}/delivered`, method: "POST" }),
+      invalidatesTags: ["Board", "RestaurantReport"],
     }),
 
     markReady: build.mutation<unknown, string>({
@@ -717,6 +779,11 @@ export const {
   useStaffLogoutEverywhereMutation,
   useOrderBoardQuery,
   useOrderHistoryQuery,
+  useDeliveriesQuery,
+  useDriversQuery,
+  useAssignDriverMutation,
+  usePickedUpMutation,
+  useDeliveredMutation,
   useMarkReadyMutation,
   useCompleteOrderMutation,
   useOverrideCompleteMutation,

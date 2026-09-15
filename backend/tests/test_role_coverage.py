@@ -18,9 +18,13 @@ from fastapi.routing import APIRoute
 
 from app.api import deps
 
+# ALL is the floor: every role that works in the restaurant. DRIVER is not
+# one of them -- a driver sees the orders assigned to them and no more of the
+# portal -- so it appears only under DELIVERY.
 ALL = frozenset({"ADMIN", "MANAGER", "KITCHEN", "CASHIER"})
 MANAGERS = frozenset({"ADMIN", "MANAGER"})
 ADMIN = frozenset({"ADMIN"})
+DELIVERY = frozenset({"ADMIN", "MANAGER", "DRIVER"})
 
 # Kept in step with "Staff roles" in README.md and with
 # web/src/features/restaurant/nav.ts.
@@ -32,7 +36,13 @@ EXPECTED = {
     ("POST", "/restaurant/orders/{order_id}/complete"): ALL,
     ("GET", "/restaurant/stock"): ALL,
     ("PATCH", "/restaurant/items/{item_id}/availability"): ALL,
+    # Delivery: a driver's own orders, and the two steps of running one.
+    ("GET", "/restaurant/deliveries"): DELIVERY,
+    ("POST", "/restaurant/orders/{order_id}/picked-up"): DELIVERY,
+    ("POST", "/restaurant/orders/{order_id}/delivered"): DELIVERY,
     # Managers: the exceptions to the counter's rules.
+    ("POST", "/restaurant/orders/{order_id}/assign-driver"): MANAGERS,
+    ("GET", "/restaurant/drivers"): MANAGERS,
     ("POST", "/restaurant/orders/{order_id}/override-complete"): MANAGERS,
     ("POST", "/restaurant/orders/{order_id}/cancel"): MANAGERS,
     # Managers: reports and the whole menu builder.

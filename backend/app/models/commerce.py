@@ -14,19 +14,39 @@ from app.db.base import Base, TimestampMixin, uuid_pk
 
 
 class OrderStatus(str, enum.Enum):
-    """Frozen OrderStatus values, pickup-only MVP subset (Appendix A.5).
+    """Frozen OrderStatus values (Appendix A.5), pickup plus the two a
+    restaurant's own driver needs.
 
-    Delivery states (READY_FOR_DELIVERY, DRIVER_ASSIGNED, DRIVER_ACCEPTED,
-    OUT_FOR_DELIVERY, DELIVERY_FAILED) are intentionally absent from this
-    build. They stay in the v3.0 baseline for the delivery release.
+    A customer still cannot order a delivery: checkout creates PICKUP orders
+    and nothing else. A manager can hand a paid order to one of the
+    restaurant's drivers, which is where READY_FOR_DELIVERY and
+    OUT_FOR_DELIVERY come in -- the food is ready but not at a counter, and
+    then it is with the driver.
+
+    DRIVER_ASSIGNED, DRIVER_ACCEPTED and DELIVERY_FAILED from the baseline
+    stay absent. The first two are not progress of the food but of the
+    paperwork -- a manager may assign or reassign at any point, which as
+    states would mean an edge from everywhere to everywhere -- so who is
+    delivering is a column on the order. The third belongs with the retry and
+    refund handling the delivery release brings.
     """
     PENDING_PAYMENT = "PENDING_PAYMENT"
     AUTO_ACCEPTED = "AUTO_ACCEPTED"
     PREPARING = "PREPARING"
     READY_FOR_PICKUP = "READY_FOR_PICKUP"
+    READY_FOR_DELIVERY = "READY_FOR_DELIVERY"
+    OUT_FOR_DELIVERY = "OUT_FOR_DELIVERY"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
+
+
+class FulfillmentType(str, enum.Enum):
+    """How the customer gets the food. Checkout always writes PICKUP; a
+    manager assigning a driver is what makes an order a DELIVERY."""
+
+    PICKUP = "PICKUP"
+    DELIVERY = "DELIVERY"
 
 
 # Normative transition matrix (Appendix A.6), pickup subset.
@@ -43,9 +63,22 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     },
     OrderStatus.PREPARING.value: {
         OrderStatus.READY_FOR_PICKUP.value,
+        # Which of the two "ready" states an order reaches is decided by its
+        # fulfillment_type, not by the person pressing the button.
+        OrderStatus.READY_FOR_DELIVERY.value,
         OrderStatus.CANCELLED.value,
     },
     OrderStatus.READY_FOR_PICKUP.value: {
+        OrderStatus.COMPLETED.value,
+        OrderStatus.CANCELLED.value,
+    },
+    OrderStatus.READY_FOR_DELIVERY.value: {
+        OrderStatus.OUT_FOR_DELIVERY.value,
+        OrderStatus.CANCELLED.value,
+    },
+    OrderStatus.OUT_FOR_DELIVERY.value: {
+        # Delivered. There is no PIN at a doorstep, so the driver saying so is
+        # what completes it -- recorded against them in order_events.
         OrderStatus.COMPLETED.value,
         OrderStatus.CANCELLED.value,
     },
@@ -124,6 +157,14 @@ class Order(Base, TimestampMixin):
 
     customer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Delivery. Null on every pickup order, which is all checkout creates: a
+    # manager assigning one of the restaurant's own drivers sets both, and the
+    # address is what they were told on the phone.
+    driver_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    delivery_address: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
     # Encrypted, not hashed: the authenticated customer must be able to read
     # it back. Never logged, never in a URL, never in a push body.
     pickup_pin_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -198,6 +239,10 @@ class OrderEventAction(str, enum.Enum):
     # Handed over without the customer's PIN, on a manager's say-so.
     COMPLETED_BY_OVERRIDE = "COMPLETED_BY_OVERRIDE"
     CANCELLED = "CANCELLED"
+    # Delivery: who a manager gave it to, and the driver's two steps.
+    ASSIGNED_DRIVER = "ASSIGNED_DRIVER"
+    PICKED_UP = "PICKED_UP"
+    DELIVERED = "DELIVERED"
 
 
 class OrderEvent(Base):

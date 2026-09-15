@@ -13,7 +13,7 @@ import {
 } from "@/features/restaurant/restaurantApi";
 import { errorMessage } from "@/services/apiClient";
 
-const ROLES = ["ADMIN", "MANAGER", "KITCHEN", "CASHIER"] as const;
+const ROLES = ["ADMIN", "MANAGER", "KITCHEN", "CASHIER", "DRIVER"] as const;
 type Role = (typeof ROLES)[number];
 
 const ROLE_HELP: Record<Role, string> = {
@@ -21,6 +21,7 @@ const ROLE_HELP: Record<Role, string> = {
   MANAGER: "Orders, menu, reports, and handing over or cancelling orders. No staff changes.",
   KITCHEN: "The order board and sold-out toggles.",
   CASHIER: "The counter: collect orders with PINs, and sold-out toggles.",
+  DRIVER: "Deliveries assigned to them, and nothing else of the portal.",
 };
 
 /** One row asking "are you sure", for one of the two actions that need it. */

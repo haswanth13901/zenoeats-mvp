@@ -14,15 +14,20 @@ board.
 | Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
 | Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
 | Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
-| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports |
+| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports, deliveries the restaurant runs itself |
 | Admin | Super admin portal: onboarding, activation, platform reports, CSV |
 | Infra | Docker Compose, Nginx, two Redis instances, Celery, Alembic, GitHub Actions |
 
 ## What is deliberately not here
 
-Delivery, drivers, GPS, WebSockets, cash payments, reconciliation, promotions,
-reviews, SMS, push, PITR. All of it stays in the v3.0 baseline for later
-releases. See "Adding delivery" at the bottom.
+Ordering a delivery, delivery fees, driver GPS and routing, WebSockets, cash
+payments, reconciliation, promotions, reviews, SMS, push, PITR. All of it
+stays in the v3.0 baseline for later releases. See "Adding delivery" at the
+bottom.
+
+A restaurant can send an order out with one of its own drivers -- a phone
+order it agreed to run -- but a customer cannot choose delivery, is not
+charged for one, and the address is typed by staff.
 
 ## The payment sequence
 
@@ -70,7 +75,7 @@ on the URL.
 | URL | Who | What |
 |---|---|---|
 | `spicehouse.zenoeats.local:8080/` | Customers | Menu, cart, checkout, order tracking |
-| `spicehouse.zenoeats.local:8080/manage` | Restaurant staff | Kitchen board, menu builder, staff, reports |
+| `spicehouse.zenoeats.local:8080/manage` | Restaurant staff | Kitchen board, deliveries, menu builder, staff, reports |
 | `admin.zenoeats.local:8080/admin` | Platform | Create and activate restaurants, platform reports |
 
 The restaurant screens must be opened **on that restaurant's subdomain**. The
@@ -94,6 +99,14 @@ system read surface.
   without the PIN or cancel a paid one, each with a reason; cancelling does
   not refund, which stays in the restaurant's Stripe Dashboard. A ticket
   refunded there is marked "refunded".
+- **Deliveries** is for the orders a restaurant runs out itself. Customers
+  cannot order a delivery: a manager assigns a paid order to one of the
+  restaurant's drivers and types the address taken by phone, which is what
+  makes it a delivery. The kitchen's "ready" then means ready for the driver,
+  and the driver marks it picked up, then delivered -- no PIN at a doorstep,
+  so the driver saying so is what completes it, recorded against them. A
+  driver sees their own deliveries and nothing else; a manager sees them all
+  and can press the same buttons for a driver whose hands are full.
 - **Stock** is the sold-out toggle for everyone on the floor: sold-out items
   first, a search box, one button per item.
 - **Menu** has four tabs. *Items* is everything the restaurant sells, each
@@ -121,26 +134,32 @@ system read surface.
 
 ### Staff roles
 
-Every member of a restaurant's team has one of four roles. The same person
+Every member of a restaurant's team has one of five roles. The same person
 can hold a different role at another restaurant.
 
-| Role | Kitchen | Stock | Menu | Staff | Reports |
+| Role | Kitchen | Deliveries | Stock | Menu | Staff | Reports |
+|---|---|---|---|---|---|---|
+| Admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Manager | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| Kitchen | ✓ | | ✓ | | | |
+| Cashier | ✓ | | ✓ | | | |
+| Driver | | ✓ | | | | |
+
+A driver is not floor staff with an extra screen. Deliveries is the whole
+portal to them, and it shows only the orders assigned to them.
+
+The actions split further:
+
+| Action | Admin | Manager | Kitchen | Cashier | Driver |
 |---|---|---|---|---|---|
-| Admin | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Manager | ✓ | ✓ | ✓ | | ✓ |
-| Kitchen | ✓ | ✓ | | | |
-| Cashier | ✓ | ✓ | | | |
-
-Within the Kitchen screen, the actions split further:
-
-| Action | Admin | Manager | Kitchen | Cashier |
-|---|---|---|---|---|
-| See the board, mark ready, collect with PIN | ✓ | ✓ | ✓ | ✓ |
-| Mark items sold out or back in stock | ✓ | ✓ | ✓ | ✓ |
-| Hand over without the PIN | ✓ | ✓ | | |
-| Cancel a paid order | ✓ | ✓ | | |
-| Edit the menu, read reports | ✓ | ✓ | | |
-| Invite and remove staff, change roles, reset passwords | ✓ | | | |
+| See the board, mark ready, collect with PIN | ✓ | ✓ | ✓ | ✓ | |
+| Mark items sold out or back in stock | ✓ | ✓ | ✓ | ✓ | |
+| Hand over without the PIN | ✓ | ✓ | | | |
+| Cancel a paid order | ✓ | ✓ | | | |
+| Edit the menu, read reports | ✓ | ✓ | | | |
+| Send an order out with a driver | ✓ | ✓ | | | |
+| Pick up and deliver | ✓ | ✓ | | | ✓ |
+| Invite and remove staff, change roles, reset passwords | ✓ | | | | |
 
 ### How roles are enforced
 
@@ -441,9 +460,16 @@ The production edge and deployment shape are in `docker-compose.prod.yml` and
 
 ## Adding delivery later
 
-The seams are already in place. `Order.fulfillment_type` exists and is always
-`PICKUP`. The transition matrix in `app/models/commerce.py` is missing exactly
-the five delivery states from Appendix A.5; add them there and the guard
-rejects everything you have not explicitly allowed. Polling in the order page
-is the thing to replace with WebSockets, and section 12 of the baseline
-already specifies how.
+Half of it is here. `Order.fulfillment_type` is `PICKUP` until a manager
+sends an order out, and the transition matrix in `app/models/commerce.py`
+carries READY_FOR_DELIVERY and OUT_FOR_DELIVERY. Who is delivering is a
+column, `orders.driver_user_id`, rather than the baseline's DRIVER_ASSIGNED
+and DRIVER_ACCEPTED states: a manager may assign or reassign at any point,
+which as states would mean an edge from everywhere to everywhere.
+
+What a customer-facing delivery release still needs: delivery as a choice at
+checkout, with the address collected and validated there; a delivery fee and
+its tax; a delivery radius; DELIVERY_FAILED with the retry and refund
+handling around it; and driver location if that is wanted. Polling in the
+order page is the thing to replace with WebSockets, and section 12 of the
+baseline already specifies how.

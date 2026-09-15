@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useAppSelector } from "@/app/hooks";
 import { Shell } from "@/components/layout/Shell";
 import { selectSession } from "@/features/session/sessionSlice";
-import { navFor } from "../nav";
+import { homeFor, navFor } from "../nav";
 import { StaffSignOut } from "./StaffSignOut";
 
 /**
@@ -26,7 +26,7 @@ export function ManageShell({ children }: { children: ReactNode }) {
   return (
     <Shell
       title={restaurantName ?? "Restaurant"}
-      titleHref="/manage"
+      titleHref={homeFor(roleCode)}
       nav={navFor(roleCode)}
       action={<StaffSignOut />}
     >

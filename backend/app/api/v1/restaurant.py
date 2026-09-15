@@ -28,9 +28,9 @@ from app.db.session import system_session, tenant_session
 from app.models import (
     Combo, ComboSlot, ComboSlotItem, DiscountKind, Item, ItemIncludedOption,
     ItemModifierGroup, ItemType, Meal, MealItem, ModifierGroup,
-    ModifierGroupItemType, ModifierOption, Order, OrderEvent, OrderEventAction,
-    OrderItem, OrderStatus, Payment, PaymentStatus, Restaurant, RestaurantUser,
-    SelectionType, StaffRole, StaffStatus,
+    FulfillmentType, ModifierGroupItemType, ModifierOption, Order, OrderEvent,
+    OrderEventAction, OrderItem, OrderStatus, Payment, PaymentStatus, Restaurant,
+    RestaurantUser, SelectionType, StaffRole, StaffStatus,
     User, UserKind,
 )
 from app.schemas.api import (
@@ -263,10 +263,16 @@ def change_password(
 # ANY_STAFF is every role, the floor included. It used to be called KITCHEN,
 # which read as "kitchen staff only" to anyone adding an endpoint.
 MANAGE = require_staff(StaffRole.ADMIN, StaffRole.MANAGER)
+# Deliberately not DRIVER: a driver has no business on the board, in the
+# menu, in stock or in reports. Everything they may do is under DELIVERY.
 ANY_STAFF = require_staff(
     StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.KITCHEN, StaffRole.CASHIER
 )
 STAFF_ADMIN = require_staff(StaffRole.ADMIN)
+# The delivery surface. A driver sees only the orders assigned to them, which
+# the endpoints enforce; a manager sees every delivery and may act for a driver
+# who is on the road with their hands full.
+DELIVERY = require_staff(StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.DRIVER)
 
 
 class MealIn(BaseModel):
@@ -2199,6 +2205,10 @@ def order_board(
         OrderStatus.AUTO_ACCEPTED.value,
         OrderStatus.PREPARING.value,
         OrderStatus.READY_FOR_PICKUP.value,
+        # A delivery is still the kitchen's order until the driver has it, and
+        # the counter still wants to see where it got to afterwards.
+        OrderStatus.READY_FOR_DELIVERY.value,
+        OrderStatus.OUT_FOR_DELIVERY.value,
     ]
     orders = db.execute(
         select(Order)
@@ -2214,6 +2224,7 @@ def order_board(
             )
         ).all()
     ) if orders else {}
+    driver_names = _driver_names(orders)
 
     return [
         {
@@ -2230,6 +2241,11 @@ def order_board(
             "customer_note": o.customer_note,
             "payment_status": payment_status.get(o.id),
             "pin_locked": o.pickup_pin_failed_attempts >= PIN_ATTEMPTS,
+            # Delivery, and who is running it. Null on a pickup order, which
+            # is every order until a manager assigns a driver.
+            "fulfillment_type": o.fulfillment_type,
+            "delivery_address": o.delivery_address,
+            "driver": driver_names.get(o.driver_user_id),
             # combo_name and combo_group ride along so the screen can draw a
             # meal deal as one block. Without them a combo reads as three
             # unrelated items and gets plated as three separate orders.
@@ -2326,6 +2342,8 @@ def order_history(
             "paid_at": o.paid_at.isoformat() if o.paid_at else None,
             "finished_at": (o.completed_at or o.updated_at).isoformat(),
             "payment_status": payment_status.get(o.id),
+            "fulfillment_type": o.fulfillment_type,
+            "delivery_address": o.delivery_address,
             "items": [
                 {"name": i.name_snapshot, "quantity": i.quantity, "combo_name": i.combo_name_snapshot}
                 for i in o.items
@@ -2350,7 +2368,14 @@ def mark_ready(
     order = db.get(Order, order_id, with_for_update=True)
     if order is None:
         raise errors.order_not_found()
-    transition(order, OrderStatus.READY_FOR_PICKUP.value)
+    # One button on the board, two destinations: a delivery is ready for its
+    # driver, not for a counter, and it is the order that knows which it is.
+    ready = (
+        OrderStatus.READY_FOR_DELIVERY.value
+        if order.fulfillment_type == FulfillmentType.DELIVERY.value
+        else OrderStatus.READY_FOR_PICKUP.value
+    )
+    transition(order, ready)
     _record(db, order, membership, OrderEventAction.MARKED_READY)
     return {"order_id": str(order.id), "status": order.status}
 
@@ -2539,6 +2564,241 @@ def cancel_order(
             PaymentStatus.REFUNDED.value, PaymentStatus.REFUND_PENDING.value
         ),
     }
+
+
+# ------------------------------------------------------------- delivery ----
+#
+# A customer cannot order a delivery in this build. This is for the order a
+# restaurant agrees over the phone to run out itself: a manager gives a paid
+# order to one of its drivers with the address, and the driver's screen is
+# that order and no more of the portal.
+
+
+class AssignDriverIn(BaseModel):
+    # The membership, not the person: it is what proves this driver works
+    # here, and it is what the team list already gives the portal.
+    membership_id: UUID
+    delivery_address: str = Field(min_length=1, max_length=300)
+
+
+def _driver_names(orders) -> dict:
+    """The name to show for each order's driver, read in one go.
+
+    users is a platform table -- there is no tenant policy on it -- so it is
+    read with the system role, exactly as the team list does.
+    """
+    ids = {o.driver_user_id for o in orders if o.driver_user_id}
+    if not ids:
+        return {}
+    with system_session() as sys_db:
+        return {
+            user.id: user.full_name or user.email
+            for user in sys_db.execute(select(User).where(User.id.in_(ids))).scalars()
+        }
+
+
+def _delivery_order(db: Session, order_id: UUID, membership: RestaurantUser) -> Order:
+    """The order a driver may act on: assigned to them, and still in play.
+
+    A manager may act on any delivery -- a driver on the road calling it in --
+    but a driver only on their own. RLS has already confined this to the
+    restaurant; this is about which person inside it.
+    """
+    order = db.get(Order, order_id, with_for_update=True)
+    if order is None:
+        raise errors.order_not_found()
+    if order.fulfillment_type != FulfillmentType.DELIVERY.value:
+        raise errors.order_state_conflict("This order is a collection, not a delivery.")
+    if (
+        membership.role_code == StaffRole.DRIVER.value
+        and order.driver_user_id != membership.user_id
+    ):
+        # Not "this is someone else's": a driver has no way to learn which
+        # orders exist but are not theirs.
+        raise errors.order_not_found()
+    return order
+
+
+@router.post("/orders/{order_id}/assign-driver")
+def assign_driver(
+    order_id: UUID,
+    body: AssignDriverIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(MANAGE),
+):
+    """Give a paid order to one of the restaurant's drivers, with the address.
+
+    This is what turns a pickup order into a delivery, because nothing else
+    does: checkout has no delivery option and no address to collect. Managers
+    only, like the other two exceptions to the counter's rules.
+
+    Reassigning is the same call again -- a driver who called in sick has
+    their orders handed on, and each assignment is recorded with who did it
+    and who took it.
+    """
+    driver = db.get(RestaurantUser, body.membership_id)
+    if (
+        driver is None
+        or driver.status != StaffStatus.ACTIVE.value
+        or driver.role_code != StaffRole.DRIVER.value
+    ):
+        raise errors.validation_error("Choose a driver from this restaurant's team.")
+
+    order = db.get(Order, order_id, with_for_update=True)
+    if order is None:
+        raise errors.order_not_found()
+    if order.status in (
+        OrderStatus.COMPLETED.value, OrderStatus.CANCELLED.value, OrderStatus.EXPIRED.value
+    ):
+        raise errors.order_state_conflict("This order is finished.")
+    _require_paid(db, order)
+    if order.status == OrderStatus.READY_FOR_PICKUP.value:
+        # It was ready at the counter; a delivery is ready for its driver.
+        transition(order, OrderStatus.READY_FOR_DELIVERY.value)
+
+    order.fulfillment_type = FulfillmentType.DELIVERY.value
+    order.driver_user_id = driver.user_id
+    order.delivery_address = body.delivery_address.strip()
+
+    name = _driver_names([order]).get(driver.user_id) or "a driver"
+    _record(db, order, membership, OrderEventAction.ASSIGNED_DRIVER, f"to {name}")
+    return {
+        "order_id": str(order.id),
+        "status": order.status,
+        "driver": name,
+        "delivery_address": order.delivery_address,
+    }
+
+
+@router.get("/drivers")
+def drivers(
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    _=Depends(MANAGE),
+):
+    """The drivers a manager may hand an order to.
+
+    Names and membership ids, nothing else. The full team list is admins only,
+    and a manager assigning a delivery does not need it -- only who is here to
+    drive.
+    """
+    rows = db.execute(
+        select(RestaurantUser).where(
+            RestaurantUser.role_code == StaffRole.DRIVER.value,
+            RestaurantUser.status == StaffStatus.ACTIVE.value,
+        )
+    ).scalars().all()
+
+    names = {}
+    if rows:
+        with system_session() as sys_db:
+            for user in sys_db.execute(
+                select(User).where(User.id.in_([r.user_id for r in rows]))
+            ).scalars():
+                names[user.id] = user.full_name or user.email
+
+    return sorted(
+        ({"membership_id": str(r.id), "name": names.get(r.user_id, "unknown")} for r in rows),
+        key=lambda d: d["name"].lower(),
+    )
+
+
+@router.get("/deliveries")
+def deliveries(
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(DELIVERY),
+):
+    """The deliveries in play: a driver's own, or every one for a manager.
+
+    Everything a driver needs to run the order and nothing else about the
+    restaurant: what to take, where to, and what they have already picked up.
+    """
+    active = [
+        OrderStatus.AUTO_ACCEPTED.value,
+        OrderStatus.PREPARING.value,
+        OrderStatus.READY_FOR_DELIVERY.value,
+        OrderStatus.OUT_FOR_DELIVERY.value,
+    ]
+    query = (
+        select(Order)
+        .where(
+            Order.fulfillment_type == FulfillmentType.DELIVERY.value,
+            Order.status.in_(active),
+        )
+        .order_by(Order.created_at)
+        .options(selectinload(Order.items).selectinload(OrderItem.modifiers))
+    )
+    if membership.role_code == StaffRole.DRIVER.value:
+        query = query.where(Order.driver_user_id == membership.user_id)
+
+    orders = db.execute(query).scalars().all()
+    names = _driver_names(orders)
+    return [
+        {
+            "order_id": str(o.id),
+            "order_number": o.order_number,
+            "status": o.status,
+            "total_minor": o.total_minor,
+            "currency": o.currency,
+            "created_at": o.created_at.isoformat(),
+            "paid_at": o.paid_at.isoformat() if o.paid_at else None,
+            "delivery_address": o.delivery_address,
+            "customer_note": o.customer_note,
+            "driver": names.get(o.driver_user_id),
+            "mine": o.driver_user_id == membership.user_id,
+            "items": [
+                {
+                    "name": i.name_snapshot,
+                    "combo_name": i.combo_name_snapshot,
+                    "combo_group": i.combo_group,
+                    "quantity": i.quantity,
+                    "note": i.item_note,
+                    "modifiers": [
+                        f"{m.group_name_snapshot}: {m.option_name_snapshot}"
+                        for m in i.modifiers
+                    ],
+                }
+                for i in o.items
+            ],
+        }
+        for o in orders
+    ]
+
+
+@router.post("/orders/{order_id}/picked-up")
+def picked_up(
+    order_id: UUID,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(DELIVERY),
+):
+    """The driver has the food and is on the way."""
+    order = _delivery_order(db, order_id, membership)
+    transition(order, OrderStatus.OUT_FOR_DELIVERY.value)
+    _record(db, order, membership, OrderEventAction.PICKED_UP)
+    return {"order_id": str(order.id), "status": order.status}
+
+
+@router.post("/orders/{order_id}/delivered")
+def delivered(
+    order_id: UUID,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(DELIVERY),
+):
+    """Handed to the customer at their door, which finishes the order.
+
+    No PIN: there is no counter and no screen to read it from. The driver
+    saying so is what completes it, and order_events records who said it.
+    """
+    order = _delivery_order(db, order_id, membership)
+    _require_paid(db, order)
+    transition(order, OrderStatus.COMPLETED.value)
+    order.completed_at = utcnow()
+    _record(db, order, membership, OrderEventAction.DELIVERED)
+    return {"order_id": str(order.id), "status": order.status}
 
 
 # ---------------------------------------------------------------- staff ----
