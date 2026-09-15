@@ -2191,6 +2191,10 @@ def order_board(
             "total_minor": o.total_minor,
             "currency": o.currency,
             "created_at": o.created_at.isoformat(),
+            # When the kitchen's clock starts. created_at is when checkout
+            # began, which can be minutes before the payment that put the
+            # ticket on the board; timing from it made every order look late.
+            "paid_at": o.paid_at.isoformat() if o.paid_at else None,
             "customer_note": o.customer_note,
             "payment_status": payment_status.get(o.id),
             "pin_locked": o.pickup_pin_failed_attempts >= PIN_ATTEMPTS,
@@ -2214,6 +2218,94 @@ def order_board(
         }
         for o in orders
     ]
+
+
+HISTORY_LIMIT = 200
+
+
+@router.get("/orders/history")
+def order_history(
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
+    _=Depends(ANY_STAFF),
+):
+    """Today's orders that have left the board, newest first.
+
+    Once handed over or cancelled, an order vanished from every screen the
+    counter has, so "I ordered twenty minutes ago, where is it?" had no answer
+    short of the Stripe Dashboard. This is today -- the restaurant's today, in
+    its timezone -- by the day each order was paid.
+
+    Each carries the last thing staff did to it, from order_events: who handed
+    it over or cancelled it, and for an override or a cancellation, the reason
+    they gave -- which is what settles a disputed pickup.
+    """
+    zone = _zone(restaurant.timezone)
+    today = datetime.now(zone).date()
+    start = datetime.combine(today, time(0), tzinfo=zone)
+    end = datetime.combine(today + timedelta(days=1), time(0), tzinfo=zone)
+
+    orders = db.execute(
+        select(Order)
+        .where(
+            Order.status.in_([OrderStatus.COMPLETED.value, OrderStatus.CANCELLED.value]),
+            Order.paid_at >= start,
+            Order.paid_at < end,
+        )
+        .order_by(func.coalesce(Order.completed_at, Order.updated_at).desc())
+        .limit(HISTORY_LIMIT)
+        .options(selectinload(Order.items).selectinload(OrderItem.modifiers))
+    ).scalars().all()
+
+    # The last event per order: what left it here, and who did it.
+    last_event: dict = {}
+    if orders:
+        for event in db.execute(
+            select(OrderEvent)
+            .where(OrderEvent.order_id.in_([o.id for o in orders]))
+            .order_by(OrderEvent.created_at)
+        ).scalars().all():
+            last_event[event.order_id] = event
+
+    names: dict = {}
+    actor_ids = {event.actor_user_id for event in last_event.values()}
+    if actor_ids:
+        with system_session() as sys_db:
+            for user in sys_db.execute(select(User).where(User.id.in_(actor_ids))).scalars():
+                names[user.id] = user.full_name or user.email
+
+    payment_status = dict(
+        db.execute(
+            select(Payment.order_id, Payment.status).where(
+                Payment.order_id.in_([o.id for o in orders])
+            )
+        ).all()
+    ) if orders else {}
+
+    out = []
+    for o in orders:
+        event = last_event.get(o.id)
+        out.append({
+            "order_id": str(o.id),
+            "order_number": o.order_number,
+            "status": o.status,
+            "total_minor": o.total_minor,
+            "currency": o.currency,
+            "paid_at": o.paid_at.isoformat() if o.paid_at else None,
+            "finished_at": (o.completed_at or o.updated_at).isoformat(),
+            "payment_status": payment_status.get(o.id),
+            "items": [
+                {"name": i.name_snapshot, "quantity": i.quantity, "combo_name": i.combo_name_snapshot}
+                for i in o.items
+            ],
+            # Null for an order finished before events were recorded.
+            "last_action": None if event is None else {
+                "action": event.action,
+                "by": names.get(event.actor_user_id),
+                "reason": event.reason,
+            },
+        })
+    return {"date": today.isoformat(), "timezone": zone.key, "orders": out}
 
 
 @router.post("/orders/{order_id}/ready")

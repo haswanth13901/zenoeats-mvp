@@ -27,6 +27,7 @@ ADMIN = frozenset({"ADMIN"})
 EXPECTED = {
     # The floor: the board, handing over with a PIN, and stock.
     ("GET", "/restaurant/orders"): ALL,
+    ("GET", "/restaurant/orders/history"): ALL,
     ("POST", "/restaurant/orders/{order_id}/ready"): ALL,
     ("POST", "/restaurant/orders/{order_id}/complete"): ALL,
     ("GET", "/restaurant/stock"): ALL,

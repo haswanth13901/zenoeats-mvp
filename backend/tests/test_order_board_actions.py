@@ -80,11 +80,12 @@ def shop(admin_user, cleanup):
         cook = None
 
         @staticmethod
-        def order(status="READY_FOR_PICKUP", payment="PAID", paid=True, attempts=0):
+        def order(status="READY_FOR_PICKUP", payment="PAID", paid=True, attempts=0,
+                  paid_at=None):
             from app.core.crypto import encrypt_field
             from app.models import Order, Payment
 
-            now = utcnow()
+            now = paid_at or utcnow()
             with tenant_session(restaurant.id) as session:
                 order = Order(
                     restaurant_id=restaurant.id, order_number=next(numbers),
@@ -260,3 +261,53 @@ def test_the_application_cannot_rewrite_an_event(shop):
                 text("UPDATE order_events SET reason = 'nothing to see' WHERE order_id = :i"),
                 {"i": order_id},
             )
+
+
+# ------------------------------------------------------------- the day ---
+#
+# The board timed tickets from checkout start, and an order handed over or
+# cancelled vanished from every screen the counter has.
+
+
+def test_a_ticket_says_when_it_was_paid(shop):
+    order_id = shop.order(status="PREPARING")
+    ticket = next(o for o in shop.cook.get("/api/v1/restaurant/orders").json()
+                  if o["order_id"] == order_id)
+    assert ticket["paid_at"] is not None
+
+
+def test_todays_finished_orders_say_what_happened_and_who_did_it(shop):
+    from datetime import timedelta
+
+    from app.db.base import utcnow
+
+    with_pin = shop.order()
+    assert _post(shop.cook, with_pin, "complete", pin=PIN).status_code == 200
+    overridden = shop.order()
+    assert _post(shop.manager, overridden, "override-complete", reason="Phone died").status_code == 200
+    cancelled = shop.order(status="PREPARING", payment="REFUNDED")
+    assert _post(shop.manager, cancelled, "cancel", reason="Never came").status_code == 200
+    still_cooking = shop.order(status="PREPARING")
+    yesterdays = shop.order(status="COMPLETED", paid_at=utcnow() - timedelta(hours=30))
+
+    res = shop.cook.get("/api/v1/restaurant/orders/history")  # the floor can read it
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["timezone"] == "America/Chicago"
+    by_id = {o["order_id"]: o for o in body["orders"]}
+
+    assert set(by_id) == {with_pin, overridden, cancelled}
+    assert still_cooking not in by_id and yesterdays not in by_id
+
+    assert by_id[with_pin]["last_action"]["action"] == "COMPLETED_WITH_PIN"
+    assert by_id[with_pin]["last_action"]["by"]  # the cook, by name or email
+    assert by_id[overridden]["last_action"] | {"by": None} == {
+        "action": "COMPLETED_BY_OVERRIDE", "by": None, "reason": "Phone died",
+    }
+    assert by_id[cancelled]["status"] == "CANCELLED"
+    assert by_id[cancelled]["last_action"]["reason"] == "Never came"
+    assert by_id[cancelled]["payment_status"] == "REFUNDED"
+    assert by_id[with_pin]["items"] == []  # the fixture's orders carry no lines
+
+    # Newest first.
+    assert body["orders"][0]["order_id"] == cancelled

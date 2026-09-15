@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useAppSelector } from "@/app/hooks";
 import { Empty, ErrorNote } from "@/components/common/Feedback";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
@@ -7,9 +7,12 @@ import {
   useCompleteOrderMutation,
   useMarkReadyMutation,
   useOrderBoardQuery,
+  useOrderHistoryQuery,
   useOverrideCompleteMutation,
   type BoardOrder,
+  type HistoryOrder,
 } from "@/features/restaurant/restaurantApi";
+import { useNewOrderAlert } from "@/features/restaurant/newOrderAlert";
 import { canManage as roleCanManage } from "@/features/restaurant/nav";
 import { selectSession } from "@/features/session/sessionSlice";
 import { ApiError, errorMessage } from "@/services/apiClient";
@@ -21,6 +24,10 @@ export function KitchenBoardPage() {
   // the time it takes to read a new ticket. RTK Query supersedes an in-flight
   // request rather than stacking them, so a slow API cannot pile up work.
   const board = useOrderBoardQuery(undefined, { pollingInterval: 5_000 });
+  // RTK Query keeps the same array while nothing changed, so this only
+  // recomputes when the board does.
+  const orderIds = useMemo(() => board.data?.map((o) => o.order_id), [board.data]);
+  const alert = useNewOrderAlert(orderIds);
   const [markReady] = useMarkReadyMutation();
   const [completeOrder] = useCompleteOrderMutation();
   const [overrideComplete] = useOverrideCompleteMutation();
@@ -151,11 +158,31 @@ export function KitchenBoardPage() {
         <p className="mb-4 border-l-2 border-ink bg-paper px-3 py-2 text-sm">{notice}</p>
       )}
 
+      <div className="mb-4 flex items-center justify-end gap-3 text-xs">
+        {alert.soundReady ? (
+          <>
+            <span className="text-muted">Sound on for new orders</span>
+            <button className="text-muted underline" onClick={alert.disableSound}>
+              turn off
+            </button>
+          </>
+        ) : (
+          <button className="btn-quiet px-3 py-1.5 text-sm" onClick={() => void alert.enableSound()}>
+            {alert.soundWanted ? "Tap to turn sound back on" : "Turn on sound for new orders"}
+          </button>
+        )}
+      </div>
+
       <div className="grid gap-8 lg:grid-cols-2">
         <Column title={`Making now (${preparing.length})`}>
           {!preparing.length && <Empty>Nothing in the queue.</Empty>}
           {preparing.map((o) => (
-            <Ticket key={o.order_id} order={o}>
+            <Ticket
+              key={o.order_id}
+              order={o}
+              fresh={o.order_id in alert.fresh}
+              onSeen={() => alert.acknowledge(o.order_id)}
+            >
               {actionFor(o) ?? (
                 <>
                   <button
@@ -175,7 +202,12 @@ export function KitchenBoardPage() {
         <Column title={`Waiting for collection (${waiting.length})`}>
           {!waiting.length && <Empty>Nothing waiting at the counter.</Empty>}
           {waiting.map((o) => (
-            <Ticket key={o.order_id} order={o}>
+            <Ticket
+              key={o.order_id}
+              order={o}
+              fresh={o.order_id in alert.fresh}
+              onSeen={() => alert.acknowledge(o.order_id)}
+            >
               {actionFor(o) ??
                 (o.pin_locked ? (
                   <div>
@@ -245,6 +277,8 @@ export function KitchenBoardPage() {
           ))}
         </Column>
       </div>
+
+      <TodayHistory />
 
       <p className="mt-8 text-xs text-muted">
         Unpaid orders never reach this board. An order appears only after Stripe
@@ -332,12 +366,32 @@ function Column({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Ticket({ order, children }: { order: BoardOrder; children: ReactNode }) {
-  const waited = Math.floor((Date.now() - new Date(order.created_at).getTime()) / 60000);
+function Ticket({
+  order,
+  fresh,
+  onSeen,
+  children,
+}: {
+  order: BoardOrder;
+  fresh?: boolean;
+  onSeen?: () => void;
+  children: ReactNode;
+}) {
+  // From payment, which is when the order reached the kitchen. From checkout
+  // start, a customer slow at the card step made the ticket look late on
+  // arrival.
+  const since = order.paid_at ?? order.created_at;
+  const waited = Math.floor((Date.now() - new Date(since).getTime()) / 60000);
   return (
-    <article className="border border-hairline bg-surface p-4">
+    <article
+      className={`bg-surface p-4 ${fresh ? "border-2 border-brick" : "border border-hairline"}`}
+      onClick={onSeen}
+    >
       <header className="flex items-baseline justify-between gap-3">
         <span className="font-display text-xl">#{order.order_number}</span>
+        {fresh && (
+          <span className="rounded bg-brick px-2 py-0.5 text-xs font-medium text-white">new</span>
+        )}
         {/* A refund in the Stripe Dashboard never moves the order, so this is
             the only sign on the board that nobody is paying for it now. */}
         {(order.payment_status === "REFUNDED" ||
@@ -448,4 +502,96 @@ export function groupTicket(items: TicketLine[]): TicketEntry[] {
   }
 
   return entries;
+}
+
+
+const FINISHED: Record<string, string> = {
+  COMPLETED_WITH_PIN: "handed over",
+  COMPLETED_BY_OVERRIDE: "handed over without PIN",
+  CANCELLED: "cancelled",
+};
+
+/**
+ * Today's orders that have left the board.
+ *
+ * Once handed over or cancelled, an order used to vanish from every screen the
+ * counter has, so "I ordered twenty minutes ago -- where is it?" had no answer.
+ * Searchable by order number, which is what a customer reads out.
+ */
+function TodayHistory() {
+  const history = useOrderHistoryQuery(undefined, { pollingInterval: 30_000 });
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const orders = history.data?.orders ?? [];
+  const needle = search.replace(/\D/g, "");
+  const shown = needle ? orders.filter((o) => String(o.order_number).includes(needle)) : orders;
+
+  return (
+    <section className="mt-10 border-t border-hairline pt-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button className="text-sm font-medium" onClick={() => setOpen((o) => !o)}>
+          {open ? "▾" : "▸"} Done today ({orders.length})
+        </button>
+        {open && orders.length > 0 && (
+          <input
+            className="field w-40 py-1 text-sm"
+            inputMode="numeric"
+            placeholder="Order number"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        )}
+      </div>
+
+      {open && (
+        <div className="mt-3">
+          {history.error ? (
+            <ErrorNote message={errorMessage(history.error)} />
+          ) : !orders.length ? (
+            <Empty>Nothing handed over or cancelled yet today.</Empty>
+          ) : !shown.length ? (
+            <Empty>No order today matches #{needle}.</Empty>
+          ) : (
+            <ul className="divide-y divide-hairline border border-hairline bg-surface">
+              {shown.map((o) => (
+                <HistoryRow key={o.order_id} order={o} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HistoryRow({ order }: { order: HistoryOrder }) {
+  const action = order.last_action;
+  const what =
+    (action && FINISHED[action.action]) ??
+    (order.status === "CANCELLED" ? "cancelled" : "handed over");
+  const time = new Date(order.finished_at).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const summary = order.items.map((i) => `${i.quantity}× ${i.name}`).join(", ");
+
+  return (
+    <li className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
+      <span className="font-display w-16">#{order.order_number}</span>
+      <span className={order.status === "CANCELLED" ? "text-brick" : undefined}>
+        {what} {time}
+        {action?.by && <span className="text-muted"> · {action.by}</span>}
+      </span>
+      {(order.payment_status === "REFUNDED" || order.payment_status === "PARTIALLY_REFUNDED") && (
+        <span className="rounded bg-brick/10 px-2 py-0.5 text-xs text-brick">
+          {order.payment_status === "REFUNDED" ? "refunded" : "partly refunded"}
+        </span>
+      )}
+      <span className="min-w-0 flex-1 truncate text-xs text-muted">{summary}</span>
+      {action?.reason && (
+        <span className="w-full text-xs text-muted">Reason: {action.reason}</span>
+      )}
+    </li>
+  );
 }

@@ -31,6 +31,8 @@ export type BoardOrder = {
   total_minor: number;
   currency: string;
   created_at: string;
+  /** When payment put it on the board: where the kitchen's clock starts. */
+  paid_at: string | null;
   customer_note: string | null;
   /** PAID, or REFUNDED / PARTIALLY_REFUNDED after a refund from the Stripe
    *  Dashboard. A refund never moves the order itself, so this is how the
@@ -48,6 +50,33 @@ export type BoardOrder = {
     combo_name: string | null;
     combo_group: number | null;
   }[];
+};
+
+/** An order that left the board today: handed over or cancelled. */
+export type HistoryOrder = {
+  order_id: string;
+  order_number: number;
+  status: "COMPLETED" | "CANCELLED";
+  total_minor: number;
+  currency: string;
+  paid_at: string | null;
+  finished_at: string;
+  payment_status: string | null;
+  items: { name: string; quantity: number; combo_name: string | null }[];
+  /** The last staff action on it, from the order's history. Null for an order
+   *  finished before that history was kept. */
+  last_action: {
+    action: "MARKED_READY" | "COMPLETED_WITH_PIN" | "COMPLETED_BY_OVERRIDE" | "CANCELLED";
+    by: string | null;
+    reason: string | null;
+  } | null;
+};
+
+export type OrderHistory = {
+  /** Today where the restaurant is. */
+  date: string;
+  timezone: string;
+  orders: HistoryOrder[];
 };
 
 /** Cancelling never moves money; refund_needed says the refund is still to
@@ -289,6 +318,13 @@ export const restaurantApi = api.injectEndpoints({
 
     orderBoard: build.query<BoardOrder[], void>({
       query: () => ({ url: "/restaurant/orders" }),
+      providesTags: ["Board"],
+    }),
+
+    // Tagged with the board, so handing over or cancelling moves an order
+    // from one list to the other in the same refresh.
+    orderHistory: build.query<OrderHistory, void>({
+      query: () => ({ url: "/restaurant/orders/history" }),
       providesTags: ["Board"],
     }),
 
@@ -673,6 +709,7 @@ export const {
   useStaffMeQuery,
   useStaffLogoutMutation,
   useOrderBoardQuery,
+  useOrderHistoryQuery,
   useMarkReadyMutation,
   useCompleteOrderMutation,
   useOverrideCompleteMutation,

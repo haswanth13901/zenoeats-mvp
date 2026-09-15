@@ -85,8 +85,11 @@ system read surface.
 ### Restaurant screens
 
 - **Kitchen** polls every five seconds. Unpaid orders never appear here.
-  Tickets show quantity, modifiers and notes, and turn the elapsed time red
-  past fifteen minutes. "Collect with PIN" needs the customer's six digits;
+  A new order chimes (once sound is switched on with a tap, which browsers
+  require), is marked "new" and counts in the tab title. Tickets show
+  quantity, modifiers and notes, and time from payment, turning red past
+  fifteen minutes. "Done today" lists today's handed-over and cancelled
+  orders, searchable by number, with who did it and any reason given. "Collect with PIN" needs the customer's six digits;
   five wrong attempts locks that order. A manager can hand an order over
   without the PIN or cancel a paid one, each with a reason; cancelling does
   not refund, which stays in the restaurant's Stripe Dashboard. A ticket
