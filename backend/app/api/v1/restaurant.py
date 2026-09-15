@@ -528,12 +528,13 @@ def create_meal(
     db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
+    name = _required_name(body.name, "A meal period needs a name.")
     starts, ends = _resolve_hours(
         body.model_dump(exclude_unset=True), (None, None)
     )
     meal = Meal(
         restaurant_id=restaurant.id,
-        name=body.name,
+        name=name,
         sort_order=body.sort_order,
         starts_at=starts,
         ends_at=ends,
@@ -689,6 +690,64 @@ def remove_meal_item(
 
     db.delete(link)
     return {"meal_id": str(meal_id), "item_id": str(item_id), "removed": True}
+
+
+def _required_name(value: str | None, message: str) -> str:
+    """A name with its surrounding spaces trimmed, refused if nothing is left.
+
+    The update endpoints always did this; the create endpoints stored " " as a
+    name, which reads on a menu as an item or heading with no name at all.
+    """
+    name = (value or "").strip()
+    if not name:
+        raise errors.validation_error(message)
+    return name
+
+
+def _check_group_rules(
+    name: str,
+    selection_type: SelectionType | str,
+    is_required: bool,
+    min_select: int,
+    max_select: int,
+    *,
+    option_count: int,
+) -> None:
+    """Refuse a modifier group no customer could complete, or one that says
+    something checkout does not do.
+
+    These mirror services/pricing._validate_modifiers, which is what a customer
+    actually meets: a pick-one group takes exactly one choice, a minimum only
+    binds a required group, and every choice is one tick of one option.
+    """
+    kind = selection_type.value if isinstance(selection_type, SelectionType) else selection_type
+    if option_count < 1:
+        raise errors.validation_error(
+            f"{name} needs at least one option. A group with none has nothing to offer."
+        )
+    if kind == SelectionType.SINGLE.value and (max_select != 1 or min_select > 1):
+        raise errors.validation_error(
+            f"{name} is pick-one, so a customer chooses exactly one: its maximum is 1."
+        )
+    if max_select < min_select:
+        raise errors.validation_error(
+            f"{name} has a maximum of {max_select}, below its minimum of {min_select}."
+        )
+    if is_required and min_select < 1:
+        raise errors.validation_error(
+            f"{name} is required, so a customer has to choose at least one."
+        )
+    if not is_required and min_select > 0:
+        # Checkout only holds a minimum against a required group, so an
+        # optional one with a minimum would promise a rule nobody enforces.
+        raise errors.validation_error(
+            f"{name} is optional, so it cannot have a minimum. Make it required instead."
+        )
+    if min_select > option_count:
+        raise errors.validation_error(
+            f"{name} asks customers to choose {min_select} but has only "
+            f"{option_count} {'option' if option_count == 1 else 'options'}."
+        )
 
 
 def _set_group_types(
@@ -991,12 +1050,23 @@ def create_modifier_group(
     _=Depends(MANAGE),
 ):
     """Reusable across items. Define "Ice level" once, attach it to every
-    beverage."""
-    if body.max_select < body.min_select:
-        raise errors.validation_error("max_select cannot be below min_select.")
+    beverage.
+
+    The builder checks all of this before it sends anything, but the API is
+    what stores the group, and a group whose rules no customer can meet makes
+    every item offering it impossible to order.
+    """
+    name = _required_name(body.name, "A modifier group needs a name.")
+    option_names = [
+        _required_name(option.name, "Every option needs a name.") for option in body.options
+    ]
+    _check_group_rules(
+        name, body.selection_type, body.is_required, body.min_select, body.max_select,
+        option_count=len(option_names),
+    )
 
     group = ModifierGroup(
-        restaurant_id=restaurant.id, name=body.name,
+        restaurant_id=restaurant.id, name=name,
         selection_type=body.selection_type.value, is_required=body.is_required,
         min_select=body.min_select, max_select=body.max_select,
     )
@@ -1004,10 +1074,10 @@ def create_modifier_group(
     db.flush()
     _set_group_types(db, restaurant, group, body.applies_to_type_ids)
 
-    for option in body.options:
+    for option, option_name in zip(body.options, option_names):
         db.add(
             ModifierOption(
-                restaurant_id=restaurant.id, group_id=group.id, name=option.name,
+                restaurant_id=restaurant.id, group_id=group.id, name=option_name,
                 price_delta_minor=option.price_delta_minor,
                 sort_order=option.sort_order,
                 image_path=images.accept(option.image_path, restaurant.id, ImageKind.OPTIONS),
@@ -1241,6 +1311,33 @@ def delete_modifier_option(
     option = db.get(ModifierOption, option_id)
     if option is None or option.deleted_at is not None:
         raise errors.validation_error("No such option.")
+
+    # What the group is left with has to still be a group a customer can
+    # complete: a required "choose 2" with one option left, or a group with
+    # none at all, would make every item offering it unorderable.
+    group = db.get(ModifierGroup, option.group_id)
+    if group is not None and group.deleted_at is None:
+        remaining = sum(
+            1
+            for sibling in db.execute(
+                select(ModifierOption).where(
+                    ModifierOption.group_id == group.id,
+                    ModifierOption.deleted_at.is_(None),
+                )
+            ).scalars().all()
+            if sibling.id != option.id
+        )
+        if remaining == 0:
+            raise errors.validation_error(
+                f"{option.name} is the last option in {group.name}. Delete the group "
+                "instead, or add another option first."
+            )
+        if group.is_required and remaining < group.min_select:
+            raise errors.validation_error(
+                f"{group.name} asks customers to choose {group.min_select}, so it needs "
+                f"at least {group.min_select} options. Add another before deleting this one."
+            )
+
     option.deleted_at = utcnow()
     return {"id": str(option.id), "deleted": True}
 
@@ -1759,10 +1856,12 @@ def create_item(
     db: Session = Depends(tenant_db_staff),
     _=Depends(MANAGE),
 ):
+    name = _required_name(body.name, "An item needs a name.")
     item_type = _live_type(db, body.item_type_id)
     item = Item(
-        restaurant_id=restaurant.id, name=body.name, item_type_id=item_type.id,
-        description=body.description, base_price_minor=body.base_price_minor,
+        restaurant_id=restaurant.id, name=name, item_type_id=item_type.id,
+        description=(body.description or "").strip() or None,
+        base_price_minor=body.base_price_minor,
         currency=restaurant.currency, sort_order=body.sort_order,
         image_path=images.accept(body.image_path, restaurant.id, ImageKind.ITEMS),
     )

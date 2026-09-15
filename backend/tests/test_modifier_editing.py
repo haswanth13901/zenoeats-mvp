@@ -31,6 +31,9 @@ class FakeRow:
         self.deleted_at = None
         self.group_id = None
         self.item_type_id = None
+        # Groups only: an optional group, as the builder makes by default.
+        self.is_required = False
+        self.min_select = 0
         # Item types only. A group is offered for top-level types, so the
         # endpoint reads this on every type it is handed.
         self.parent_id = None
