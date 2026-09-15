@@ -98,6 +98,19 @@ class FakeType:
         self.deleted_at = None
 
 
+# The meal period every fake item is served in and every fake combo belongs
+# to, unless a test says otherwise.
+LUNCH = uuid.uuid4()
+DINNER = uuid.uuid4()
+
+
+class FakeMealLink:
+    """A meal_items row: this period serves this item."""
+
+    def __init__(self, meal_id):
+        self.meal_id = meal_id
+
+
 FOOD = FakeType("Food")
 DRINKS = FakeType("Drinks")
 SIDES = FakeType("Sides")
@@ -111,7 +124,7 @@ class FakeIncluded:
 
 
 class FakeItem:
-    def __init__(self, name, price, item_type=FOOD, groups=(), includes=()):
+    def __init__(self, name, price, item_type=FOOD, groups=(), includes=(), meals=(LUNCH,)):
         self.id = uuid.uuid4()
         self.name = name
         self.item_type_id = item_type.id
@@ -122,6 +135,7 @@ class FakeItem:
         self.modifier_links = [FakeGroupLink(g) for g in groups]
         # What the item comes with. Empty unless a test says otherwise.
         self.included_links = [FakeIncluded(o) for o in includes]
+        self.meal_links = [FakeMealLink(m) for m in meals]
 
 
 class FakeChoice:
@@ -139,8 +153,9 @@ class FakeSlot:
 
 
 class FakeCombo:
-    def __init__(self, name, slots, kind="NONE", value=0, available=True):
+    def __init__(self, name, slots, kind="NONE", value=0, available=True, meal_id=LUNCH):
         self.id = uuid.uuid4()
+        self.meal_id = meal_id
         self.name = name
         self.slots = slots
         self.discount_kind = kind
@@ -391,3 +406,51 @@ def test_a_cart_of_nothing_but_a_combo_is_a_real_cart(meal_deal):
 def test_a_combo_quantity_below_one_is_refused(meal_deal):
     with pytest.raises(errors.ApiError):
         _cart(meal_deal, quantity=0)
+
+
+# --- what the combo's meal period serves -----------------------------------
+#
+# A choice is only sold while the combo's own period serves the item. Taking
+# fries off Lunch used to leave them in the Lunch combo, still sold at a
+# discount.
+
+
+def test_a_choice_taken_off_the_combos_period_is_refused(meal_deal):
+    burger, tea, fries, combo = meal_deal
+    fries.meal_links = [FakeMealLink(DINNER)]  # moved to dinner only
+
+    with pytest.raises(errors.ApiError) as caught:
+        _cart(meal_deal)
+    assert caught.value.code == "ITEM_UNAVAILABLE"
+    assert "not one of the choices for Burger Meal" in caught.value.detail["message"]
+
+
+def test_the_choice_comes_back_when_the_item_is_served_again(meal_deal):
+    burger, tea, fries, combo = meal_deal
+    fries.meal_links = [FakeMealLink(DINNER), FakeMealLink(LUNCH)]
+    assert _cart(meal_deal).subtotal_minor == 1700
+
+
+def test_a_combo_whose_period_was_deleted_sells_nothing(meal_deal):
+    """Deleting a period deletes its item links, so nothing is served there."""
+    burger, tea, fries, combo = meal_deal
+    for item in (burger, tea, fries):
+        item.meal_links = []
+
+    with pytest.raises(errors.ApiError) as caught:
+        _cart(meal_deal)
+    assert caught.value.code == "ITEM_UNAVAILABLE"
+
+
+def test_an_item_on_no_meal_period_is_not_sold_on_its_own():
+    """The storefront hides it, but a cart outlives a menu edit and the API can
+    be called directly."""
+    from app.services.pricing import price_cart
+
+    retired = FakeItem("Seasonal Pie", 600, meals=())
+    line = {"menu_item_id": str(retired.id), "quantity": 1, "modifiers": []}
+
+    with pytest.raises(errors.ApiError) as caught:
+        price_cart(FakeSession([retired], None), FakeRestaurant(), [line], [])
+    assert caught.value.code == "ITEM_UNAVAILABLE"
+    assert caught.value.detail["message"] == "Seasonal Pie is no longer on the menu."

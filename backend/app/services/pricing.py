@@ -115,6 +115,9 @@ def price_cart(
             # What each item comes with. Read here rather than per line, so a
             # cart of ten burgers still costs one query to answer.
             selectinload(Item.included_links),
+            # Which meal periods serve it -- whether it is on the menu at all,
+            # and whether a combo's period may still offer it.
+            selectinload(Item.meal_links),
         )
     ).scalars().all()
     items_by_id = {i.id: i for i in items}
@@ -135,6 +138,11 @@ def price_cart(
             raise errors.validation_error(f"Quantity for {item.name} must be at least 1.")
         if not item.is_available:
             raise errors.item_unavailable(f"{item.name} is sold out.")
+        # The storefront only shows what a meal period serves, but a cart
+        # outlives a menu edit and the API can be called directly. An item
+        # taken off every period is off the menu, however it was reached.
+        if not item.meal_links:
+            raise errors.item_unavailable(f"{item.name} is no longer on the menu.")
         if item.currency != restaurant.currency:
             raise errors.validation_error("Mixed currencies in one cart.")
 
@@ -387,14 +395,22 @@ def _price_combo(
 
         item_id = UUID(str(selection["menu_item_id"]))
         allowed = {choice.item_id for choice in slot.choices}
-        if item_id not in allowed:
-            # Not on the list for this slot: either never was, or was taken
-            # off it. The customer does not need to know which.
+        item = items_by_id.get(item_id)
+        # A choice counts only while the combo's own period serves the item.
+        # The builder checks that when the combo is saved, but an item can be
+        # taken off the period afterwards, and the combo kept selling it: food
+        # the period no longer offers, at a meal-deal discount. Deleting the
+        # period removes its links too, so a combo left on one sells nothing.
+        served_here = item is not None and combo.meal_id in {
+            link.meal_id for link in item.meal_links
+        }
+        if item_id not in allowed or (item is not None and not served_here):
+            # Not on the list for this slot, or no longer served in this
+            # period. The customer does not need to know which.
             raise errors.item_unavailable(
                 f"That is not one of the choices for {combo.name}."
             )
 
-        item = items_by_id.get(item_id)
         if item is None:
             raise errors.item_unavailable("An item in your cart no longer exists.")
         if not item.is_available:

@@ -495,3 +495,37 @@ def test_a_period_that_says_nothing_about_hours_sends_nulls():
 
     assert menu.meals[0].starts_at is None
     assert menu.meals[0].ends_at is None
+
+
+def test_a_combo_offers_only_what_its_period_serves():
+    """Cola was taken off Lunch. The Lunch combo kept offering it, at a
+    discount, for food the period no longer sold."""
+    types = starter_types()
+    burger = FakeItem("Smash Burger", types[0])
+    tea = FakeItem("Iced Tea", types[1])
+    cola = FakeItem("Cola", types[1])
+    lunch = FakeMeal("Lunch", [burger, tea])  # cola is not on it any more
+    combo = FakeCombo("Burger Meal", lunch, [
+        FakeSlot(types[0], [burger]),
+        FakeSlot(types[1], [tea, cola]),
+    ])
+
+    for include_empty in (False, True):
+        out = load_menu(FakeDb([lunch], [combo], types), include_empty=include_empty)
+        drinks = out.meals[0].combos[0].slots[1]
+        assert [i.name for i in drinks.items] == ["Iced Tea"], include_empty
+
+
+def test_a_combo_whose_only_choice_left_the_period_is_dropped():
+    types = starter_types()
+    burger = FakeItem("Smash Burger", types[0])
+    tea = FakeItem("Iced Tea", types[1])  # in stock, but not served at lunch
+    lunch = FakeMeal("Lunch", [burger])
+    dinner = FakeMeal("Dinner", [tea])
+    combo = FakeCombo("Burger Meal", lunch, [
+        FakeSlot(types[0], [burger]),
+        FakeSlot(types[1], [tea]),
+    ])
+
+    menu = load_menu(FakeDb([lunch, dinner], [combo], types), include_empty=False)
+    assert all(meal.combos == [] for meal in menu.meals)

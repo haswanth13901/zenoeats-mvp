@@ -123,9 +123,7 @@ def load_menu(db: Session, *, include_empty: bool) -> MenuOut:
     # Every combo in one query, then handed out by period. One query per
     # meal would be a round trip per heading on the page, which is the shape
     # of loading this menu carefully everywhere except the last step.
-    combos_by_meal = _combos_by_meal(
-        db, [meal.id for meal in meals], include_empty=include_empty
-    )
+    combos_by_meal = _combos_by_meal(db, meals, include_empty=include_empty)
 
     out: list[MealOut] = []
     for meal in meals:
@@ -208,7 +206,7 @@ def _sections(types: list[ItemType], buckets: dict) -> list[SectionOut]:
 
 
 def _combos_by_meal(
-    db: Session, meal_ids: list, *, include_empty: bool
+    db: Session, meals: list, *, include_empty: bool
 ) -> dict:
     """Every period's combos, in one read, keyed by the period.
 
@@ -217,9 +215,25 @@ def _combos_by_meal(
     would end in a customer being refused at checkout. So on the storefront a
     combo with an empty slot is dropped whole, while the builder keeps it --
     it is the screen where the missing choice gets fixed.
+
+    A choice is offered only while the combo's period serves the item. Taking
+    an item off a period used to leave it in that period's combos, still sold
+    at a discount; checkout refuses it now too. Filtered here rather than
+    deleted from the combo, so putting the item back on the period brings the
+    choice back with it.
     """
-    if not meal_ids:
+    if not meals:
         return {}
+    meal_ids = [meal.id for meal in meals]
+
+    # What each period serves, read off the periods already loaded above
+    # rather than asked for again.
+    served = {
+        (meal.id, link.item.id)
+        for meal in meals
+        for link in meal.item_links
+        if link.item is not None
+    }
 
     combos = db.execute(
         select(Combo)
@@ -255,6 +269,7 @@ def _combos_by_meal(
                 for choice in slot.choices
                 if choice.item is not None
                 and choice.item.deleted_at is None
+                and (combo.meal_id, choice.item_id) in served
                 and (include_empty or choice.item.is_available)
             ]
             if not items:

@@ -141,9 +141,27 @@ export function ComboBuilder({
                       {typeName.get(slot.item_type_id) ?? "unknown type"}
                     </span>
                     <span className="text-sm">
-                      {slot.item_ids
-                        .map((id) => items.find((i) => i.id === id)?.name ?? "?")
-                        .join(" · ")}
+                      {slot.item_ids.map((id, index) => {
+                        const item = items.find((i) => i.id === id);
+                        // Still ticked, but taken off this combo's period since:
+                        // the storefront and checkout skip it until it is served
+                        // there again, so the list says why it is missing.
+                        const offPeriod = item && !item.meal_ids.includes(combo.meal_id);
+                        return (
+                          <span key={id}>
+                            {index > 0 && " · "}
+                            <span className={offPeriod ? "text-muted line-through" : undefined}>
+                              {item?.name ?? "?"}
+                            </span>
+                            {offPeriod && (
+                              <span className="text-xs text-brick">
+                                {" "}
+                                (not on {mealName.get(combo.meal_id) ?? "this period"})
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
                     </span>
                   </li>
                 ))}
@@ -335,7 +353,17 @@ function ComboForm({
     // through read the same way down the page as the menu does.
     const slots: ComboSlotDraft[] = headings
       .filter((t) => (draft.picked[t.id] ?? []).length > 0)
-      .map((t) => ({ item_type_id: t.id, item_ids: draft.picked[t.id] ?? [] }));
+      .map((t) => ({
+        item_type_id: t.id,
+        // Only choices this period still serves. A tick left over from before
+        // an item was taken off the period is not on screen to untick, and the
+        // server refuses it, so it is dropped here rather than failing a save
+        // over something the manager cannot see.
+        item_ids: (draft.picked[t.id] ?? []).filter((id) =>
+          servedHere.some((item) => item.id === id),
+        ),
+      }))
+      .filter((slot) => slot.item_ids.length > 0);
 
     if (!slots.length) {
       onError("Tick the items this combo includes. Each type ticked becomes a choice.");
