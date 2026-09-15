@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import current_restaurant, get_current_user, tenant_db
+from app.api.deps import TenantDb, current_restaurant, get_current_user
 from app.config import settings
 from app.core import errors, idempotency
 from app.core.ratelimit import per_ip, per_user
@@ -95,7 +95,7 @@ def _serialize(order: Order, payment: Payment | None, *, include_pin: bool) -> O
 def quote_cart(
     body: QuoteIn,
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
     """Authoritative pricing preview. Creates nothing."""
     cart = price_cart(
@@ -126,7 +126,7 @@ def create_order(
     idempotency_key: str = Header(alias="Idempotency-Key"),
     user: User = Depends(get_current_user),
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
     """Create a PENDING_PAYMENT order. No charge is attempted here.
 
@@ -186,7 +186,7 @@ def create_payment_intent(
     idempotency_key: str = Header(alias="Idempotency-Key"),
     user: User = Depends(get_current_user),
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
     """Create or return the PaymentIntent for an existing order.
 
@@ -252,7 +252,7 @@ def get_order(
     order_id: UUID,
     user: User = Depends(get_current_user),
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
     """Authoritative order state. This is what the tracking page polls.
 
@@ -276,7 +276,7 @@ def get_order(
 def list_my_orders(
     user: User = Depends(get_current_user),
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
     """Order history, scoped to this restaurant by RLS and to this customer
     by ownership. Section 2.3: each restaurant sees only its own relationship

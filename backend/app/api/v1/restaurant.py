@@ -15,8 +15,8 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import (
-    TenantContext, current_restaurant_staff, current_staff_user, current_staff_user_ready,
-    require_staff, resolve_tenant_staff, tenant_db_staff,
+    StaffDb, TenantContext, current_restaurant_staff, current_staff_user,
+    current_staff_user_ready, require_staff, resolve_tenant_staff,
 )
 from app.config import settings
 from app.core import errors, staff_auth
@@ -549,7 +549,7 @@ def upload_image(
 @router.get("/menu", response_model=MenuOut)
 def staff_menu(
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """The menu as the builder needs to see it.
@@ -566,7 +566,7 @@ def staff_menu(
 def create_meal(
     body: MealIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     name = _required_name(body.name, "A meal period needs a name.")
@@ -590,7 +590,7 @@ def update_meal(
     meal_id: UUID,
     body: MealUpdateIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Correct a meal's name, or say the hours it is served.
@@ -638,7 +638,7 @@ def _meal_out(meal: Meal) -> dict:
 def delete_meal(
     meal_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Remove a meal period. The items it served are kept.
@@ -671,7 +671,7 @@ def add_meal_items(
     meal_id: UUID,
     body: MealItemsIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Start serving existing items during this period.
@@ -714,7 +714,7 @@ def remove_meal_item(
     meal_id: UUID,
     item_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Stop serving one item during this period.
@@ -968,7 +968,7 @@ def _combo_out(combo: Combo) -> dict:
 @router.get("/combos")
 def list_combos(
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Every combo, whichever period it belongs to."""
@@ -985,7 +985,7 @@ def list_combos(
 def create_combo(
     body: ComboIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     meal = db.get(Meal, body.meal_id)
@@ -1014,7 +1014,7 @@ def update_combo(
     combo_id: UUID,
     body: ComboUpdateIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Edit a combo.
@@ -1065,7 +1065,7 @@ def update_combo(
 def delete_combo(
     combo_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Take a combo off the menu. The items it offered are untouched.
@@ -1087,7 +1087,7 @@ def delete_combo(
 def create_modifier_group(
     body: ModifierGroupIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Reusable across items. Define "Ice level" once, attach it to every
@@ -1132,7 +1132,7 @@ def create_modifier_group(
 def list_modifier_groups(
     item_type_id: UUID | None = None,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """The reusable library. Filtered by item type so adding a drink surfaces
@@ -1191,7 +1191,7 @@ def update_modifier_group(
     group_id: UUID,
     body: ModifierGroupUpdateIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Correct a group's name, which item kinds it is offered for, or its rules.
@@ -1298,7 +1298,7 @@ def _change_group_rules(db: Session, group: ModifierGroup, sent: dict) -> None:
 def delete_modifier_group(
     group_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Remove a group and its options.
@@ -1329,7 +1329,7 @@ def create_modifier_option(
     group_id: UUID,
     body: OptionIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Add one option to an existing group.
@@ -1368,7 +1368,7 @@ def update_modifier_option(
     option_id: UUID,
     body: ModifierOptionUpdateIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Edit an option's name, its price change, or its picture."""
@@ -1408,7 +1408,7 @@ def update_modifier_option(
 def delete_modifier_option(
     option_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Take one option off a group.
@@ -1527,7 +1527,7 @@ def _type_name_taken(db: Session, name: str, *, excluding: UUID | None = None) -
 @router.get("/item-types")
 def list_item_types(
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """The restaurant's own types, in the order its menu reads.
@@ -1565,7 +1565,7 @@ def list_item_types(
 def create_item_type(
     body: ItemTypeIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Add a type, or a subcategory inside one.
@@ -1615,7 +1615,7 @@ def update_item_type(
     type_id: UUID,
     body: ItemTypeUpdateIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Rename a type, move it up or down, or file it under another one.
@@ -1720,7 +1720,7 @@ def _refile(db: Session, item_type: ItemType, parent_id: UUID | None) -> None:
 def delete_item_type(
     type_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Remove a type nothing is using.
@@ -1918,7 +1918,7 @@ def _set_meal_links(db: Session, restaurant: Restaurant, item: Item, meal_ids) -
 @router.get("/items")
 def list_items(
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """The item library: everything the restaurant sells, served or not.
@@ -1969,7 +1969,7 @@ def list_items(
 def create_item(
     body: ItemIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     name = _required_name(body.name, "An item needs a name.")
@@ -1998,7 +1998,7 @@ def update_item(
     item_id: UUID,
     body: ItemUpdateIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Edit an item: what it is called, what it costs, what type it is,
@@ -2080,7 +2080,7 @@ def update_item(
 def delete_item(
     item_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """Take an item off the menu for good, in every period at once.
@@ -2115,7 +2115,7 @@ def delete_item(
 @router.get("/stock")
 def stock(
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(ANY_STAFF),
 ):
     """What is in stock, for the people who run out of it.
@@ -2166,7 +2166,7 @@ def set_item_availability(
     item_id: UUID,
     is_available: bool,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(ANY_STAFF),
 ):
     """Manual sold-out toggle. Overrides everything else."""
@@ -2180,7 +2180,7 @@ def set_item_availability(
 @router.get("/orders")
 def order_board(
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(ANY_STAFF),
 ):
     """The live board. Polled every few seconds by the kitchen screen.
@@ -2258,7 +2258,7 @@ HISTORY_LIMIT = 200
 @router.get("/orders/history")
 def order_history(
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(ANY_STAFF),
 ):
     """Today's orders that have left the board, newest first.
@@ -2344,7 +2344,7 @@ def order_history(
 def mark_ready(
     order_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(ANY_STAFF),
 ):
     order = db.get(Order, order_id, with_for_update=True)
@@ -2416,7 +2416,7 @@ def complete_order(
     order_id: UUID,
     body: CompleteOrderIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(ANY_STAFF),
 ):
     """Hand the food over. PIN verified server side, five attempts then lock.
@@ -2474,7 +2474,7 @@ def override_complete(
     order_id: UUID,
     body: OrderReasonIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(MANAGE),
 ):
     """Hand an order over without the customer's PIN.
@@ -2504,7 +2504,7 @@ def cancel_order(
     order_id: UUID,
     body: OrderReasonIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(MANAGE),
 ):
     """Take a paid order off the board: a no-show, a refund, a mistake.
@@ -2551,7 +2551,7 @@ class StaffInviteIn(BaseModel):
 @router.get("/staff")
 def list_staff(
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
     rows = db.execute(
@@ -2586,7 +2586,7 @@ def invite_staff(
     body: StaffInviteIn,
     background: BackgroundTasks,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
     """Invite someone to this restaurant's team.
@@ -2697,7 +2697,7 @@ def _queue_staff_invitation(restaurant_id, membership_id) -> None:
 def accept_invitation(
     user: User = Depends(current_staff_user_ready),
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
 ):
     """The invitee accepts. This is the only path from INVITED to ACTIVE.
 
@@ -2723,7 +2723,7 @@ def accept_invitation(
 def revoke_staff(
     membership_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
     """Take someone off the team, or withdraw an invitation.
@@ -2799,7 +2799,7 @@ def change_staff_role(
     membership_id: UUID,
     body: StaffRoleIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
     """Give a team member a different role, or change the role an invitation
@@ -2855,7 +2855,7 @@ def _login_used_elsewhere(user_id) -> bool:
 def reset_staff_password(
     membership_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
     """Issue a team member a new temporary password, for a forgotten one.
@@ -2923,7 +2923,7 @@ def restaurant_reports(
     from_: date | None = Query(default=None, alias="from"),
     to: date | None = None,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
     _=Depends(MANAGE),
 ):
     """This restaurant's numbers for a range of its own days.

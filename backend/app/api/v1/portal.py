@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import TenantContext, current_restaurant, resolve_tenant, tenant_db
+from app.api.deps import TenantContext, TenantDb, current_restaurant, resolve_tenant
 from app.config import settings
 from app.core.ratelimit import per_ip
 from app.models import Restaurant, RestaurantPaymentAccount
@@ -26,7 +26,7 @@ router = APIRouter(tags=["portal"])
 def get_portal(
     tenant: TenantContext = Depends(resolve_tenant),
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
     account = db.execute(select(RestaurantPaymentAccount)).scalar_one_or_none()
     return PortalOut(
@@ -49,7 +49,7 @@ def get_portal(
 )
 def get_menu(
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
     """The sellable menu.
 

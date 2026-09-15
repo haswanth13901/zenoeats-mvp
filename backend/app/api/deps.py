@@ -205,9 +205,28 @@ def tenant_db_staff(tenant: TenantContext = Depends(resolve_tenant_staff)) -> It
     yield from _open_tenant_session(tenant)
 
 
+# How every endpoint asks for its database session.
+#
+# scope="function" is the whole point of these aliases. A dependency with
+# yield defaults to scope "request", which FastAPI closes after the response
+# has been sent -- and after any background task has run. The commit therefore
+# landed after the caller had already been told the write succeeded: an
+# invitation whose email took seconds to queue was not yet readable when the
+# invitee signed in, and a customer's order could be missing from the payment
+# request that followed it. "function" closes the session as soon as the
+# endpoint returns, before the response leaves.
+#
+# Asking for the session any other way would open a second one: FastAPI keys
+# its per-request cache on the scope as well as the callable, so a mixed
+# request would run two transactions. tests/test_commit_before_response.py
+# fails if an endpoint does that.
+TenantDb = Depends(tenant_db, scope="function")
+StaffDb = Depends(tenant_db_staff, scope="function")
+
+
 def current_restaurant_staff(
     tenant: TenantContext = Depends(resolve_tenant_staff),
-    db: Session = Depends(tenant_db_staff),
+    db: Session = StaffDb,
 ) -> Restaurant:
     """The restaurant behind the portal, including one still in draft."""
     restaurant = db.get(Restaurant, tenant.restaurant_id)
@@ -218,7 +237,7 @@ def current_restaurant_staff(
 
 def current_restaurant(
     tenant: TenantContext = Depends(resolve_tenant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ) -> Restaurant:
     restaurant = db.get(Restaurant, tenant.restaurant_id)
     if restaurant is None:
@@ -290,7 +309,7 @@ def require_staff(*roles: StaffRole):
 
     def _dep(
         user: User = Depends(current_staff_user_ready),
-        db: Session = Depends(tenant_db_staff),
+        db: Session = StaffDb,
         tenant: TenantContext = Depends(resolve_tenant_staff),
     ) -> RestaurantUser:
         membership = db.execute(
