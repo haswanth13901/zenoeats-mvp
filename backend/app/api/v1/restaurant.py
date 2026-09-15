@@ -151,6 +151,38 @@ def staff_logout(response: Response):
     )
 
 
+@router.post("/logout-everywhere", status_code=204)
+def staff_logout_everywhere(
+    response: Response,
+    user: User = Depends(current_staff_user),
+):
+    """End every session this account holds, on every device.
+
+    Ordinary sign-out stays with the device it is pressed on, on purpose: a
+    restaurant often shares one login across the kitchen tablets, and one
+    person leaving must not sign the tablet on the pass out mid-service. But
+    that left no answer to a lost phone, or to a session left open on someone
+    else's device -- short of changing the password. This is that answer
+    without the password change: every session issued before now is refused,
+    by the same sessions_valid_after check a password change uses.
+
+    Needs only a session, not a role, so an account still holding a temporary
+    password can use it too.
+    """
+    with system_session() as session:
+        row = session.get(User, user.id)
+        if row is not None:
+            row.sessions_valid_after = utcnow()
+    log.info("staff %s signed out of every device", email_for_log(user.email))
+    response.delete_cookie(
+        key=staff_auth.SESSION_COOKIE,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.ENV == "production",
+    )
+
+
 @router.get("/me", response_model=StaffMeOut)
 def staff_me(
     user: User = Depends(current_staff_user),

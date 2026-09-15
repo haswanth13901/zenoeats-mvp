@@ -209,7 +209,9 @@ passed, and everything below was found and has since been fixed.
       stamped on admin sign-out, on a staff password change and on a
       super-admin reset, and every request refuses a token issued before it.
       Staff sign-out stays per-device, so one person signing out does not
-      sign out the tablet on the pass. `tests/test_session_revocation.py`.
+      sign out the tablet on the pass; "Sign out all devices" in the portal
+      header ends every session the account holds, for a lost phone.
+      `tests/test_session_revocation.py`.
 - [x] **[BLOCKER] The platform API answered on every restaurant subdomain.**
       *(code)* Restaurants and the portal share one root domain, so browsers
       treat them as one site: a page on any storefront could call the

@@ -316,6 +316,12 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Session"],
     }),
 
+    // Every session this account holds, on every device -- not just this one.
+    staffLogoutEverywhere: build.mutation<void, void>({
+      query: () => ({ url: "/restaurant/logout-everywhere", method: "POST" }),
+      invalidatesTags: ["Session"],
+    }),
+
     orderBoard: build.query<BoardOrder[], void>({
       query: () => ({ url: "/restaurant/orders" }),
       providesTags: ["Board"],
@@ -708,6 +714,7 @@ export const restaurantApi = api.injectEndpoints({
 export const {
   useStaffMeQuery,
   useStaffLogoutMutation,
+  useStaffLogoutEverywhereMutation,
   useOrderBoardQuery,
   useOrderHistoryQuery,
   useMarkReadyMutation,

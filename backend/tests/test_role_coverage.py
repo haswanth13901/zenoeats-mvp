@@ -76,6 +76,8 @@ EXPECTED = {
 NO_ROLE = {
     ("POST", "/restaurant/login"): None,  # how a session is obtained
     ("POST", "/restaurant/logout"): None,  # clears the cookie, whoever holds it
+    # Ends the caller's own sessions everywhere; a temporary password may too.
+    ("POST", "/restaurant/logout-everywhere"): deps.current_staff_user,
     ("GET", "/restaurant/me"): deps.current_staff_user,  # a temporary password must reach it
     ("POST", "/restaurant/change-password"): deps.current_staff_user,  # likewise
     # An invitee is INVITED, not yet a member with a role; this is how they become one.

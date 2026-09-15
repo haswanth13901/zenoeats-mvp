@@ -151,7 +151,9 @@ these checks in order, and any one of them refuses the request:
    person, never a restaurant. It is refused if expired, if it was issued
    before a password change or reset (`users.sessions_valid_after`), or if
    the account is inactive. An account still holding a temporary password can
-   only ask who it is, sign out, and change that password.
+   only ask who it is, sign out, and change that password. "Sign out" is
+   this device only, because restaurants share logins across tablets; "Sign
+   out all devices" ends every session the account holds.
 2. **Which restaurant.** The tenant comes from the `Host` header and nothing
    else, so a request cannot name a restaurant it is not on.
 3. **Your role there.** `require_staff(...)` in `app/api/deps.py` reads your

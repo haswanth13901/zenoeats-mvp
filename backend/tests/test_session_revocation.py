@@ -141,3 +141,28 @@ def test_staff_sign_out_stays_on_this_device(admin_user, cleanup):
 
     assert _staff(restaurant.slug, phone).post("/api/v1/restaurant/logout").status_code == 204
     assert _staff(restaurant.slug, tablet).get("/api/v1/restaurant/me").status_code == 200
+
+
+def test_signing_out_everywhere_ends_every_device(admin_user, cleanup):
+    """For a lost phone, or a session left open on a borrowed device, without
+    having to change the password."""
+    restaurant = _create(admin_user, cleanup)
+    out, _ = _owner(admin_user, restaurant.id, _email())
+    tablet = staff_auth.issue_session(out.user_id)
+    lost_phone = staff_auth.issue_session(out.user_id)
+
+    res = _staff(restaurant.slug, tablet).post("/api/v1/restaurant/logout-everywhere")
+    assert res.status_code == 204
+    assert staff_auth.SESSION_COOKIE in res.headers.get("set-cookie", "")
+
+    assert _staff(restaurant.slug, lost_phone).get("/api/v1/restaurant/me").status_code == 401
+    assert _staff(restaurant.slug, tablet).get("/api/v1/restaurant/me").status_code == 401
+
+    # Signing straight back in works; the password never changed.
+    fresh = staff_auth.issue_session(out.user_id)
+    assert _staff(restaurant.slug, fresh).get("/api/v1/restaurant/me").status_code == 200
+
+
+def test_signing_out_everywhere_needs_a_session():
+    client = TestClient(_app(), base_url="http://spicehouse.zenoeats.local")
+    assert client.post("/api/v1/restaurant/logout-everywhere").status_code == 401
