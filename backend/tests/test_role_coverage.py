@@ -66,6 +66,8 @@ EXPECTED = {
     ("GET", "/restaurant/staff"): ADMIN,
     ("POST", "/restaurant/staff"): ADMIN,
     ("DELETE", "/restaurant/staff/{membership_id}"): ADMIN,
+    ("PATCH", "/restaurant/staff/{membership_id}"): ADMIN,
+    ("POST", "/restaurant/staff/{membership_id}/reset-password"): ADMIN,
 }
 
 # Before a role exists, each for a stated reason, and each with the identity

@@ -34,6 +34,7 @@ from app.models import (
 )
 from app.schemas.api import (
     ChangePasswordIn, MenuOut, StaffInviteOut, StaffLoginIn, StaffMeOut,
+    StaffPasswordResetOut,
 )
 from app.services import images
 from app.services.images import ImageKind
@@ -2433,34 +2434,178 @@ def revoke_staff(
     locked before counting, and the second request waits and then sees the
     first one's removal.
     """
-    # Locked first and in one statement, so concurrent removals queue here.
-    active_admins = db.execute(
-        select(RestaurantUser)
-        .where(
-            RestaurantUser.role_code == StaffRole.ADMIN.value,
-            RestaurantUser.status == StaffStatus.ACTIVE.value,
-        )
-        .with_for_update()
-    ).scalars().all()
-
-    target = db.get(RestaurantUser, membership_id)
-    if target is None or target.status == StaffStatus.REVOKED.value:
-        raise errors.validation_error("No such team member.")
+    active_admins = _lock_active_admins(db)
+    target = _live_member(db, membership_id)
     if target.user_id == membership.user_id:
         raise errors.ApiError(
             409, "CANNOT_REMOVE_SELF",
             "You can't remove yourself. Ask another admin to do it.",
         )
     if target in active_admins and len(active_admins) == 1:
-        raise errors.ApiError(
-            409, "LAST_ADMIN",
-            "This is the restaurant's only admin. Invite another admin, and once "
-            "they have accepted, try again.",
-        )
+        raise _last_admin()
 
     target.status = StaffStatus.REVOKED.value
     target.revoked_at = utcnow()
     return {"id": str(target.id), "status": target.status}
+
+
+def _lock_active_admins(db: Session) -> list[RestaurantUser]:
+    """Every active admin, locked, before anything that could leave none.
+
+    One statement and first, so concurrent removals and demotions queue here:
+    the second waits, then reads the first one's change instead of a count
+    from before it.
+    """
+    return list(
+        db.execute(
+            select(RestaurantUser)
+            .where(
+                RestaurantUser.role_code == StaffRole.ADMIN.value,
+                RestaurantUser.status == StaffStatus.ACTIVE.value,
+            )
+            .with_for_update()
+        ).scalars().all()
+    )
+
+
+def _live_member(db: Session, membership_id: UUID) -> RestaurantUser:
+    target = db.get(RestaurantUser, membership_id)
+    if target is None or target.status == StaffStatus.REVOKED.value:
+        raise errors.validation_error("No such team member.")
+    return target
+
+
+def _last_admin() -> errors.ApiError:
+    return errors.ApiError(
+        409, "LAST_ADMIN",
+        "This is the restaurant's only admin. Make another team member an admin first.",
+    )
+
+
+class StaffRoleIn(BaseModel):
+    role_code: StaffRole
+
+
+@router.patch("/staff/{membership_id}")
+def change_staff_role(
+    membership_id: UUID,
+    body: StaffRoleIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
+):
+    """Give a team member a different role, or change the role an invitation
+    offers.
+
+    Takes effect on their next request: the role is read from this row every
+    time. Before this the only way was to remove someone and invite them
+    again, which dropped them from the team in between.
+
+    The same two refusals as removal, for the same reason. Your own role is
+    not yours to change -- an admin demoting themselves is the likeliest way
+    to leave a restaurant with none -- and the last active admin cannot be
+    demoted, under the same lock.
+    """
+    active_admins = _lock_active_admins(db)
+    target = _live_member(db, membership_id)
+    if target.user_id == membership.user_id:
+        raise errors.ApiError(
+            409, "CANNOT_CHANGE_OWN_ROLE",
+            "You can't change your own role. Ask another admin to do it.",
+        )
+    new_role = body.role_code.value
+    if (
+        new_role != StaffRole.ADMIN.value
+        and target in active_admins
+        and len(active_admins) == 1
+    ):
+        raise _last_admin()
+
+    target.role_code = new_role
+    return {"id": str(target.id), "role_code": target.role_code, "status": target.status}
+
+
+def _login_used_elsewhere(user_id) -> bool:
+    """Whether this login is on the team of any other restaurant.
+
+    Asked through the system role, which may read exactly two columns of every
+    restaurant's memberships for this (migration 0017). The tenant role cannot
+    see beyond its own restaurant, which is the point of it.
+    """
+    with system_session() as sys_db:
+        live = sys_db.execute(
+            text(
+                "SELECT count(*) FROM restaurant_users "
+                "WHERE user_id = :u AND status IN ('ACTIVE', 'INVITED')"
+            ),
+            {"u": str(user_id)},
+        ).scalar_one()
+    return live > 1
+
+
+@router.post("/staff/{membership_id}/reset-password", response_model=StaffPasswordResetOut)
+def reset_staff_password(
+    membership_id: UUID,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = Depends(tenant_db_staff),
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
+):
+    """Issue a team member a new temporary password, for a forgotten one.
+
+    Before this a restaurant had no way to do it at all: re-inviting leaves an
+    existing login alone, and the super admin reset was the only route.
+
+    The new password is shown once, to the admin, to pass on. The old one
+    stops working, every session the person holds ends, and they choose their
+    own at next sign-in -- the same state a new invitation leaves them in.
+
+    Three refusals, each because the reset would give the admin more than a
+    forgotten password is worth:
+
+    Your own. You know it; change it instead, which asks for the current one.
+
+    Another admin's. Admins are otherwise equal, but a reset hands over the
+    login, and with it every action recorded under that person's name. Those
+    go through Zenoeats support.
+
+    A login that is also on another restaurant's team. Resetting it would let
+    this restaurant's admin sign in there as that person -- the takeover the
+    staff invitation used to allow. That person's password is reset by
+    support, who can see both restaurants.
+    """
+    target = _live_member(db, membership_id)
+    if target.user_id == membership.user_id:
+        raise errors.ApiError(
+            409, "CANNOT_RESET_OWN_PASSWORD",
+            "This is your own account. Use Change password instead.",
+        )
+    if target.role_code == StaffRole.ADMIN.value:
+        raise errors.ApiError(
+            409, "ADMIN_PASSWORD_RESET_BY_SUPPORT",
+            "An admin's password is reset by Zenoeats support, not from here.",
+        )
+    if _login_used_elsewhere(target.user_id):
+        raise errors.ApiError(
+            409, "LOGIN_SHARED_WITH_ANOTHER_RESTAURANT",
+            "This person also works at another Zenoeats restaurant, so their "
+            "password can only be reset by Zenoeats support.",
+        )
+
+    temp_password = staff_auth.generate_temp_password()
+    with system_session() as sys_db:
+        user = sys_db.get(User, target.user_id)
+        if user is None or user.kind != UserKind.STAFF.value:
+            raise errors.validation_error("No such team member.")
+        user.password_hash = staff_auth.hash_password(temp_password)
+        user.must_change_password = True
+        # Whoever is signed in as them now -- a lost phone, a shared tablet --
+        # is signed out along with the old password.
+        user.sessions_valid_after = utcnow()
+        email = user.email
+    log.info(
+        "staff password reset for %s at %s", email_for_log(email), restaurant.slug
+    )
+    return StaffPasswordResetOut(id=target.id, email=email, temporary_password=temp_password)
 
 
 # --------------------------------------------------------------- reports ---

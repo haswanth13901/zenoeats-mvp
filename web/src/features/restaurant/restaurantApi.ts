@@ -59,6 +59,13 @@ export type CancelledOrder = {
   refund_needed: boolean;
 };
 
+/** Shown once to the admin who reset it; only its hash is kept. */
+export type StaffPasswordReset = {
+  id: string;
+  email: string;
+  temporary_password: string;
+};
+
 export type StaffMember = {
   id: string;
   email: string;
@@ -587,6 +594,22 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Session", "Staff"],
     }),
 
+    changeStaffRole: build.mutation<unknown, { membershipId: string; role_code: string }>({
+      query: ({ membershipId, role_code }) => ({
+        url: `/restaurant/staff/${membershipId}`,
+        method: "PATCH",
+        body: { role_code },
+      }),
+      invalidatesTags: ["Staff"],
+    }),
+
+    resetStaffPassword: build.mutation<StaffPasswordReset, string>({
+      query: (membershipId) => ({
+        url: `/restaurant/staff/${membershipId}/reset-password`,
+        method: "POST",
+      }),
+    }),
+
     revokeStaff: build.mutation<unknown, string>({
       query: (membershipId) => ({
         url: `/restaurant/staff/${membershipId}`,
@@ -641,5 +664,7 @@ export const {
   useInviteStaffMutation,
   useAcceptInvitationMutation,
   useRevokeStaffMutation,
+  useChangeStaffRoleMutation,
+  useResetStaffPasswordMutation,
   useRestaurantReportsQuery,
 } = restaurantApi;

@@ -306,6 +306,13 @@ class StaffMeOut(BaseModel):
     membership_status: str
 
 
+class StaffPasswordResetOut(BaseModel):
+    id: UUID
+    email: str
+    # Shown once to the restaurant admin to pass on; only its hash is kept.
+    temporary_password: str
+
+
 class StaffInviteOut(BaseModel):
     id: UUID
     email: str

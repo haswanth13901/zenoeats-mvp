@@ -1,7 +1,7 @@
-import { errorMessage, request } from "@/services/apiClient";
+import { ApiError, errorMessage, request } from "@/services/apiClient";
 
 /**
- * Replace a temporary password. Part of the credential flow, so it stays
+ * Replace a temporary password, or change your own. Part of the credential flow, so it stays
  * outside React with the login pages rather than being the one auth screen
  * that pulls in the whole app bundle.
  *
@@ -26,6 +26,33 @@ const lengthHint = el<HTMLSpanElement>("length-hint");
 const matchHint = el<HTMLSpanElement>("match-hint");
 const errorBox = el<HTMLParagraphElement>("error");
 const submitButton = el<HTMLButtonElement>("submit");
+
+/**
+ * The page serves two people. Someone holding a temporary password arrives
+ * here automatically and can go nowhere else. Someone already signed in with
+ * their own password arrives by choice, from the portal header, and should
+ * read "current password" and have a way back. Which one is asked of the API
+ * rather than guessed from how they got here.
+ */
+async function adapt(): Promise<void> {
+  try {
+    const me = await request<{ must_change_password: boolean }>("/restaurant/me");
+    if (me.must_change_password) return;
+    el("heading").textContent = "Change your password";
+    el("intro").textContent =
+      "Enter the password you use now, then choose a new one. You'll be signed out " +
+      "everywhere and sign in again with the new one.";
+    el("current-label").textContent = "Current password";
+    el("back").hidden = false;
+  } catch (e) {
+    // Not signed in: there is no password to change from here.
+    if (e instanceof ApiError && e.status === 401) {
+      window.location.replace("/manage/login?next=/manage/change-password");
+    }
+  }
+}
+
+void adapt();
 
 /** Mirrors the server's rules so the button only enables on input the API will
  *  accept. The server enforces them regardless; this just avoids a round trip

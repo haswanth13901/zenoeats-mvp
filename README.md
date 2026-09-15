@@ -102,7 +102,13 @@ system read surface.
   price change; a blank price means no change and a negative one is allowed,
   like `-0.50` for no cheese.
 - **Staff** sends invitations. An invited person shows as "waiting to accept"
-  and has no access until they sign in to this restaurant and accept.
+  and has no access until they sign in to this restaurant and accept. An admin
+  can change a member's role, which applies on their next click, and reset a
+  forgotten password: the person is signed out everywhere and gets a
+  temporary password, shown once. You cannot remove yourself, change your own
+  role, or leave the restaurant without an active admin. Resets are refused
+  for another admin, and for a login that also works at another Zenoeats
+  restaurant; Zenoeats support resets those.
 - **Reports** shows paid orders, gross, average order value, tax, top items,
   and how many checkouts expired unpaid.
 
@@ -127,7 +133,7 @@ Within the Kitchen screen, the actions split further:
 | Hand over without the PIN | ✓ | ✓ | | |
 | Cancel a paid order | ✓ | ✓ | | |
 | Edit the menu, read reports | ✓ | ✓ | | |
-| Invite and remove staff | ✓ | | | |
+| Invite and remove staff, change roles, reset passwords | ✓ | | | |
 
 ### How roles are enforced
 

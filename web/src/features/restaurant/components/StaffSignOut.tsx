@@ -24,6 +24,11 @@ export function StaffSignOut() {
           {session.roleCode && ` · ${session.roleCode.toLowerCase()}`}
         </span>
       )}
+      {/* A full navigation: the page is its own entry outside React, like the
+          sign-in pages. */}
+      <a className="hidden text-xs text-muted underline sm:inline" href="/manage/change-password">
+        Change password
+      </a>
       <button
         className="btn-quiet px-3 py-1.5 text-sm"
         disabled={isLoading}
