@@ -96,8 +96,37 @@ def geocode(address: str) -> Point | None:
 
 
 # ------------------------------------------------------------- provider ---
+#
+# Google takes the API key as a query parameter -- it has no header form -- so
+# the key is in the request URL whether we like it or not. httpx puts that URL
+# into the text of its exceptions, which means the obvious `log.warning("%s",
+# exc)` writes the key, and the customer's home address beside it, into the
+# application log and on to Sentry.
+#
+# So no exception from this call is ever logged or chained. What comes out is
+# the class name, or a status code, and nothing that was sent.
+
+
+def _redact(text: str) -> str:
+    """Never let the key travel in something we are about to write down."""
+    key = settings.GOOGLE_MAPS_API_KEY
+    return text.replace(key, "<api-key>") if key else text
+
+
+def _blame(reason: str) -> None:
+    """Fail without saying what was in the request.
+
+    Called after the except block has ended, never inside one. `raise ... from
+    None` clears __cause__ but leaves __context__ pointing at the original
+    exception, and the URL is still in there for anything that reads it.
+    Raising outside the handler is what actually leaves nothing attached.
+    """
+    log.warning("geocoding request failed: %s", reason)
+    raise GeocodingUnavailable("Could not reach the geocoding service.")
+
 
 def _google(address: str) -> Point | None:
+    failure = None
     try:
         response = httpx.get(
             "https://maps.googleapis.com/maps/api/geocode/json",
@@ -106,10 +135,13 @@ def _google(address: str) -> Point | None:
         )
         response.raise_for_status()
         body = response.json()
+    except httpx.HTTPStatusError as exc:
+        # Only the number. The exception's own text is the whole request URL.
+        failure = f"provider returned HTTP {exc.response.status_code}"
     except (httpx.HTTPError, ValueError) as exc:
-        # The address is not named in the log: it is a customer's home.
-        log.warning("geocoding request failed: %s", exc)
-        raise GeocodingUnavailable("Could not reach the geocoding service.") from exc
+        failure = type(exc).__name__
+    if failure is not None:
+        _blame(failure)
 
     status = body.get("status")
     if status == "ZERO_RESULTS":
@@ -117,8 +149,15 @@ def _google(address: str) -> Point | None:
     if status != "OK":
         # OVER_QUERY_LIMIT, REQUEST_DENIED and INVALID_REQUEST are all our
         # problem rather than the customer's, and all mean the same thing to
-        # them: delivery cannot be quoted right now.
-        log.error("geocoding provider answered %s", status)
+        # them: delivery cannot be quoted right now. Whoever has to fix it
+        # needs more than the status, though -- REQUEST_DENIED alone does not
+        # distinguish an unenabled API from a key restricted the wrong way --
+        # so Google's own explanation is logged, with the key scrubbed out of
+        # it in case a future message ever quotes what was sent.
+        log.error(
+            "geocoding provider answered %s: %s",
+            status, _redact(str(body.get("error_message") or "no reason given")),
+        )
         raise GeocodingUnavailable("The geocoding service refused the request.")
 
     results = body.get("results") or []
@@ -129,7 +168,9 @@ def _google(address: str) -> Point | None:
         return Point(latitude=float(location["lat"]), longitude=float(location["lng"]))
     except (KeyError, TypeError, ValueError):
         log.error("geocoding provider returned an unreadable location")
-        raise GeocodingUnavailable("The geocoding service returned nothing usable.")
+        raise GeocodingUnavailable(
+            "The geocoding service returned nothing usable."
+        ) from None
 
 
 # ---------------------------------------------------------------- cache ---
