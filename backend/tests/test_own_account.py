@@ -250,6 +250,76 @@ def test_the_change_is_written_down_without_spelling_the_address_out(team):
     assert scope["from"].startswith(before[0]) and "***@" in scope["from"]
 
 
+# --------------------------------------------- and the database agrees ---
+#
+# Everything above is an application rule, and an application rule is one
+# refactor away from not being a rule. Migration 0023 makes it structural.
+
+
+def test_the_database_refuses_a_second_staff_login_for_one_address(team):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db.session import system_session
+
+    user_id, _ = team.member("CASHIER")
+    taken = _user(user_id, "email")
+
+    with pytest.raises(IntegrityError):
+        with system_session() as session:
+            session.execute(
+                text(
+                    "INSERT INTO users (id, kind, email, password_hash, is_platform_admin, "
+                    "is_active, must_change_password, created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), 'STAFF', :e, 'x', false, true, false, "
+                    "now(), now())"
+                ),
+                {"e": taken},
+            )
+
+
+def test_the_same_address_in_a_different_case_is_the_same_address(team):
+    """The index is on lower(email), so a caller that forgets to normalise is
+    refused rather than quietly making sign-in ambiguous."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db.session import system_session
+
+    user_id, _ = team.member("CASHIER")
+    taken = _user(user_id, "email")
+
+    with pytest.raises(IntegrityError):
+        with system_session() as session:
+            session.execute(
+                text(
+                    "INSERT INTO users (id, kind, email, password_hash, is_platform_admin, "
+                    "is_active, must_change_password, created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), 'STAFF', :e, 'x', false, true, false, "
+                    "now(), now())"
+                ),
+                {"e": taken.upper()},
+            )
+
+
+def test_a_customer_may_still_hold_the_same_address(team):
+    """The index is confined to staff. Customers are a separate population and
+    an address that orders lunch here can also work here."""
+    from app.db.session import system_session
+
+    user_id, _ = team.member("CASHIER")
+    shared = _user(user_id, "email")
+
+    with system_session() as session:
+        session.execute(
+            text(
+                "INSERT INTO users (id, kind, email, clerk_user_id, is_platform_admin, "
+                "is_active, must_change_password, created_at, updated_at) "
+                "VALUES (gen_random_uuid(), 'CUSTOMER', :e, :c, false, true, false, "
+                "now(), now())"
+            ),
+            {"e": shared, "c": f"user_dup_{shared[:10]}"},
+        )
+
+
 def _staff_rows(email) -> int:
     from app.db.session import system_session
 
