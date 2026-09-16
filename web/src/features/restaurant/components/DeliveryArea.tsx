@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ErrorNote, Panel } from "@/components/common/Feedback";
 import {
   useDeliverySettingsQuery,
@@ -228,11 +228,14 @@ function Rings({ data }: { data: DeliverySettings }) {
   }));
   const draft = rows ?? fromServer;
 
-  // Back to the server's answer whenever it changes under us, so another
-  // admin's save is not silently overwritten by a stale form.
-  useEffect(() => {
-    setRows(null);
-  }, [data.zones]);
+  // Deliberately no resync from the server while rows are being edited.
+  //
+  // Four mutations invalidate the Delivery tag -- placing the restaurant, the
+  // switch, the fee-tax checkbox and a profile save -- and three of them are
+  // on this very screen. Resetting the draft when fresh data arrives meant
+  // typing three rings, ticking "charge tax on the delivery fee" just above,
+  // and watching the rings vanish. The draft returns to the server's answer
+  // when a save succeeds, which is the only moment the two are known to agree.
 
   function edit(index: number, patch: Partial<Draft>) {
     setSaved(false);
@@ -304,14 +307,21 @@ function Rings({ data }: { data: DeliverySettings }) {
           disabled={!dirty || isLoading}
           onClick={async () => {
             setError(null);
-            const zones = draft
-              .map((row) => ({
-                max_miles: Number.parseFloat(row.max_miles),
-                fee_minor: Math.round(Number.parseFloat(row.fee || "0") * 100),
-              }))
-              .filter((z) => Number.isFinite(z.max_miles) && Number.isFinite(z.fee_minor));
-            if (zones.length !== draft.length) {
-              setError("Every ring needs a distance and a fee.");
+            // No `|| "0"` on the fee. It used to be there, and it turned a
+            // ring someone forgot to price into free delivery for that whole
+            // band, silently, while the error below claimed to prevent it.
+            const zones = draft.map((row) => ({
+              max_miles: Number.parseFloat(row.max_miles),
+              fee_minor: Math.round(Number.parseFloat(row.fee) * 100),
+            }));
+            if (zones.some((z) => !Number.isFinite(z.max_miles) || !Number.isFinite(z.fee_minor))) {
+              setError(
+                "Every ring needs a distance and a fee. Type 0 as the fee for free delivery.",
+              );
+              return;
+            }
+            if (zones.some((z) => z.max_miles <= 0 || z.fee_minor < 0)) {
+              setError("A ring has to reach further than zero miles, and cannot cost less than nothing.");
               return;
             }
             try {
