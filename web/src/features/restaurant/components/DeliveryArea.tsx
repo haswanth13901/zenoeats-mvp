@@ -3,7 +3,7 @@ import { ErrorNote, Panel } from "@/components/common/Feedback";
 import {
   useDeliverySettingsQuery,
   useLocateRestaurantMutation,
-  useSetDeliveryEnabledMutation,
+  useSetDeliverySettingsMutation,
   useSetDeliveryZonesMutation,
   type DeliverySettings,
 } from "@/features/restaurant/restaurantApi";
@@ -53,7 +53,7 @@ export function DeliveryArea() {
 }
 
 function Status({ data }: { data: DeliverySettings }) {
-  const [setEnabled, { isLoading }] = useSetDeliveryEnabledMutation();
+  const [save, { isLoading }] = useSetDeliverySettingsMutation();
   const [error, setError] = useState<string | null>(null);
 
   // What is missing, minus "it is switched off" -- which is the switch's own
@@ -73,7 +73,7 @@ function Status({ data }: { data: DeliverySettings }) {
           onChange={async (e) => {
             setError(null);
             try {
-              await setEnabled(e.target.checked).unwrap();
+              await save({ delivery_enabled: e.target.checked }).unwrap();
             } catch (err) {
               setError(errorMessage(err));
             }
@@ -101,6 +101,60 @@ function Status({ data }: { data: DeliverySettings }) {
           collection only until this is fixed.
         </p>
       )}
+
+      <FeeTax data={data} />
+    </div>
+  );
+}
+
+/**
+ * Whether the fee is taxed.
+ *
+ * Delivery charges are taxable in some states and not others, so there is no
+ * default that is right for everyone and the restaurant has to answer. Under
+ * Stripe Tax nobody answers it: Stripe is told the amount and decides for the
+ * jurisdiction, which is the reason to be on Stripe Tax, so the switch is
+ * replaced by a sentence saying so rather than left there doing nothing.
+ */
+function FeeTax({ data }: { data: DeliverySettings }) {
+  const [save, { isLoading }] = useSetDeliverySettingsMutation();
+  const [error, setError] = useState<string | null>(null);
+
+  if (data.tax_mode === "STRIPE_TAX") {
+    return (
+      <p className="mt-4 text-sm text-muted">
+        Stripe works out whether delivery is taxed where you are, along with the rest of the tax
+        on each order.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-4">
+      <ErrorNote message={error} />
+      <label className="flex items-start gap-3 text-sm">
+        <input
+          type="checkbox"
+          className="mt-1"
+          disabled={isLoading}
+          checked={data.delivery_fee_taxable}
+          onChange={async (e) => {
+            setError(null);
+            try {
+              await save({ delivery_fee_taxable: e.target.checked }).unwrap();
+            } catch (err) {
+              setError(errorMessage(err));
+            }
+          }}
+        />
+        <span>
+          Charge tax on the delivery fee
+          <span className="block text-muted">
+            Some states tax delivery and some do not. If you are unsure, ask whoever files your
+            sales tax — this changes what customers are charged.
+          </span>
+        </span>
+      </label>
     </div>
   );
 }

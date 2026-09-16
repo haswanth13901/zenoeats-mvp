@@ -57,6 +57,10 @@ class PricedCart:
     tax_minor: int
     total_minor: int
     lines: list[PricedLine]
+    # Charged on top of the food, never part of the subtotal: a subtotal that
+    # quietly included delivery would make every item's share of a refund
+    # wrong, and would read as a menu price rise on the reports.
+    delivery_fee_minor: int = 0
     # The Stripe Tax calculation behind tax_minor, for restaurants on Stripe
     # Tax; None under a flat rate. Carried onto the order so the sale can be
     # recorded against exactly the numbers the customer was charged.
@@ -68,6 +72,7 @@ def price_cart(
     restaurant: Restaurant,
     raw_lines: list[dict],
     raw_combos: list[dict] | None = None,
+    delivery_fee_minor: int = 0,
 ) -> PricedCart:
     """Validate and price a cart. Raises ApiError on any invalid input.
 
@@ -190,14 +195,19 @@ def price_cart(
     discount = min(discount, subtotal)
 
     taxable_base = max(subtotal - discount, 0)
+    # The fee is priced by services/delivery.py from the restaurant's own
+    # rings. It never reaches here from the browser: what a customer sends is
+    # an address, and what comes back is a number they cannot choose.
+    fee = max(delivery_fee_minor, 0)
     tax_result = TaxService.calculate(
         session,
         restaurant,
         [TaxLine(amount_minor=line.line_total_minor, quantity=line.quantity) for line in priced_lines],
         discount,
+        shipping_minor=fee,
     )
     tax = tax_result.tax_minor
-    total = taxable_base + tax
+    total = taxable_base + fee + tax
 
     return PricedCart(
         currency=restaurant.currency,
@@ -205,6 +215,7 @@ def price_cart(
         discount_minor=discount,
         tax_minor=tax,
         total_minor=total,
+        delivery_fee_minor=fee,
         lines=priced_lines,
         tax_calculation_id=tax_result.calculation_id,
     )

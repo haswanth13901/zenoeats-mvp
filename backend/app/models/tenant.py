@@ -79,6 +79,13 @@ class Restaurant(Base, TimestampMixin):
     # detectable: an address edited without re-placing it would otherwise go
     # on charging distances from where it used to be.
     geocoded_address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Whether a delivery fee is taxed, for restaurants on a flat rate. Varies
+    # by state, so it is the restaurant's to answer, like the rate itself.
+    # Restaurants on Stripe Tax never read it: Stripe is told the shipping
+    # amount and decides taxability for the jurisdiction itself.
+    delivery_fee_taxable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

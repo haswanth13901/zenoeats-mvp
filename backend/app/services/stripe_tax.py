@@ -70,7 +70,9 @@ def _address(restaurant: Restaurant) -> dict:
 
 # ------------------------------------------------------------ calculation ---
 
-def calculate(restaurant: Restaurant, stripe_account_id: str, lines) -> "TaxResult":
+def calculate(
+    restaurant: Restaurant, stripe_account_id: str, lines, shipping_minor: int = 0
+) -> "TaxResult":
     from app.services.tax import TaxResult
 
     billable = [line for line in lines if line.amount_minor > 0]
@@ -97,6 +99,10 @@ def calculate(restaurant: Restaurant, stripe_account_id: str, lines) -> "TaxResu
         ],
         "customer_details": {"address": _address(restaurant), "address_source": "shipping"},
     }
+    if shipping_minor:
+        # Stripe decides whether this jurisdiction taxes delivery, which is
+        # the part a flat rate cannot do.
+        request["shipping_cost"] = {"amount": shipping_minor}
     cache_key = "taxcalc:" + hashlib.sha256(
         json.dumps([stripe_account_id, request], sort_keys=True).encode()
     ).hexdigest()

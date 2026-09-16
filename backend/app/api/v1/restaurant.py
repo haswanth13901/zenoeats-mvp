@@ -584,9 +584,13 @@ class ZonesIn(BaseModel):
 
 
 class DeliverySettingsIn(BaseModel):
+    """Only what was sent is applied, so switching delivery on and answering
+    the tax question are separate decisions that do not overwrite each other."""
+
     model_config = ConfigDict(extra="forbid")
 
-    delivery_enabled: bool
+    delivery_enabled: bool | None = None
+    delivery_fee_taxable: bool | None = None
 
 
 class ZoneOut(BaseModel):
@@ -614,6 +618,11 @@ class DeliverySettingsOut(BaseModel):
     # than leaving someone pressing a button that cannot work.
     geocoding_configured: bool
     currency: str
+    # Whether the fee is taxed. Only meaningful under a flat rate: a Stripe Tax
+    # restaurant hands Stripe the amount and Stripe decides per jurisdiction,
+    # so the screen shows that instead of a switch nothing reads.
+    delivery_fee_taxable: bool
+    tax_mode: str
     zones: list[ZoneOut]
 
 
@@ -651,6 +660,8 @@ def _delivery_out(db: Session, restaurant: Restaurant) -> DeliverySettingsOut:
         origin_is_current=origin_current,
         geocoding_configured=geocoding.configured(),
         currency=restaurant.currency,
+        delivery_fee_taxable=restaurant.delivery_fee_taxable,
+        tax_mode=restaurant.tax_mode,
         zones=[
             ZoneOut(id=z.id, max_miles=z.max_miles, fee_minor=z.fee_minor) for z in zones
         ],
@@ -713,13 +724,17 @@ def update_delivery(
     db: Session = StaffDb,
     membership: RestaurantUser = Depends(STAFF_ADMIN),
 ):
-    """Switch delivery on or off.
+    """Switch delivery on or off, and say whether the fee is taxed.
 
     Switching it on is refused unless there is something to quote with: a
     restaurant that believes it is delivering and is not is worse off than one
     told why it cannot yet.
     """
-    if body.delivery_enabled:
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise errors.validation_error("No changes to save.")
+
+    if changes.get("delivery_enabled"):
         if not restaurant.delivery_origin_is_current:
             raise errors.ApiError(
                 409, "DELIVERY_NOT_READY",
@@ -731,10 +746,11 @@ def update_delivery(
                 "Add at least one delivery ring before switching delivery on.",
             )
 
-    restaurant.delivery_enabled = body.delivery_enabled
+    for field, value in changes.items():
+        setattr(restaurant, field, value)
     restaurant_profile.audit(
         db, membership.user_id, "RESTAURANT_DELIVERY_SWITCH",
-        {"restaurant_id": str(restaurant.id), "enabled": body.delivery_enabled},
+        {"restaurant_id": str(restaurant.id), **{k: v for k, v in changes.items()}},
     )
     db.flush()
     return _delivery_out(db, restaurant)

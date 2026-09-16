@@ -73,11 +73,26 @@ class TaxService:
         restaurant: Restaurant,
         lines: list[TaxLine],
         discount_minor: int,
+        shipping_minor: int = 0,
     ) -> TaxResult:
+        """shipping_minor is the delivery fee, which is taxed differently from
+        the food and differently again by jurisdiction.
+
+        Under a flat rate the restaurant says whether its state taxes delivery,
+        because a single rate cannot work it out. Under Stripe Tax the amount
+        is handed over and Stripe decides, which is the reason to be on Stripe
+        Tax at all -- so the restaurant's own answer is deliberately not
+        consulted there.
+        """
         amounts = allocate_discount([line.amount_minor for line in lines], discount_minor)
 
         if restaurant.tax_mode != TaxMode.STRIPE_TAX.value:
-            return TaxResult(tax_minor=apply_rate_bps(sum(amounts), restaurant.tax_rate_bps))
+            taxable = sum(amounts)
+            # Asked only when there is a fee: a collection has no delivery to
+            # have an opinion about.
+            if shipping_minor and restaurant.delivery_fee_taxable:
+                taxable += shipping_minor
+            return TaxResult(tax_minor=apply_rate_bps(taxable, restaurant.tax_rate_bps))
 
         # Imported here: stripe_tax pulls in the Stripe client and Redis, which
         # a flat-rate restaurant never needs.
@@ -92,4 +107,5 @@ class TaxService:
             restaurant,
             account.stripe_account_id,
             [TaxLine(amount_minor=a, quantity=line.quantity) for a, line in zip(amounts, lines)],
+            shipping_minor=shipping_minor,
         )

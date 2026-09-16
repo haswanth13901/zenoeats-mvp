@@ -51,6 +51,10 @@ export type DeliverySettings = {
    *  than offering a button that cannot work. */
   geocoding_configured: boolean;
   currency: string;
+  /** Whether the fee is taxed. Only meaningful under a flat rate: a Stripe Tax
+   *  restaurant hands Stripe the amount and Stripe decides per jurisdiction. */
+  delivery_fee_taxable: boolean;
+  tax_mode: string;
   zones: DeliveryZone[];
 };
 
@@ -456,12 +460,13 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Delivery"],
     }),
 
-    setDeliveryEnabled: build.mutation<DeliverySettings, boolean>({
-      query: (delivery_enabled) => ({
-        url: "/restaurant/delivery",
-        method: "PATCH",
-        body: { delivery_enabled },
-      }),
+    // Only what is sent is applied, so the switch and the tax answer are
+    // separate decisions that do not overwrite each other.
+    setDeliverySettings: build.mutation<
+      DeliverySettings,
+      { delivery_enabled?: boolean; delivery_fee_taxable?: boolean }
+    >({
+      query: (body) => ({ url: "/restaurant/delivery", method: "PATCH", body }),
       // Portal too: whether a customer is offered delivery follows from this.
       invalidatesTags: ["Delivery", "Portal"],
     }),
@@ -977,6 +982,6 @@ export const {
   useChangeStaffEmailMutation,
   useDeliverySettingsQuery,
   useLocateRestaurantMutation,
-  useSetDeliveryEnabledMutation,
+  useSetDeliverySettingsMutation,
   useSetDeliveryZonesMutation,
 } = restaurantApi;
