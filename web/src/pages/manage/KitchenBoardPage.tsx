@@ -9,6 +9,7 @@ import {
   useMarkReadyMutation,
   useOrderBoardQuery,
   useDriversQuery,
+  useUnassignDriverMutation,
   useOrderHistoryQuery,
   useOverrideCompleteMutation,
   type BoardOrder,
@@ -35,6 +36,7 @@ export function KitchenBoardPage() {
   const [overrideComplete] = useOverrideCompleteMutation();
   const [cancelOrder] = useCancelOrderMutation();
   const [assignDriver] = useAssignDriverMutation();
+  const [unassignDriver] = useUnassignDriverMutation();
   const { roleCode } = useAppSelector(selectSession);
   // Override and cancel are managers only. The server decides regardless;
   // this only avoids offering a button that would 403.
@@ -183,6 +185,20 @@ export function KitchenBoardPage() {
       </button>
     );
 
+  /** Undo a delivery: the customer is collecting after all. */
+  async function backToCollection(order: BoardOrder) {
+    setBusy(order.order_id);
+    clearMessages();
+    try {
+      await unassignDriver(order.order_id).unwrap();
+      setNotice(`#${order.order_number} is a collection again.`);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   /** Hand the order to a driver, or hand it to a different one. */
   const driverLink = (order: BoardOrder) =>
     canManage && (
@@ -266,8 +282,17 @@ export function KitchenBoardPage() {
                           ? `Waiting for ${o.driver} to pick it up.`
                           : "Ready, but no driver assigned yet."}
                     </p>
-                    <div className="mt-2 flex justify-end gap-3">
+                    <div className="mt-2 flex flex-wrap justify-end gap-3">
                       {driverLink(o)}
+                      {canManage && o.status !== "OUT_FOR_DELIVERY" && (
+                        <button
+                          className="text-xs text-muted underline"
+                          disabled={busy === o.order_id}
+                          onClick={() => void backToCollection(o)}
+                        >
+                          back to collection
+                        </button>
+                      )}
                       {cancelLink(o)}
                     </div>
                   </div>

@@ -2671,6 +2671,43 @@ def assign_driver(
     }
 
 
+@router.post("/orders/{order_id}/unassign-driver")
+def unassign_driver(
+    order_id: UUID,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(MANAGE),
+):
+    """Take a delivery back off its driver: it is a collection again.
+
+    For the customer who rings back to say they will come in after all. The
+    driver, the address and the delivery itself are undone, and an order that
+    was waiting for a driver is waiting at the counter instead.
+
+    Not once the driver has it. The food has left the building, and pretending
+    otherwise would put a PIN prompt in front of a counter that has nothing to
+    hand over. Cancel it, or let the driver finish and mark it delivered.
+    """
+    order = db.get(Order, order_id, with_for_update=True)
+    if order is None:
+        raise errors.order_not_found()
+    if order.fulfillment_type != FulfillmentType.DELIVERY.value:
+        raise errors.order_state_conflict("This order is already a collection.")
+    if order.status == OrderStatus.OUT_FOR_DELIVERY.value:
+        raise errors.order_state_conflict(
+            "The driver already has this order. Cancel it, or let them deliver it."
+        )
+
+    if order.status == OrderStatus.READY_FOR_DELIVERY.value:
+        transition(order, OrderStatus.READY_FOR_PICKUP.value)
+
+    order.fulfillment_type = FulfillmentType.PICKUP.value
+    order.driver_user_id = None
+    order.delivery_address = None
+    _record(db, order, membership, OrderEventAction.UNASSIGNED_DRIVER)
+    return {"order_id": str(order.id), "status": order.status, "fulfillment_type": order.fulfillment_type}
+
+
 @router.get("/drivers")
 def drivers(
     restaurant: Restaurant = Depends(current_restaurant_staff),

@@ -386,6 +386,14 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Board"],
     }),
 
+    unassignDriver: build.mutation<unknown, string>({
+      query: (orderId) => ({
+        url: `/restaurant/orders/${orderId}/unassign-driver`,
+        method: "POST",
+      }),
+      invalidatesTags: ["Board"],
+    }),
+
     pickedUp: build.mutation<unknown, string>({
       query: (orderId) => ({ url: `/restaurant/orders/${orderId}/picked-up`, method: "POST" }),
       invalidatesTags: ["Board"],
@@ -782,6 +790,7 @@ export const {
   useDeliveriesQuery,
   useDriversQuery,
   useAssignDriverMutation,
+  useUnassignDriverMutation,
   usePickedUpMutation,
   useDeliveredMutation,
   useMarkReadyMutation,

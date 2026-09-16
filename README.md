@@ -106,7 +106,10 @@ system read surface.
   and the driver marks it picked up, then delivered -- no PIN at a doorstep,
   so the driver saying so is what completes it, recorded against them. A
   driver sees their own deliveries and nothing else; a manager sees them all
-  and can press the same buttons for a driver whose hands are full.
+  and can press the same buttons for a driver whose hands are full. A manager
+  can also hand the order to a different driver, or take it back to being a
+  collection -- until the driver has it, at which point the choices are let
+  them deliver it or cancel.
 - **Stock** is the sold-out toggle for everyone on the floor: sold-out items
   first, a search box, one button per item.
 - **Menu** has four tabs. *Items* is everything the restaurant sells, each

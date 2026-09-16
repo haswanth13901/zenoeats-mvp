@@ -42,6 +42,7 @@ EXPECTED = {
     ("POST", "/restaurant/orders/{order_id}/delivered"): DELIVERY,
     # Managers: the exceptions to the counter's rules.
     ("POST", "/restaurant/orders/{order_id}/assign-driver"): MANAGERS,
+    ("POST", "/restaurant/orders/{order_id}/unassign-driver"): MANAGERS,
     ("GET", "/restaurant/drivers"): MANAGERS,
     ("POST", "/restaurant/orders/{order_id}/override-complete"): MANAGERS,
     ("POST", "/restaurant/orders/{order_id}/cancel"): MANAGERS,

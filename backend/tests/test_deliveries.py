@@ -335,3 +335,61 @@ def test_a_collection_is_not_a_delivery(shop):
     res = shop.manager.post(f"/api/v1/restaurant/orders/{order_id}/picked-up")
     assert res.status_code == 409
     assert "collection" in res.json()["detail"]["message"]
+
+
+# ------------------------------------------------ taking it back off ---
+
+def _unassign(client, order_id):
+    return client.post(f"/api/v1/restaurant/orders/{order_id}/unassign-driver")
+
+
+def test_a_delivery_can_become_a_collection_again(shop):
+    """The customer rings back to say they will come in after all."""
+    order_id = shop.order()
+    _assign(shop.manager, order_id, shop.driver_membership)
+    shop.kitchen.post(f"/api/v1/restaurant/orders/{order_id}/ready")
+
+    res = _unassign(shop.manager, order_id)
+    assert res.status_code == 200, res.text
+    row = shop.row(order_id)
+    assert (row.status, row.fulfillment_type) == ("READY_FOR_PICKUP", "PICKUP")
+    assert (row.driver_user_id, row.delivery_address) == (None, None)
+    assert shop.driver.get("/api/v1/restaurant/deliveries").json() == []
+    assert [e[0] for e in shop.events(order_id)][-1] == "UNASSIGNED_DRIVER"
+
+    # And the counter can hand it over with the PIN, as any collection.
+    done = shop.kitchen.post(
+        f"/api/v1/restaurant/orders/{order_id}/complete", json={"pin": PIN}
+    )
+    assert done.status_code == 200 and done.json()["status"] == "COMPLETED"
+
+
+def test_an_order_still_being_made_can_be_taken_back_too(shop):
+    order_id = shop.order()
+    _assign(shop.manager, order_id, shop.driver_membership)
+
+    assert _unassign(shop.manager, order_id).status_code == 200
+    row = shop.row(order_id)
+    assert (row.status, row.fulfillment_type) == ("PREPARING", "PICKUP")
+
+
+def test_an_order_the_driver_already_has_cannot_be_taken_back(shop):
+    order_id = shop.order()
+    _assign(shop.manager, order_id, shop.driver_membership)
+    shop.kitchen.post(f"/api/v1/restaurant/orders/{order_id}/ready")
+    shop.driver.post(f"/api/v1/restaurant/orders/{order_id}/picked-up")
+
+    res = _unassign(shop.manager, order_id)
+    assert res.status_code == 409
+    assert "already has this order" in res.json()["detail"]["message"]
+    assert shop.row(order_id).status == "OUT_FOR_DELIVERY"
+
+
+def test_a_collection_cannot_be_unassigned_and_a_driver_cannot_do_it(shop):
+    order_id = shop.order()
+    plain = _unassign(shop.manager, order_id)
+    assert plain.status_code == 409 and "already a collection" in plain.json()["detail"]["message"]
+
+    _assign(shop.manager, order_id, shop.driver_membership)
+    assert _unassign(shop.driver, order_id).status_code == 403
+    assert shop.row(order_id).fulfillment_type == "DELIVERY"

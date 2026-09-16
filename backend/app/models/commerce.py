@@ -74,6 +74,9 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     },
     OrderStatus.READY_FOR_DELIVERY.value: {
         OrderStatus.OUT_FOR_DELIVERY.value,
+        # Back to the counter: the customer rang to say they will collect
+        # after all, and the food has not left the kitchen.
+        OrderStatus.READY_FOR_PICKUP.value,
         OrderStatus.CANCELLED.value,
     },
     OrderStatus.OUT_FOR_DELIVERY.value: {
@@ -241,6 +244,7 @@ class OrderEventAction(str, enum.Enum):
     CANCELLED = "CANCELLED"
     # Delivery: who a manager gave it to, and the driver's two steps.
     ASSIGNED_DRIVER = "ASSIGNED_DRIVER"
+    UNASSIGNED_DRIVER = "UNASSIGNED_DRIVER"
     PICKED_UP = "PICKED_UP"
     DELIVERED = "DELIVERED"
 
