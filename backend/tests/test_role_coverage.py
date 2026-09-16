@@ -80,6 +80,11 @@ EXPECTED = {
     ("DELETE", "/restaurant/staff/{membership_id}"): ADMIN,
     ("PATCH", "/restaurant/staff/{membership_id}"): ADMIN,
     ("POST", "/restaurant/staff/{membership_id}/reset-password"): ADMIN,
+    # ...and the restaurant's own record. A manager runs the service; the
+    # trading name, the address tax is sourced at and the tax rate itself are
+    # the owner's to answer for.
+    ("GET", "/restaurant/profile"): ADMIN,
+    ("PATCH", "/restaurant/profile"): ADMIN,
 }
 
 # Before a role exists, each for a stated reason, and each with the identity

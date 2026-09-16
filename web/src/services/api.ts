@@ -65,6 +65,7 @@ export const api = createApi({
     "ModifierGroup",
     "Board",
     "Staff",
+    "RestaurantProfile",
     "RestaurantReport",
     "Order",
     "Session",

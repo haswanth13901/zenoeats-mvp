@@ -6,6 +6,7 @@ import { KitchenBoardPage } from "@/pages/manage/KitchenBoardPage";
 import { MenuPage } from "@/pages/manage/MenuPage";
 import { StaffPage } from "@/pages/manage/StaffPage";
 import { ReportsPage } from "@/pages/manage/ReportsPage";
+import { SettingsPage } from "@/pages/manage/SettingsPage";
 import { StockPage } from "@/pages/manage/StockPage";
 import { DeliveriesPage } from "@/pages/manage/DeliveriesPage";
 import {
@@ -59,7 +60,7 @@ export function AppRoutes() {
         <Route
           path="/orders/:orderId"
           element={
-            <RequireCustomer>
+            <RequireCustomer allowOrderToken>
               <OrderPage />
             </RequireCustomer>
           }
@@ -89,6 +90,10 @@ export function AppRoutes() {
         <Route
           path="/manage/reports"
           element={<RequireStaff roles={MANAGER_ROLES}><ReportsPage /></RequireStaff>}
+        />
+        <Route
+          path="/manage/settings"
+          element={<RequireStaff roles={ADMIN_ROLES}><SettingsPage /></RequireStaff>}
         />
 
         {/* Platform portal. Credentials from ADMIN_USERS. */}

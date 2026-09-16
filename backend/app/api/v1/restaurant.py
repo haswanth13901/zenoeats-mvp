@@ -6,11 +6,12 @@ were removed, RLS would return zero rows for another restaurant's data.
 
 import logging
 from datetime import date, datetime, time, timedelta
+from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Response, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
@@ -35,9 +36,9 @@ from app.models import (
 )
 from app.schemas.api import (
     ChangePasswordIn, MenuOut, StaffInviteOut, StaffLoginIn, StaffMeOut,
-    StaffPasswordResetOut,
+    StaffPasswordResetOut, known_timezone,
 )
-from app.services import images
+from app.services import images, restaurant_profile
 from app.services.images import ImageKind
 from app.services.menu import load_item_types, load_menu
 from app.services.orders import transition
@@ -273,6 +274,149 @@ STAFF_ADMIN = require_staff(StaffRole.ADMIN)
 # the endpoints enforce; a manager sees every delivery and may act for a driver
 # who is on the road with their hands full.
 DELIVERY = require_staff(StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.DRIVER)
+
+
+# ------------------------------------------------------ restaurant profile ---
+#
+# A restaurant editing its own record. The platform can edit the same row from
+# the Super Admin portal, and both go through services/restaurant_profile.py
+# so the two cannot drift: the tax rules are the same rules whoever is typing.
+#
+# Admin only. A manager runs the service; changing the trading name, the
+# address sales tax is sourced at, or the tax rate itself is a different kind
+# of decision, and it is the one the owner is accountable for.
+
+
+class RestaurantProfileIn(BaseModel):
+    """What a restaurant may change about itself.
+
+    Every field is optional and only the ones actually sent are applied, so
+    clearing the tagline by sending null stays distinguishable from leaving it
+    alone, and two admins editing different fields do not overwrite one
+    another.
+
+    Deliberately absent, and still the platform's to change:
+      slug      -- the public address, in QR codes on tables and in customers'
+                   bookmarks. Moving is a migration, not a text edit.
+      status    -- activate and suspend own that transition and its readiness
+                   gate, which a plain field write would bypass.
+      currency  -- what every existing order and payment is denominated in.
+    """
+
+    # Reject unknown fields rather than ignoring them, so sending `slug` is a
+    # refusal rather than a silent no-op that reads like a client bug.
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    tagline: str | None = Field(default=None, max_length=200)
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    _timezone = field_validator("timezone")(known_timezone)
+    accepting_orders: bool | None = None
+    tax_mode: Literal["FLAT", "STRIPE_TAX"] | None = None
+    tax_rate_bps: int | None = Field(default=None, ge=0, le=3000)
+    tax_code: str | None = Field(default=None, pattern=r"^txcd_\d{8}$")
+    address_line1: str | None = Field(default=None, max_length=200)
+    address_line2: str | None = Field(default=None, max_length=200)
+    address_city: str | None = Field(default=None, max_length=100)
+    address_state: str | None = Field(default=None, max_length=100)
+    address_postal_code: str | None = Field(default=None, max_length=20)
+    address_country: str | None = Field(default=None, pattern=r"^[A-Za-z]{2}$")
+
+
+class RestaurantProfileOut(BaseModel):
+    """The profile, plus the few read-only facts the screen needs to explain
+    itself -- why Stripe Tax is refused, and what the platform still owns."""
+
+    slug: str
+    status: str
+    currency: str
+    name: str
+    tagline: str | None
+    timezone: str
+    accepting_orders: bool
+    tax_mode: str
+    tax_rate_bps: int
+    tax_code: str
+    address_line1: str | None
+    address_line2: str | None
+    address_city: str | None
+    address_state: str | None
+    address_postal_code: str | None
+    address_country: str | None
+    stripe_connected: bool
+    charges_enabled: bool
+
+
+def _profile_out(db: Session, restaurant: Restaurant) -> RestaurantProfileOut:
+    account = db.execute(
+        text(
+            "SELECT stripe_account_id, charges_enabled FROM restaurant_payment_accounts "
+            "WHERE restaurant_id = :rid"
+        ),
+        {"rid": str(restaurant.id)},
+    ).mappings().one_or_none()
+    return RestaurantProfileOut(
+        slug=restaurant.slug, status=restaurant.status, currency=restaurant.currency,
+        name=restaurant.name, tagline=restaurant.tagline, timezone=restaurant.timezone,
+        accepting_orders=restaurant.accepting_orders,
+        tax_mode=restaurant.tax_mode, tax_rate_bps=restaurant.tax_rate_bps,
+        tax_code=restaurant.tax_code,
+        address_line1=restaurant.address_line1, address_line2=restaurant.address_line2,
+        address_city=restaurant.address_city, address_state=restaurant.address_state,
+        address_postal_code=restaurant.address_postal_code,
+        address_country=restaurant.address_country,
+        stripe_connected=bool(account and account["stripe_account_id"]),
+        charges_enabled=bool(account and account["charges_enabled"]),
+    )
+
+
+@router.get("/profile", response_model=RestaurantProfileOut)
+def read_profile(
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    _=Depends(STAFF_ADMIN),
+):
+    """This restaurant's own record.
+
+    Read through the tenant session, so RLS is what proves this is the
+    caller's restaurant rather than any id they could have supplied.
+    """
+    return _profile_out(db, restaurant)
+
+
+@router.patch("/profile", response_model=RestaurantProfileOut)
+def update_profile(
+    body: RestaurantProfileIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
+):
+    """Change it.
+
+    The Stripe Tax gate runs before anything is written and on the *result* of
+    the edit, not on the edit: a restaurant clearing its own city is refused
+    exactly as one switching Stripe Tax on without an address is. Otherwise
+    the first order after a quiet typo is the one that discovers it.
+    """
+    changes = restaurant_profile.normalize(body.model_dump(exclude_unset=True))
+    if not changes:
+        raise errors.validation_error("No changes to save.")
+
+    account_id = db.execute(
+        text("SELECT stripe_account_id FROM restaurant_payment_accounts WHERE restaurant_id = :rid"),
+        {"rid": str(restaurant.id)},
+    ).scalar_one_or_none()
+    restaurant_profile.guard_stripe_tax(restaurant, changes, account_id)
+
+    for field, value in changes.items():
+        setattr(restaurant, field, value)
+
+    restaurant_profile.audit(
+        db, membership.user_id, "RESTAURANT_UPDATE_PROFILE",
+        {"restaurant_id": str(restaurant.id), "fields": sorted(changes)},
+    )
+    db.flush()
+    return _profile_out(db, restaurant)
 
 
 class MealIn(BaseModel):

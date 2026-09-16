@@ -36,7 +36,7 @@ from app.schemas.api import (
     CreateRestaurantIn, RestaurantOut, RestaurantReportOut, StripeSyncOut,
     UpdateRestaurantIn,
 )
-from app.services import images, stripe_service, stripe_tax
+from app.services import images, restaurant_profile, stripe_service, stripe_tax
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["super-admin"])
@@ -229,34 +229,11 @@ def list_restaurants(
     ]
 
 
-TAX_AND_ADDRESS_FIELDS = (
-    "tax_mode", "tax_code", "address_line1", "address_line2", "address_city",
-    "address_state", "address_postal_code", "address_country",
-)
-
-
-def _tax_fields(source) -> dict:
-    """The tax and address attributes of a Restaurant or a row mapping."""
-    get = source.get if isinstance(source, dict) or hasattr(source, "keys") else (
-        lambda name: getattr(source, name)
-    )
-    return {name: get(name) for name in TAX_AND_ADDRESS_FIELDS}
-
-
-def _stripe_tax_blockers(restaurant_view, stripe_account_id: str | None) -> list[str]:
-    """Why a restaurant cannot calculate tax through Stripe; empty when it can.
-
-    Called outside any database transaction: it asks Stripe for the connected
-    account's tax settings, and a network call must never hold a connection
-    from the narrow system pool (rule 6).
-    """
-    blockers = [f"Pickup address is missing the {part}." for part in
-                stripe_tax.address_problems(restaurant_view)]
-    if not stripe_account_id:
-        blockers.append("No Stripe connected account.")
-    else:
-        blockers.extend(stripe_tax.settings_problems(stripe_account_id))
-    return blockers
+# Shared with the restaurant's own Settings screen, which writes the same row
+# and must not be allowed to write it by looser rules.
+TAX_AND_ADDRESS_FIELDS = restaurant_profile.TAX_AND_ADDRESS_FIELDS
+_tax_fields = restaurant_profile.tax_fields
+_stripe_tax_blockers = restaurant_profile.stripe_tax_blockers
 
 
 def _restaurant_out(session, restaurant: Restaurant) -> RestaurantOut:
@@ -297,17 +274,7 @@ def update_restaurant(
     if not changes:
         raise errors.validation_error("No fields to update.")
 
-    if changes.get("currency"):
-        changes["currency"] = changes["currency"].upper()
-    if changes.get("address_country"):
-        changes["address_country"] = changes["address_country"].upper()
-    for field in TAX_AND_ADDRESS_FIELDS:
-        if isinstance(changes.get(field), str):
-            changes[field] = changes[field].strip() or None
-    if "tax_mode" in changes and changes["tax_mode"] is None:
-        raise errors.validation_error("Choose a tax mode.")
-    if "tax_code" in changes and changes["tax_code"] is None:
-        raise errors.validation_error("A tax code is required.")
+    changes = restaurant_profile.normalize(changes)
 
     # Stripe Tax is checked before anything is written, and outside the
     # transaction, because the check asks Stripe. It runs whenever the result
@@ -318,21 +285,15 @@ def update_restaurant(
         current = session.get(Restaurant, restaurant_id)
         if current is None or current.deleted_at is not None:
             raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
-        prospective = {**_tax_fields(current), **{
-            k: v for k, v in changes.items() if k in TAX_AND_ADDRESS_FIELDS
-        }}
+        # Read inside the session: the check runs after it closes, and a
+        # detached instance would raise rather than answer.
+        current_tax = restaurant_profile.tax_fields(current)
         account_id = session.execute(
             text("SELECT stripe_account_id FROM restaurant_payment_accounts WHERE restaurant_id = :rid"),
             {"rid": str(restaurant_id)},
         ).scalar_one_or_none()
 
-    touches_tax = any(field in changes for field in TAX_AND_ADDRESS_FIELDS)
-    if touches_tax and prospective["tax_mode"] == TaxMode.STRIPE_TAX.value:
-        from types import SimpleNamespace
-
-        blockers = _stripe_tax_blockers(SimpleNamespace(**prospective), account_id)
-        if blockers:
-            raise errors.ApiError(409, "STRIPE_TAX_NOT_READY", " ".join(blockers))
+    restaurant_profile.guard_stripe_tax(current_tax, changes, account_id)
 
     with system_session() as session:
         restaurant = session.get(Restaurant, restaurant_id)

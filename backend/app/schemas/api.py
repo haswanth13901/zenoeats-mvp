@@ -284,6 +284,11 @@ def _known_timezone(value: str | None) -> str | None:
     return value
 
 
+# The restaurant portal validates its own timezone field with the same rule,
+# and a shared rule should not be reached for through a private name.
+known_timezone = _known_timezone
+
+
 class CreateRestaurantIn(BaseModel):
     slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str = Field(min_length=1, max_length=160)

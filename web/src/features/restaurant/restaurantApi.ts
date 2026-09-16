@@ -15,6 +15,40 @@ export type StaffMe = {
   membership_status: "ACTIVE" | "INVITED";
 };
 
+/** The restaurant's own record, as its admin may see and edit it.
+ *
+ *  slug, status and currency are here to be shown and not changed: the
+ *  subdomain is printed on tables, the status has a readiness gate of its own,
+ *  and the currency is what existing orders are denominated in. */
+export type RestaurantProfile = {
+  slug: string;
+  status: string;
+  currency: string;
+  name: string;
+  tagline: string | null;
+  timezone: string;
+  accepting_orders: boolean;
+  tax_mode: "FLAT" | "STRIPE_TAX";
+  tax_rate_bps: number;
+  tax_code: string;
+  address_line1: string | null;
+  address_line2: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  address_postal_code: string | null;
+  address_country: string | null;
+  /** Why Stripe Tax may be refused: it needs a connected account that has
+   *  finished its own tax setup, as well as a full pickup address. */
+  stripe_connected: boolean;
+  charges_enabled: boolean;
+};
+
+/** Only the fields actually sent are applied, so an edit of one field cannot
+ *  overwrite another admin's edit of a different one. */
+export type RestaurantProfilePatch = Partial<
+  Omit<RestaurantProfile, "slug" | "status" | "currency" | "stripe_connected" | "charges_enabled">
+>;
+
 export type StaffInvite = {
   id: string;
   email: string;
@@ -359,6 +393,18 @@ export const restaurantApi = api.injectEndpoints({
     staffLogoutEverywhere: build.mutation<void, void>({
       query: () => ({ url: "/restaurant/logout-everywhere", method: "POST" }),
       invalidatesTags: ["Session"],
+    }),
+
+    restaurantProfile: build.query<RestaurantProfile, void>({
+      query: () => ({ url: "/restaurant/profile" }),
+      providesTags: ["RestaurantProfile"],
+    }),
+
+    // Session too: the header shows the restaurant's name, so renaming it
+    // should not need a reload to take effect.
+    updateRestaurantProfile: build.mutation<RestaurantProfile, RestaurantProfilePatch>({
+      query: (body) => ({ url: "/restaurant/profile", method: "PATCH", body }),
+      invalidatesTags: ["RestaurantProfile", "Session", "Portal"],
     }),
 
     orderBoard: build.query<BoardOrder[], void>({
@@ -842,4 +888,6 @@ export const {
   useChangeStaffRoleMutation,
   useResetStaffPasswordMutation,
   useRestaurantReportsQuery,
+  useRestaurantProfileQuery,
+  useUpdateRestaurantProfileMutation,
 } = restaurantApi;

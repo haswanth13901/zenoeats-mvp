@@ -24,6 +24,7 @@ export const MANAGE_NAV: ManageNavItem[] = [
   { href: "/manage/menu", label: "Menu", roles: MANAGER_ROLES },
   { href: "/manage/staff", label: "Staff", roles: ADMIN_ROLES },
   { href: "/manage/reports", label: "Reports", roles: MANAGER_ROLES },
+  { href: "/manage/settings", label: "Settings", roles: ADMIN_ROLES },
 ];
 
 /** The tabs this role can use. No role yet -- the guard has not answered --
