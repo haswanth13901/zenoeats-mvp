@@ -395,6 +395,20 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Session"],
     }),
 
+    // Your own name. Every role may, drivers included -- it is not a
+    // privilege, it is what colleagues see beside an order.
+    updateOwnAccount: build.mutation<StaffMe, { full_name: string | null }>({
+      query: (body) => ({ url: "/restaurant/me", method: "PATCH", body }),
+      invalidatesTags: ["Session"],
+    }),
+
+    // Separate from the name, because it takes the current password: the
+    // address you sign in with is a credential and the name is not.
+    changeStaffEmail: build.mutation<void, { email: string; current_password: string }>({
+      query: (body) => ({ url: "/restaurant/change-email", method: "POST", body }),
+      invalidatesTags: ["Session"],
+    }),
+
     restaurantProfile: build.query<RestaurantProfile, void>({
       query: () => ({ url: "/restaurant/profile" }),
       providesTags: ["RestaurantProfile"],
@@ -890,4 +904,6 @@ export const {
   useRestaurantReportsQuery,
   useRestaurantProfileQuery,
   useUpdateRestaurantProfileMutation,
+  useUpdateOwnAccountMutation,
+  useChangeStaffEmailMutation,
 } = restaurantApi;

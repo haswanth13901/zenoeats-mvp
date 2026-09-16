@@ -274,6 +274,134 @@ STAFF_ADMIN = require_staff(StaffRole.ADMIN)
 # the endpoints enforce; a manager sees every delivery and may act for a driver
 # who is on the road with their hands full.
 DELIVERY = require_staff(StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.DRIVER)
+# Every role, drivers included. Not a permission so much as the absence of
+# one: these are about your own name and your own login, which a cook and a
+# driver have exactly as much claim to as an owner.
+OWN_ACCOUNT = require_staff()
+
+
+# ------------------------------------------------------------ own account ---
+
+
+class OwnAccountIn(BaseModel):
+    """Your own display name. Optional, and clearable: some people would
+    rather a ticket showed nothing but their email."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: str | None = Field(default=None, max_length=160)
+
+
+class ChangeEmailIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=320)
+    # The session already proves who you are. This proves you are still here,
+    # which is a different question on a tablet left signed in behind a
+    # counter -- the same reason change-password asks for it.
+    current_password: str = Field(min_length=1, max_length=256)
+
+
+@router.patch("/me", response_model=StaffMeOut)
+def update_own_account(
+    body: OwnAccountIn,
+    user: User = Depends(current_staff_user_ready),
+    tenant: TenantContext = Depends(resolve_tenant_staff),
+    membership: RestaurantUser = Depends(OWN_ACCOUNT),
+):
+    """Change your own display name.
+
+    No password asked for: a name is what colleagues see beside an order, not
+    a credential, and getting it wrong costs nothing that cannot be typed
+    again.
+    """
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise errors.validation_error("No changes to save.")
+
+    full_name = (changes["full_name"] or "").strip() or None
+
+    with system_session() as session:
+        row = session.get(User, user.id)
+        if row is None:
+            raise errors.ApiError(401, "UNAUTHENTICATED", "Sign in to continue.")
+        row.full_name = full_name
+        email = row.email
+        must_change = row.must_change_password
+
+    with tenant_session(tenant.restaurant_id) as session:
+        restaurant = session.get(Restaurant, tenant.restaurant_id)
+        if restaurant is None:
+            raise errors.tenant_scope_denied()
+        restaurant_name = restaurant.name
+
+    return StaffMeOut(
+        user_id=user.id, email=email, full_name=full_name,
+        role_code=membership.role_code, must_change_password=must_change,
+        restaurant_name=restaurant_name, membership_status=membership.status,
+    )
+
+
+@router.post("/change-email", status_code=204)
+def change_email(
+    body: ChangeEmailIn,
+    user: User = Depends(current_staff_user_ready),
+    _=Depends(OWN_ACCOUNT),
+):
+    """Change the address you sign in with.
+
+    Refused when another staff login already holds it, and that refusal is
+    load-bearing rather than tidiness: sign-in looks an account up by address
+    alone and expects exactly one. Two rows sharing an address make both
+    accounts unreachable, so without this check typing a colleague's address
+    into your own settings would lock them out.
+
+    Customer accounts are a separate population and are not consulted. An
+    address that orders lunch here can also work here, exactly as it can at
+    invitation time.
+
+    The session survives. You have just proved the password, and changing
+    which address it belongs to does not make the person holding it someone
+    else.
+    """
+    email = body.email.strip().lower()
+    if "@" not in email or len(email) < 3:
+        raise errors.validation_error("Enter an email address you can sign in with.")
+
+    with system_session() as session:
+        row = session.get(User, user.id)
+        if row is None or row.password_hash is None:
+            raise errors.ApiError(401, "UNAUTHENTICATED", "Sign in to continue.")
+        if not staff_auth.verify_password(row.password_hash, body.current_password):
+            raise errors.ApiError(401, "INVALID_CREDENTIALS", "Current password is incorrect.")
+
+        previous = row.email
+        if email == previous:
+            return
+
+        taken = session.execute(
+            select(User.id).where(
+                User.email == email,
+                User.kind == UserKind.STAFF.value,
+                User.id != user.id,
+            ).limit(1)
+        ).scalar_one_or_none()
+        if taken is not None:
+            # Deliberately the same answer whether that login is a colleague
+            # here or someone at a restaurant this caller cannot see: which
+            # addresses have staff accounts elsewhere is not theirs to learn.
+            raise errors.ApiError(
+                409, "EMAIL_IN_USE", "That address already has a staff login."
+            )
+
+        row.email = email
+        restaurant_profile.audit(
+            session, user.id, "STAFF_CHANGE_EMAIL",
+            {"user_id": str(user.id), "from": email_for_log(previous),
+             "to": email_for_log(email)},
+        )
+    log.info("staff %s changed sign-in address to %s",
+             email_for_log(previous), email_for_log(email))
 
 
 # ------------------------------------------------------ restaurant profile ---

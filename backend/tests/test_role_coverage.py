@@ -25,6 +25,9 @@ ALL = frozenset({"ADMIN", "MANAGER", "KITCHEN", "CASHIER"})
 MANAGERS = frozenset({"ADMIN", "MANAGER"})
 ADMIN = frozenset({"ADMIN"})
 DELIVERY = frozenset({"ADMIN", "MANAGER", "DRIVER"})
+# Everyone who has a login here, drivers included: your own name and your
+# own sign-in address belong to you whatever you do at the restaurant.
+EVERYONE = frozenset({"ADMIN", "MANAGER", "KITCHEN", "CASHIER", "DRIVER"})
 
 # Kept in step with "Staff roles" in README.md and with
 # web/src/features/restaurant/nav.ts.
@@ -85,6 +88,9 @@ EXPECTED = {
     # the owner's to answer for.
     ("GET", "/restaurant/profile"): ADMIN,
     ("PATCH", "/restaurant/profile"): ADMIN,
+    # Your own account, which is nobody's business but yours.
+    ("PATCH", "/restaurant/me"): EVERYONE,
+    ("POST", "/restaurant/change-email"): EVERYONE,
 }
 
 # Before a role exists, each for a stated reason, and each with the identity

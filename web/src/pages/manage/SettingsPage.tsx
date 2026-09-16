@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Empty, ErrorNote, Panel } from "@/components/common/Feedback";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
+import { OwnAccount } from "@/features/restaurant/components/OwnAccount";
 import {
   useRestaurantProfileQuery,
   useUpdateRestaurantProfileMutation,
@@ -82,7 +83,9 @@ export function SettingsPage() {
         <p className="mb-4 border-l-2 border-ink bg-surface px-3 py-2 text-sm">Saved.</p>
       )}
 
-      <Panel title="The basics">
+      <OwnAccount />
+
+      <Panel title="The restaurant">
         <div className="space-y-4 bg-surface px-5 py-5">
           <Field label="Restaurant name" hint="What customers see on your menu and receipts.">
             <input
