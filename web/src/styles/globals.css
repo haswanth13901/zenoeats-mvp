@@ -42,6 +42,17 @@
     @apply w-full rounded-md border border-hairline bg-surface px-3 py-2 text-sm
            focus:border-brick focus:outline-none;
   }
+  /* A row that scrolls sideways without a scrollbar sitting across it. Used
+     by the portal tab row on a phone, where the bar would cover the tabs it
+     belongs to and there is a finger to swipe with anyway. The active tab is
+     scrolled into view, so nothing is reachable only by knowing it is there. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
