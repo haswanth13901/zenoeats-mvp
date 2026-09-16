@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer,
+    BigInteger, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer,
     SmallInteger, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -119,6 +119,12 @@ class Order(Base, TimestampMixin):
         CheckConstraint("discount_minor >= 0", name="ck_order_discount"),
         CheckConstraint("tax_minor >= 0", name="ck_order_tax"),
         CheckConstraint("total_minor >= 0", name="ck_order_total"),
+        CheckConstraint("delivery_fee_minor >= 0", name="ck_order_delivery_fee"),
+        # A collection cannot have been charged for delivery.
+        CheckConstraint(
+            "delivery_fee_minor = 0 OR fulfillment_type = 'DELIVERY'",
+            name="ck_order_delivery_fee_needs_delivery",
+        ),
         CheckConstraint(
             "pickup_pin_failed_attempts >= 0 AND pickup_pin_failed_attempts <= 5",
             name="ck_order_pin_attempts",
@@ -167,6 +173,13 @@ class Order(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     delivery_address: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # What the delivery was charged, and the distance that chose it. Both are
+    # facts about this order rather than pointers at a rule: a restaurant's
+    # rings are replaced as a set whenever it edits them, so the ring that
+    # applied here may not exist by next week, while "3.2 miles, $4" stays
+    # true and stays explainable to whoever asks a year from now.
+    delivery_fee_minor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    delivery_miles: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Encrypted, not hashed: the authenticated customer must be able to read
     # it back. Never logged, never in a URL, never in a push body.

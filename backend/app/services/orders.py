@@ -6,6 +6,7 @@ Rule 6: no external network call inside a database transaction.
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
@@ -23,6 +24,20 @@ from app.models import (
 from app.services.pricing import PricedCart
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DeliveryDetails:
+    """Where an order is going, and how far that turned out to be.
+
+    Built from a priced delivery quote by the caller. The fee is not here: it
+    travels on the cart, because it is part of what the customer is charged
+    and has to have gone through the same pricing as everything else they are
+    about to pay for.
+    """
+
+    address: str
+    miles: float
 
 
 def allocate_order_number(session: Session, restaurant_id: UUID) -> int:
@@ -60,22 +75,35 @@ def create_pending_order(
     customer_user_id: UUID,
     cart: PricedCart,
     customer_note: str | None,
+    delivery: "DeliveryDetails | None" = None,
 ) -> Order:
     """Create the order and its immutable snapshots. Commits nothing.
 
     The order is PENDING_PAYMENT. No money has moved and no Stripe call has
     been made. That happens in a separate request, after this transaction
     commits.
+
+    delivery is where it is going and how far, priced already: the fee rides
+    on the cart, because it is part of what the customer is about to be
+    charged and must have gone through the same pricing the total did.
     """
     if not restaurant.is_orderable:
         raise errors.restaurant_not_orderable()
+
+    # A fee with nowhere to deliver to is a bug rather than a cheap order, and
+    # the database refuses it too. Caught here so it names itself.
+    if cart.delivery_fee_minor and delivery is None:
+        raise errors.validation_error("A delivery fee needs a delivery address.")
 
     now = utcnow()
     order = Order(
         restaurant_id=restaurant.id,
         order_number=allocate_order_number(session, restaurant.id),
         customer_user_id=customer_user_id,
-        fulfillment_type="PICKUP",
+        fulfillment_type="DELIVERY" if delivery else "PICKUP",
+        delivery_address=delivery.address if delivery else None,
+        delivery_fee_minor=cart.delivery_fee_minor if delivery else 0,
+        delivery_miles=delivery.miles if delivery else None,
         status=OrderStatus.PENDING_PAYMENT.value,
         payment_method=PaymentMethod.STRIPE.value,
         currency=cart.currency,
