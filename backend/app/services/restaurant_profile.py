@@ -96,6 +96,36 @@ def guard_stripe_tax(current, changes: dict, stripe_account_id: str | None) -> N
         raise errors.ApiError(409, "STRIPE_TAX_NOT_READY", " ".join(blockers))
 
 
+ADDRESS_FIELDS = (
+    "address_line1", "address_line2", "address_city", "address_state",
+    "address_postal_code", "address_country",
+)
+
+
+def apply_changes(restaurant, changes: dict) -> None:
+    """Write an edit onto the row, and forget where the restaurant is if the
+    address moved.
+
+    Delivery fees are measured from coordinates found by geocoding the pickup
+    address. Leaving those coordinates in place after the address changes
+    would go on charging every customer for the distance to the old premises,
+    and nothing about editing a street says that is what is happening -- so
+    the coordinates are dropped and the restaurant is asked to place itself
+    again. Delivery stops being offered until it does, which is the safe way
+    round: no delivery beats a wrong fee.
+    """
+    moved = any(
+        field in changes and changes[field] != getattr(restaurant, field)
+        for field in ADDRESS_FIELDS
+    )
+    for field, value in changes.items():
+        setattr(restaurant, field, value)
+    if moved:
+        restaurant.latitude = None
+        restaurant.longitude = None
+        restaurant.geocoded_address = None
+
+
 def audit(session, actor_user_id, action: str, scope: dict) -> None:
     """Record who changed what.
 

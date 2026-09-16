@@ -88,6 +88,11 @@ EXPECTED = {
     # the owner's to answer for.
     ("GET", "/restaurant/profile"): ADMIN,
     ("PATCH", "/restaurant/profile"): ADMIN,
+    # ...and where it delivers, which decides what customers are charged.
+    ("GET", "/restaurant/delivery"): ADMIN,
+    ("PATCH", "/restaurant/delivery"): ADMIN,
+    ("POST", "/restaurant/delivery/locate"): ADMIN,
+    ("PUT", "/restaurant/delivery/zones"): ADMIN,
     # Your own account, which is nobody's business but yours.
     ("PATCH", "/restaurant/me"): EVERYONE,
     ("POST", "/restaurant/change-email"): EVERYONE,

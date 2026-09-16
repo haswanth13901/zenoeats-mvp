@@ -20,6 +20,40 @@ export type StaffMe = {
  *  slug, status and currency are here to be shown and not changed: the
  *  subdomain is printed on tables, the status has a readiness gate of its own,
  *  and the currency is what existing orders are denominated in. */
+/** Where a restaurant delivers and what it charges, by distance.
+ *
+ *  A ring is described by its outer edge alone: sorted by max_miles they form
+ *  bands, the first covering everything up to its edge and each one after it
+ *  covering the gap from the previous edge to its own. Beyond the last ring is
+ *  no delivery, not free delivery. */
+export type DeliveryZone = {
+  id: string;
+  max_miles: number;
+  fee_minor: number;
+};
+
+export type DeliverySettings = {
+  delivery_enabled: boolean;
+  /** Whether a customer would actually be offered delivery. The switch alone
+   *  does not decide it: an unplaced address or no rings means nothing can be
+   *  quoted. */
+  delivery_available: boolean;
+  /** Why not, in the restaurant's own words. Empty when it is available. */
+  blockers: string[];
+  latitude: number | null;
+  longitude: number | null;
+  /** The address the coordinates were found from. Different from the address
+   *  as it reads now means the restaurant moved and needs placing again. */
+  geocoded_address: string | null;
+  pickup_address: string;
+  origin_is_current: boolean;
+  /** False when no API key is configured, which the screen has to say rather
+   *  than offering a button that cannot work. */
+  geocoding_configured: boolean;
+  currency: string;
+  zones: DeliveryZone[];
+};
+
 export type RestaurantProfile = {
   slug: string;
   status: string;
@@ -409,6 +443,39 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Session"],
     }),
 
+    deliverySettings: build.query<DeliverySettings, void>({
+      query: () => ({ url: "/restaurant/delivery" }),
+      providesTags: ["Delivery"],
+    }),
+
+    // Finds the restaurant's own coordinates from its pickup address. An
+    // action someone takes rather than something that happens on every save:
+    // it costs a paid lookup.
+    locateRestaurant: build.mutation<DeliverySettings, void>({
+      query: () => ({ url: "/restaurant/delivery/locate", method: "POST" }),
+      invalidatesTags: ["Delivery"],
+    }),
+
+    setDeliveryEnabled: build.mutation<DeliverySettings, boolean>({
+      query: (delivery_enabled) => ({
+        url: "/restaurant/delivery",
+        method: "PATCH",
+        body: { delivery_enabled },
+      }),
+      // Portal too: whether a customer is offered delivery follows from this.
+      invalidatesTags: ["Delivery", "Portal"],
+    }),
+
+    // The whole set at once. Rings are only meaningful against each other, so
+    // there is no sensible way to save one of them.
+    setDeliveryZones: build.mutation<
+      DeliverySettings,
+      { zones: { max_miles: number; fee_minor: number }[] }
+    >({
+      query: (body) => ({ url: "/restaurant/delivery/zones", method: "PUT", body }),
+      invalidatesTags: ["Delivery", "Portal"],
+    }),
+
     restaurantProfile: build.query<RestaurantProfile, void>({
       query: () => ({ url: "/restaurant/profile" }),
       providesTags: ["RestaurantProfile"],
@@ -418,7 +485,9 @@ export const restaurantApi = api.injectEndpoints({
     // should not need a reload to take effect.
     updateRestaurantProfile: build.mutation<RestaurantProfile, RestaurantProfilePatch>({
       query: (body) => ({ url: "/restaurant/profile", method: "PATCH", body }),
-      invalidatesTags: ["RestaurantProfile", "Session", "Portal"],
+      // Delivery too: changing the address forgets where the restaurant
+      // is, so the delivery panel must not go on showing it as placed.
+      invalidatesTags: ["RestaurantProfile", "Session", "Portal", "Delivery"],
     }),
 
     orderBoard: build.query<BoardOrder[], void>({
@@ -906,4 +975,8 @@ export const {
   useUpdateRestaurantProfileMutation,
   useUpdateOwnAccountMutation,
   useChangeStaffEmailMutation,
+  useDeliverySettingsQuery,
+  useLocateRestaurantMutation,
+  useSetDeliveryEnabledMutation,
+  useSetDeliveryZonesMutation,
 } = restaurantApi;

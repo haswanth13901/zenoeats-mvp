@@ -27,7 +27,8 @@ from app.core.ratelimit import per_ip, per_staff_user
 from app.db.base import utcnow
 from app.db.session import system_session, tenant_session
 from app.models import (
-    Combo, ComboSlot, ComboSlotItem, DiscountKind, Item, ItemIncludedOption,
+    Combo, ComboSlot, ComboSlotItem, DeliveryZone, DiscountKind, Item,
+    ItemIncludedOption,
     ItemModifierGroup, ItemType, Meal, MealItem, ModifierGroup,
     FulfillmentType, ModifierGroupItemType, ModifierOption, Order, OrderEvent,
     OrderEventAction, OrderItem, OrderStatus, Payment, PaymentStatus, Restaurant,
@@ -38,7 +39,7 @@ from app.schemas.api import (
     ChangePasswordIn, MenuOut, StaffInviteOut, StaffLoginIn, StaffMeOut,
     StaffPasswordResetOut, known_timezone,
 )
-from app.services import images, restaurant_profile
+from app.services import geocoding, images, restaurant_profile
 from app.services.images import ImageKind
 from app.services.menu import load_item_types, load_menu
 from app.services.orders import transition
@@ -536,8 +537,7 @@ def update_profile(
     ).scalar_one_or_none()
     restaurant_profile.guard_stripe_tax(restaurant, changes, account_id)
 
-    for field, value in changes.items():
-        setattr(restaurant, field, value)
+    restaurant_profile.apply_changes(restaurant, changes)
 
     restaurant_profile.audit(
         db, membership.user_id, "RESTAURANT_UPDATE_PROFILE",
@@ -545,6 +545,234 @@ def update_profile(
     )
     db.flush()
     return _profile_out(db, restaurant)
+
+
+# ------------------------------------------------------------- delivery ---
+#
+# Where a restaurant delivers and what it charges. Admin only, alongside the
+# rest of the profile: it decides what customers are charged.
+#
+# Rings are described by their outer edge alone. A restaurant types "3 miles,
+# $4" rather than "0 to 3 miles, $4", because the inner edge is never a free
+# choice -- a gap between rings would be an address that can be neither
+# charged for nor refused. Beyond the last ring is no delivery, not free
+# delivery.
+
+
+MAX_ZONES = 8
+
+
+class ZoneIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_miles: float = Field(gt=0, le=100)
+    fee_minor: int = Field(ge=0, le=100_000)
+
+
+class ZonesIn(BaseModel):
+    """The whole set at once, rather than a row at a time.
+
+    Rings are only meaningful against each other -- they have to be in order,
+    with no two sharing an edge -- so validating one in isolation cannot say
+    whether the result makes sense. Sending the set makes every save a state
+    the restaurant actually chose.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    zones: list[ZoneIn] = Field(max_length=MAX_ZONES)
+
+
+class DeliverySettingsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    delivery_enabled: bool
+
+
+class ZoneOut(BaseModel):
+    id: UUID
+    max_miles: float
+    fee_minor: int
+
+
+class DeliverySettingsOut(BaseModel):
+    delivery_enabled: bool
+    # Whether a customer would actually be offered delivery right now. The
+    # switch alone does not decide it: an address that has not been placed, or
+    # no rings to charge for, means there is nothing to quote.
+    delivery_available: bool
+    # Why not, in the restaurant's words. Empty when it is available.
+    blockers: list[str]
+    latitude: float | None
+    longitude: float | None
+    # The address the coordinates were found from, and the address as it reads
+    # now. Different means the restaurant moved and has not been placed again.
+    geocoded_address: str | None
+    pickup_address: str
+    origin_is_current: bool
+    # False when no API key is configured, which the screen has to say rather
+    # than leaving someone pressing a button that cannot work.
+    geocoding_configured: bool
+    currency: str
+    zones: list[ZoneOut]
+
+
+def _zones(db: Session, restaurant_id) -> list[DeliveryZone]:
+    return list(
+        db.execute(
+            select(DeliveryZone).where(DeliveryZone.restaurant_id == restaurant_id)
+            .order_by(DeliveryZone.max_miles)
+        ).scalars()
+    )
+
+
+def _delivery_out(db: Session, restaurant: Restaurant) -> DeliverySettingsOut:
+    zones = _zones(db, restaurant.id)
+    origin_current = restaurant.delivery_origin_is_current
+
+    blockers = []
+    if not restaurant.pickup_address_line:
+        blockers.append("Add the restaurant's address first.")
+    elif not origin_current:
+        blockers.append("Place the restaurant on the map to measure distances from.")
+    if not zones:
+        blockers.append("Add at least one delivery ring.")
+    if not restaurant.delivery_enabled:
+        blockers.append("Delivery is switched off.")
+
+    return DeliverySettingsOut(
+        delivery_enabled=restaurant.delivery_enabled,
+        delivery_available=not blockers,
+        blockers=blockers,
+        latitude=restaurant.latitude,
+        longitude=restaurant.longitude,
+        geocoded_address=restaurant.geocoded_address,
+        pickup_address=restaurant.pickup_address_line,
+        origin_is_current=origin_current,
+        geocoding_configured=geocoding.configured(),
+        currency=restaurant.currency,
+        zones=[
+            ZoneOut(id=z.id, max_miles=z.max_miles, fee_minor=z.fee_minor) for z in zones
+        ],
+    )
+
+
+@router.get("/delivery", response_model=DeliverySettingsOut)
+def read_delivery(
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    _=Depends(STAFF_ADMIN),
+):
+    """What this restaurant delivers, and why it might not be delivering."""
+    return _delivery_out(db, restaurant)
+
+
+@router.post("/delivery/locate", response_model=DeliverySettingsOut)
+def locate_restaurant(
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
+):
+    """Find the restaurant's own coordinates from its pickup address.
+
+    Deliberately an action someone takes rather than something that happens on
+    every address save: it costs a paid lookup, and an address halfway through
+    being typed is not an address to spend one on.
+    """
+    address = restaurant.pickup_address_line
+    if not address:
+        raise errors.validation_error("Add the restaurant's address first.")
+
+    try:
+        point = geocoding.geocode(address)
+    except geocoding.GeocodingUnavailable as exc:
+        raise errors.ApiError(503, "GEOCODING_UNAVAILABLE", str(exc)) from exc
+    if point is None:
+        raise errors.ApiError(
+            422, "ADDRESS_NOT_FOUND",
+            "We could not find that address on the map. Check it and try again.",
+        )
+
+    restaurant.latitude = point.latitude
+    restaurant.longitude = point.longitude
+    # Stored as it read at the moment it was placed, so a later edit to the
+    # address shows up as an origin that needs placing again.
+    restaurant.geocoded_address = address
+    restaurant_profile.audit(
+        db, membership.user_id, "RESTAURANT_LOCATED",
+        {"restaurant_id": str(restaurant.id)},
+    )
+    db.flush()
+    return _delivery_out(db, restaurant)
+
+
+@router.patch("/delivery", response_model=DeliverySettingsOut)
+def update_delivery(
+    body: DeliverySettingsIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
+):
+    """Switch delivery on or off.
+
+    Switching it on is refused unless there is something to quote with: a
+    restaurant that believes it is delivering and is not is worse off than one
+    told why it cannot yet.
+    """
+    if body.delivery_enabled:
+        if not restaurant.delivery_origin_is_current:
+            raise errors.ApiError(
+                409, "DELIVERY_NOT_READY",
+                "Place the restaurant on the map before switching delivery on.",
+            )
+        if not _zones(db, restaurant.id):
+            raise errors.ApiError(
+                409, "DELIVERY_NOT_READY",
+                "Add at least one delivery ring before switching delivery on.",
+            )
+
+    restaurant.delivery_enabled = body.delivery_enabled
+    restaurant_profile.audit(
+        db, membership.user_id, "RESTAURANT_DELIVERY_SWITCH",
+        {"restaurant_id": str(restaurant.id), "enabled": body.delivery_enabled},
+    )
+    db.flush()
+    return _delivery_out(db, restaurant)
+
+
+@router.put("/delivery/zones", response_model=DeliverySettingsOut)
+def set_zones(
+    body: ZonesIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
+):
+    """Replace the whole set of rings."""
+    edges = [round(zone.max_miles, 2) for zone in body.zones]
+    if len(set(edges)) != len(edges):
+        raise errors.validation_error("Two rings cannot end at the same distance.")
+    if not body.zones and restaurant.delivery_enabled:
+        raise errors.ApiError(
+            409, "DELIVERY_NOT_READY",
+            "Switch delivery off before removing every ring.",
+        )
+
+    for existing in _zones(db, restaurant.id):
+        db.delete(existing)
+    # Flushed before the new rows go in, so replacing a set that reuses an
+    # edge does not trip the one-ring-per-edge constraint on its way through.
+    db.flush()
+    for zone, edge in zip(body.zones, edges):
+        db.add(DeliveryZone(
+            restaurant_id=restaurant.id, max_miles=edge, fee_minor=zone.fee_minor,
+        ))
+
+    restaurant_profile.audit(
+        db, membership.user_id, "RESTAURANT_DELIVERY_ZONES",
+        {"restaurant_id": str(restaurant.id), "rings": len(body.zones)},
+    )
+    db.flush()
+    return _delivery_out(db, restaurant)
 
 
 class MealIn(BaseModel):

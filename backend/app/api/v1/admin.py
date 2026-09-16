@@ -300,8 +300,7 @@ def update_restaurant(
         if restaurant is None or restaurant.deleted_at is not None:
             raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
 
-        for field, value in changes.items():
-            setattr(restaurant, field, value)
+        restaurant_profile.apply_changes(restaurant, changes)
 
         _audit(
             session, admin, "SUPER_ADMIN_UPDATE_RESTAURANT",
@@ -379,6 +378,7 @@ _PURGE_ORDER = [
     "menu_items",
     "item_types",
     "meals",
+    "delivery_zones",
     "restaurant_users",
     "restaurant_payment_accounts",
     "restaurant_order_counters",

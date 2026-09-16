@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Empty, ErrorNote, Panel } from "@/components/common/Feedback";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import { OwnAccount } from "@/features/restaurant/components/OwnAccount";
+import { DeliveryArea } from "@/features/restaurant/components/DeliveryArea";
 import {
   useRestaurantProfileQuery,
   useUpdateRestaurantProfileMutation,
@@ -191,6 +192,8 @@ export function SettingsPage() {
           </Field>
         </div>
       </Panel>
+
+      <DeliveryArea />
 
       <Panel title="Tax">
         <div className="space-y-4 bg-surface px-5 py-5">

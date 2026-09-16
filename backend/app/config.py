@@ -140,6 +140,22 @@ class Settings(BaseSettings):
     # http://{slug}.{root_domain}:8080
     STOREFRONT_URL_TEMPLATE: str = "https://{slug}.{root_domain}"
 
+    # --- Geocoding (delivery) ---------------------------------------------
+    # Turning a customer's address into a distance from the restaurant, to
+    # find which delivery ring it falls in. Empty key means delivery cannot be
+    # switched on: a fee guessed without a distance is a fee charged wrongly.
+    #
+    # Google's terms allow caching a result for about 30 days rather than
+    # keeping it, so coordinates live in Redis with that TTL and only the
+    # derived distance and fee are kept on an order.
+    GEOCODING_PROVIDER: str = "google"
+    GOOGLE_MAPS_API_KEY: str = ""
+    # Seconds. Google permits 30 days; shorter is always safe.
+    GEOCODE_CACHE_TTL_SECONDS: int = 30 * 24 * 60 * 60
+    # A lookup sits on the checkout path, so it fails fast rather than
+    # holding a customer at a spinner.
+    GEOCODE_TIMEOUT_SECONDS: float = 4.0
+
     # --- Error tracking ---------------------------------------------------
     # Sentry. Empty DSN means off. See core/observability for what is and is
     # not sent.

@@ -37,9 +37,16 @@ from app.models.payments import (
     StripeEvent,
     StripeEventStatus,
 )
-from app.models.tenant import DEFAULT_TAX_CODE, Restaurant, RestaurantStatus, TaxMode
+from app.models.tenant import (
+    DEFAULT_TAX_CODE,
+    DeliveryZone,
+    Restaurant,
+    RestaurantStatus,
+    TaxMode,
+)
 
 __all__ = [
+    "DeliveryZone",
     "Restaurant", "RestaurantStatus", "TaxMode", "DEFAULT_TAX_CODE",
     "User", "UserKind", "RestaurantUser", "StaffRole", "StaffStatus",
     "Meal", "MealItem", "Item", "ItemType", "STARTER_ITEM_TYPES",
