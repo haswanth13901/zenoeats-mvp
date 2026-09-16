@@ -696,8 +696,17 @@ def locate_restaurant(
 
     try:
         point = geocoding.geocode(address)
-    except geocoding.GeocodingUnavailable as exc:
-        raise errors.ApiError(503, "GEOCODING_UNAVAILABLE", str(exc)) from exc
+    except geocoding.GeocodingUnavailable:
+        # Not str(exc): that text is written for whoever runs the platform --
+        # an unenabled API, a key restricted the wrong way, billing switched
+        # off -- and none of it is a restaurant's to fix or to understand. The
+        # real reason is already in the log, where the operator will look.
+        raise errors.ApiError(
+            503, "GEOCODING_UNAVAILABLE",
+            "Address lookup is not working at the moment. This one is ours to "
+            "fix rather than yours -- tell us if it keeps happening. You can "
+            "still set up your rings in the meantime.",
+        ) from None
     if point is None:
         raise errors.ApiError(
             422, "ADDRESS_NOT_FOUND",
