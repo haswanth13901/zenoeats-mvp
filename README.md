@@ -14,20 +14,23 @@ board.
 | Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
 | Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
 | Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
-| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports, deliveries the restaurant runs itself |
+| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports, deliveries the restaurant runs itself, self-service settings |
 | Admin | Super admin portal: onboarding, activation, platform reports, CSV |
 | Infra | Docker Compose, Nginx, two Redis instances, Celery, Alembic, GitHub Actions |
 
 ## What is deliberately not here
 
-Ordering a delivery, delivery fees, driver GPS and routing, WebSockets, cash
+Choosing delivery at checkout, driver GPS and routing, WebSockets, cash
 payments, reconciliation, promotions, reviews, SMS, push, PITR. All of it
 stays in the v3.0 baseline for later releases. See "Adding delivery" at the
 bottom.
 
-A restaurant can send an order out with one of its own drivers -- a phone
-order it agreed to run -- but a customer cannot choose delivery, is not
-charged for one, and the address is typed by staff.
+Delivery is half built, and the halves are worth telling apart. A restaurant
+can draw its delivery area, price it by distance and run an order out with one
+of its own drivers. A **customer** still cannot choose delivery: the address is
+typed by staff for a phone order, and nothing is charged for the journey. The
+pricing that would charge for it exists and is tested; what is missing is the
+checkout that would use it.
 
 ## The payment sequence
 
@@ -128,6 +131,30 @@ system read surface.
   role, or leave the restaurant without an active admin. Resets are refused
   for another admin, and for a login that also works at another Zenoeats
   restaurant; Zenoeats support resets those.
+- **Settings** is the admin's own screen, in four parts. *Your account* is
+  your display name and the address you sign in with -- the name saves on its
+  own, the address asks for your password, since it is a credential and a name
+  is not. *The restaurant* is the trading name, tagline and whether you are
+  taking orders. *Where you are* is the pickup address, which is also the
+  address your sales tax is worked out for, and your timezone, which decides
+  which day an order counts on in reports. *Delivery* is below. *Tax* is a flat
+  rate or Stripe Tax, which needs a connected account that has finished its own
+  tax setup -- until it has, the option says so rather than offering a switch
+  that would be refused. Your subdomain, status and currency are shown but not
+  editable: the first is printed on your tables, the second has its own
+  readiness checks, and the third is what your existing orders are counted in.
+- **Delivery**, inside Settings, is three things in the only order that works.
+  Place the restaurant on the map, which geocodes the pickup address and is
+  what every distance is then measured from. Draw the rings: each is how far it
+  reaches and what it costs, typed as "3 miles, $4" -- the inner edge is the
+  previous ring's outer one, so a gap is impossible, and past the last ring is
+  no delivery rather than free delivery. Then switch delivery on, which is
+  refused until the first two exist. Editing the address afterwards drops the
+  coordinates and pauses delivery until the restaurant is placed again, because
+  measuring from where a restaurant used to be would charge every customer the
+  wrong fee and nothing about editing a street says so. Under a flat rate you
+  also say whether your state taxes the fee; under Stripe Tax you do not,
+  because Stripe is handed the amount and decides for the jurisdiction.
 - **Reports** covers today, yesterday, the last 7 days, this month or chosen
   dates -- the restaurant's own days, in its timezone, with each order counted
   on the day it was paid there. It shows net sales (gross less refunds made
@@ -143,13 +170,13 @@ system read surface.
 Every member of a restaurant's team has one of five roles. The same person
 can hold a different role at another restaurant.
 
-| Role | Kitchen | Deliveries | Stock | Menu | Staff | Reports |
-|---|---|---|---|---|---|---|
-| Admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Manager | ✓ | ✓ | ✓ | ✓ | | ✓ |
-| Kitchen | ✓ | | ✓ | | | |
-| Cashier | ✓ | | ✓ | | | |
-| Driver | | ✓ | | | | |
+| Role | Kitchen | Deliveries | Stock | Menu | Staff | Reports | Settings |
+|---|---|---|---|---|---|---|---|
+| Admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Manager | ✓ | ✓ | ✓ | ✓ | | ✓ | |
+| Kitchen | ✓ | | ✓ | | | | |
+| Cashier | ✓ | | ✓ | | | | |
+| Driver | | ✓ | | | | | |
 
 A driver is not floor staff with an extra screen. Deliveries is the whole
 portal to them, and it shows only the orders assigned to them.
@@ -166,6 +193,14 @@ The actions split further:
 | Send an order out with a driver | ✓ | ✓ | | | |
 | Pick up and deliver | ✓ | ✓ | | | ✓ |
 | Invite and remove staff, change roles, reset passwords | ✓ | | | | |
+| Edit the restaurant's name, address, timezone and tax | ✓ | | | | |
+| Set the delivery area, its fees and whether they are taxed | ✓ | | | | |
+| Change your own display name and sign-in address | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+The last row is not an oversight. Your own name and your own login belong to
+you whatever you do at the restaurant, so a driver may change theirs exactly as
+an owner may. Only the Settings screen offers it today, which is admin-only, so
+a screen for the rest of the team is a route away rather than a rewrite.
 
 ### How roles are enforced
 
@@ -186,8 +221,11 @@ these checks in order, and any one of them refuses the request:
    requires it to be `ACTIVE` with a role in the endpoint's list. It is read
    on every request, so removing someone or changing their role takes effect
    on their next click. The lists live at the top of the staff API in
-   `app/api/v1/restaurant.py`: `MANAGE` (Admin, Manager), `ANY_STAFF` (all
-   four) and `STAFF_ADMIN` (Admin alone).
+   `app/api/v1/restaurant.py`: `MANAGE` (Admin, Manager), `ANY_STAFF` (the
+   four who work the floor, deliberately not Driver), `STAFF_ADMIN` (Admin
+   alone), `DELIVERY` (Admin, Manager, Driver) and `OWN_ACCOUNT` (everyone,
+   for the two endpoints that are about you rather than about the
+   restaurant).
 4. **Row-level security.** The query itself runs with
    `app.current_tenant` set, so even a wrong role check could not read or
    write another restaurant's rows.
@@ -251,6 +289,19 @@ nothing to set up at Google). Copy the publishable key into
 (`zenoeats.com`) so one sign-in covers every restaurant subdomain, and add a
 webhook endpoint at `https://yourdomain/api/v1/webhooks/clerk` for
 `user.created`, `user.updated` and `user.deleted`.
+
+**Google Maps (delivery only).** Needed to turn an address into a distance,
+which is what picks a delivery ring. Leave `GOOGLE_MAPS_API_KEY` empty and
+delivery simply cannot be switched on: the portal says address lookup is
+unavailable rather than offering a button that cannot work. There is no
+fallback on purpose, because a fee guessed without a distance is a fee charged
+wrongly. In the Google Cloud console enable **Geocoding API** -- not Places,
+which is billed per keystroke and several times dearer -- then create an API
+key under Credentials, and **attach a billing account to the project**. The
+free allowance covers normal volume (one lookup per delivery order, cached 30
+days), but Google refuses every request until billing exists. Restrict the key
+to the Geocoding API by IP or not at all: it is used server-side and never
+reaches a browser, so an HTTP-referrer restriction would break it.
 
 **Stripe.** Enable Connect in test mode. Copy the secret and publishable
 keys. Create a webhook endpoint **on the Connect tab** (not the account tab)
@@ -466,16 +517,37 @@ The production edge and deployment shape are in `docker-compose.prod.yml` and
 
 ## Adding delivery later
 
-Half of it is here. `Order.fulfillment_type` is `PICKUP` until a manager
-sends an order out, and the transition matrix in `app/models/commerce.py`
-carries READY_FOR_DELIVERY and OUT_FOR_DELIVERY. Who is delivering is a
-column, `orders.driver_user_id`, rather than the baseline's DRIVER_ASSIGNED
-and DRIVER_ACCEPTED states: a manager may assign or reassign at any point,
-which as states would mean an edge from everywhere to everywhere.
+Everything below the checkout is here; the checkout is not.
 
-What a customer-facing delivery release still needs: delivery as a choice at
-checkout, with the address collected and validated there; a delivery fee and
-its tax; a delivery radius; DELIVERY_FAILED with the retry and refund
-handling around it; and driver location if that is wanted. Polling in the
-order page is the thing to replace with WebSockets, and section 12 of the
-baseline already specifies how.
+**What works.** `Order.fulfillment_type` is `PICKUP` until an order is sent
+out, and the transition matrix in `app/models/commerce.py` carries
+READY_FOR_DELIVERY and OUT_FOR_DELIVERY. Who is delivering is a column,
+`orders.driver_user_id`, rather than the baseline's DRIVER_ASSIGNED and
+DRIVER_ACCEPTED states: a manager may assign or reassign at any point, which as
+states would mean an edge from everywhere to everywhere. A restaurant draws
+rings in Settings (`delivery_zones`), is geocoded to a point of its own, and
+`app/services/delivery.py` will price an address against those rings.
+`price_cart` takes the fee, keeps it out of the subtotal and puts it in the
+total, and `TaxService` taxes it per the restaurant's answer under a flat rate
+or hands it to Stripe as `shipping_cost` under Stripe Tax. An order keeps the
+fee and the distance it was charged for.
+
+**What a customer-facing release still needs.** Delivery as a choice at
+checkout, with the address collected there instead of typed by staff
+afterwards -- which is the one thing everything else waits on. Then: Stripe Tax
+sources tax at the restaurant's address, which is right for collection and
+wrong for a delivery in a destination-sourced state, so the customer's
+structured address has to reach `stripe_tax.calculate`. Then DELIVERY_FAILED
+with the retry and refund handling around it, a minimum order value if that is
+wanted, and driver location if that is. Polling in the order page is the thing
+to replace with WebSockets, and section 12 of the baseline already specifies
+how.
+
+**What was decided along the way**, so it is not relitigated. Distance is
+straight-line rather than driving distance: routing costs more per lookup and
+rings on a map are what a restaurant means by "we deliver within three miles".
+Coordinates are cached for thirty days and never stored on an order, because
+Google's terms allow caching rather than keeping; what an order keeps is the
+distance and the fee, which are ours. A ring's id is not stored either, since
+rings are replaced as a set on every edit and the pointer would dangle, while
+"3.2 miles, $4" stays true.
