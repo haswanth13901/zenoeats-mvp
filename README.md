@@ -134,6 +134,9 @@ system read surface.
   from the Stripe Dashboard), paid orders, average order, tax net of refunds,
   combo discounts, cancelled orders, a by-day breakdown, top items (leaving out
   cancelled and fully refunded orders), and checkouts that expired unpaid.
+  Deliveries are counted apart from collections and per driver -- the same
+  sales, split, not added -- since they cost the restaurant someone's time in
+  a car.
 
 ### Staff roles
 

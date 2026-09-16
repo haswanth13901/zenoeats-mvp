@@ -175,6 +175,47 @@ export function ReportsPage() {
             </Panel>
           )}
 
+          {data.orders_delivery > 0 && (
+            <Panel title={`Deliveries (${data.orders_delivery})`}>
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-y border-hairline text-left text-xs text-muted">
+                    <th className="py-2 font-medium">Driver</th>
+                    <th className="text-right font-medium">Orders</th>
+                    <th className="text-right font-medium">Delivered</th>
+                    <th className="text-right font-medium">Sales</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hairline">
+                  {data.by_driver.map((row) => (
+                    <tr key={row.driver}>
+                      <td className="py-2.5">{row.driver}</td>
+                      <td className="tnum text-right">{row.orders}</td>
+                      <td className="tnum text-right">{row.delivered}</td>
+                      <td className="tnum text-right">
+                        {money(row.gross_minor, data.currency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-hairline text-sm">
+                    <td className="py-2.5">All deliveries</td>
+                    <td className="tnum text-right">{data.orders_delivery}</td>
+                    <td className="tnum text-right">{data.orders_delivered}</td>
+                    <td className="tnum text-right">
+                      {money(data.delivery_sales_minor, data.currency)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+              <p className="mt-2 text-xs text-muted">
+                Part of the sales above, not on top of them. A delivery counts on the day
+                it was paid, like any other order.
+              </p>
+            </Panel>
+          )}
+
           <Panel title="Top items">
             {!data.top_items.length ? (
               <Empty>No paid orders in this range.</Empty>

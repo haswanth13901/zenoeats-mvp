@@ -310,6 +310,17 @@ export type RestaurantReport = {
   tax_collected_minor: number;
   combo_discounts_minor: number;
   average_order_value_minor: number;
+  /** Deliveries the restaurant ran itself, counted apart from collections.
+   *  The same sales, split, not added. */
+  orders_delivery: number;
+  orders_delivered: number;
+  delivery_sales_minor: number;
+  by_driver: {
+    driver: string;
+    orders: number;
+    delivered: number;
+    gross_minor: number;
+  }[];
   /** Right now, whatever the range. */
   orders_pending_payment: number;
   orders_expired: number;

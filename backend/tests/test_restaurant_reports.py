@@ -56,7 +56,7 @@ def books(admin_user, cleanup):
     numbers = iter(range(7001, 8000))
 
     def order(paid_at, total=1500, tax=100, status="COMPLETED", refunded=0,
-              item="Smash Burger", discount=0, created_at=None):
+              item="Smash Burger", discount=0, created_at=None, driver_id=None):
         with tenant_session(restaurant.id) as session:
             row = Order(
                 restaurant_id=restaurant.id, order_number=next(numbers),
@@ -64,6 +64,9 @@ def books(admin_user, cleanup):
                 currency="USD", subtotal_minor=total - tax + discount,
                 discount_minor=discount, tax_minor=tax, total_minor=total,
                 paid_at=paid_at,
+                fulfillment_type="DELIVERY" if driver_id else "PICKUP",
+                driver_user_id=driver_id,
+                delivery_address="12 Oak Street" if driver_id else None,
             )
             session.add(row)
             session.flush()
@@ -232,3 +235,57 @@ def test_a_restaurant_timezone_must_be_a_real_one():
         with pytest.raises(ValidationError, match="is not a timezone"):
             UpdateRestaurantIn(timezone=bad)
     assert UpdateRestaurantIn().timezone is None
+
+
+# --------------------------------------------------------- deliveries ---
+#
+# The orders a restaurant ran out itself, counted apart from collections and
+# per driver: they are the same sales, split, not added.
+
+
+def _driver(name):
+    """A driver on this restaurant's team, for the per-driver breakdown."""
+    from app.db.session import system_session
+
+    with system_session() as session:
+        return session.execute(
+            text(
+                "INSERT INTO users (id, kind, email, full_name, password_hash, "
+                "is_platform_admin, is_active, must_change_password, created_at, updated_at) "
+                "VALUES (gen_random_uuid(), 'STAFF', :e, :n, 'x', false, true, false, "
+                "now(), now()) RETURNING id"
+            ),
+            {"e": _email(), "n": name},
+        ).scalar_one()
+
+
+def test_deliveries_are_counted_apart_and_per_driver(books):
+    order, report, _ = books
+    day = utc(2026, 9, 10, 18, 0)
+    dana, sam = _driver("Dana Driver"), _driver("Sam Second")
+
+    order(day, total=1000, tax=0)                                     # a collection
+    order(day, total=2000, tax=0, driver_id=dana)                     # delivered
+    order(day, total=1500, tax=0, driver_id=dana, status="OUT_FOR_DELIVERY")
+    order(day, total=3000, tax=0, driver_id=sam)                      # delivered
+
+    r = report(**{"from": "2026-09-10", "to": "2026-09-10"})
+    assert r["orders_paid"] == 4
+    assert (r["orders_delivery"], r["orders_delivered"]) == (3, 2)
+    assert r["delivery_sales_minor"] == 6500
+    # The split does not inflate the takings.
+    assert r["gross_sales_minor"] == 7500
+
+    assert r["by_driver"] == [
+        {"driver": "Dana Driver", "orders": 2, "delivered": 1, "gross_minor": 3500},
+        {"driver": "Sam Second", "orders": 1, "delivered": 1, "gross_minor": 3000},
+    ]
+
+
+def test_a_day_without_deliveries_says_so_with_zeroes(books):
+    order, report, _ = books
+    order(utc(2026, 9, 10, 18, 0), total=1000, tax=0)
+
+    r = report(**{"from": "2026-09-10", "to": "2026-09-10"})
+    assert (r["orders_delivery"], r["orders_delivered"], r["delivery_sales_minor"]) == (0, 0, 0)
+    assert r["by_driver"] == []

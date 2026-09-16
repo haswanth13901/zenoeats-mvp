@@ -3234,6 +3234,10 @@ def restaurant_reports(
     Chicago order paid at 11.30pm is that day's, though it is tomorrow in UTC.
     Both default to today.
 
+    Deliveries are counted apart from collections, and per driver, because
+    they cost a restaurant something a collection does not: someone's time in
+    a car. The figures are the same sales, split, not added.
+
     Refunds come off. Gross is what was taken; refunds are what has since been
     given back on those same orders (from the refund webhook); net is the
     difference. Tax is net of refunds too, in proportion, since a refund
@@ -3284,7 +3288,12 @@ def restaurant_reports(
                    COALESCE(sum(o.discount_minor), 0)         AS discounts,
                    count(*) FILTER (WHERE o.status = 'COMPLETED')  AS completed,
                    count(*) FILTER (WHERE o.status = 'CANCELLED')  AS cancelled,
-                   count(*) FILTER (WHERE p.refunded_minor > 0)    AS refunded
+                   count(*) FILTER (WHERE p.refunded_minor > 0)    AS refunded,
+                   count(*) FILTER (WHERE o.fulfillment_type = 'DELIVERY') AS deliveries,
+                   count(*) FILTER (WHERE o.fulfillment_type = 'DELIVERY'
+                                    AND o.status = 'COMPLETED')            AS delivered,
+                   COALESCE(sum(o.total_minor) FILTER (
+                       WHERE o.fulfillment_type = 'DELIVERY'), 0)          AS delivery_gross
             {paid_in_range}
             """
         ),
@@ -3305,6 +3314,29 @@ def restaurant_reports(
         ),
         window,
     ).mappings().all()
+
+    by_driver = db.execute(
+        text(
+            f"""
+            SELECT o.driver_user_id                            AS driver_id,
+                   count(*)                                    AS orders,
+                   count(*) FILTER (WHERE o.status = 'COMPLETED') AS delivered,
+                   COALESCE(sum(o.total_minor), 0)             AS gross
+            {paid_in_range}
+              AND o.fulfillment_type = 'DELIVERY'
+            GROUP BY 1
+            ORDER BY 2 DESC
+            """
+        ),
+        window,
+    ).mappings().all()
+
+    driver_names = {}
+    ids = [row["driver_id"] for row in by_driver if row["driver_id"]]
+    if ids:
+        with system_session() as sys_db:
+            for user in sys_db.execute(select(User).where(User.id.in_(ids))).scalars():
+                driver_names[user.id] = user.full_name or user.email
 
     top_items = db.execute(
         text(
@@ -3358,6 +3390,20 @@ def restaurant_reports(
         "net_sales_minor": gross - refunds,
         "tax_collected_minor": int(totals["tax"]) - int(totals["tax_refunded"]),
         "combo_discounts_minor": int(totals["discounts"]),
+        "orders_delivery": totals["deliveries"],
+        "orders_delivered": totals["delivered"],
+        "delivery_sales_minor": int(totals["delivery_gross"]),
+        "by_driver": [
+            {
+                # A driver taken off the team still appears against the orders
+                # they ran; the name is what is left of them here.
+                "driver": driver_names.get(row["driver_id"], "no driver"),
+                "orders": row["orders"],
+                "delivered": row["delivered"],
+                "gross_minor": int(row["gross"]),
+            }
+            for row in by_driver
+        ],
         "average_order_value_minor": gross // paid if paid else 0,
         "orders_pending_payment": unpaid["pending"],
         "orders_expired": unpaid["expired"],
