@@ -131,7 +131,7 @@ system read surface.
   role, or leave the restaurant without an active admin. Resets are refused
   for another admin, and for a login that also works at another Zenoeats
   restaurant; Zenoeats support resets those.
-- **Settings** is the admin's own screen, in four parts. *Your account* is
+- **Settings** is the admin's own screen, in six parts. *Your account* is
   your display name and the address you sign in with -- the name saves on its
   own, the address asks for your password, since it is a credential and a name
   is not. *The restaurant* is the trading name, tagline and whether you are
@@ -141,8 +141,9 @@ system read surface.
   rate or Stripe Tax, which needs a connected account that has finished its own
   tax setup -- until it has, the option says so rather than offering a switch
   that would be refused. Your subdomain, status and currency are shown but not
-  editable: the first is printed on your tables, the second has its own
-  readiness checks, and the third is what your existing orders are counted in.
+  editable, under *Set by Zenoeats*: the first is printed on your tables, the
+  second has its own readiness checks, and the third is what your existing
+  orders are counted in.
 - **Delivery**, inside Settings, is three things in the only order that works.
   Place the restaurant on the map, which geocodes the pickup address and is
   what every distance is then measured from. Draw the rings: each is how far it
