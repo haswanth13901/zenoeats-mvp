@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import type { Contact } from "@/types";
 import { contactInputId, type ContactErrors, type ContactField } from "../contact";
 
@@ -23,6 +23,8 @@ export function ContactFields({
   emailError,
   addressLabel = "Address",
   addressHint,
+  addressAutocomplete = false,
+  addressInputRef,
   disabled = false,
   columns = false,
 }: {
@@ -36,6 +38,9 @@ export function ContactFields({
   addressLabel?: string;
   /** Replaced by the address's error when there is one. */
   addressHint?: ReactNode;
+  /** Use a single-line input so Google Places can attach suggestions. */
+  addressAutocomplete?: boolean;
+  addressInputRef?: Ref<HTMLInputElement>;
   disabled?: boolean;
   /** Name and phone side by side from 640px, the address across the full
    *  width. For a page with room, such as the profile. */
@@ -100,7 +105,8 @@ export function ContactFields({
         autoComplete="street-address"
         maxLength={300}
         hint={addressHint}
-        multiline
+        multiline={!addressAutocomplete}
+        inputRef={addressInputRef}
         className={columns ? "sm:col-span-2" : undefined}
       />
     </div>
@@ -118,6 +124,7 @@ function Field({
   type,
   inputMode,
   className,
+  inputRef,
   ...input
 }: {
   field: ContactField;
@@ -133,6 +140,7 @@ function Field({
   type?: string;
   inputMode?: "tel";
   className?: string;
+  inputRef?: Ref<HTMLInputElement>;
 }) {
   const id = contactInputId(field);
   const noteId = `${id}-note`;
@@ -163,6 +171,7 @@ function Field({
       ) : (
         <input
           {...shared}
+          ref={inputRef}
           type={type}
           inputMode={inputMode}
           onChange={(e) => onChange(e.target.value)}

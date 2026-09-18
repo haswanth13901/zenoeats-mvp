@@ -493,3 +493,34 @@
     transform: none !important;
   }
 }
+
+/* Google Places appends this list to <body>, outside the checkout card. */
+.pac-container {
+  z-index: 80 !important;
+  margin-top: 4px;
+  border: 1px solid rgb(var(--ze-line));
+  border-radius: 10px;
+  background: rgb(var(--ze-surface));
+  box-shadow: var(--ze-elevation-raised);
+  font-family: var(--font-body);
+}
+
+.pac-item {
+  min-height: 44px;
+  padding: 9px 12px;
+  border-top-color: rgb(var(--ze-line));
+  color: rgb(var(--ze-muted));
+  font-size: 13px;
+  line-height: 24px;
+  cursor: pointer;
+}
+
+.pac-item:hover,
+.pac-item-selected {
+  background: rgb(var(--ze-brand-soft));
+}
+
+.pac-item-query {
+  color: rgb(var(--ze-ink));
+  font-size: 14px;
+}

@@ -32,6 +32,7 @@ import {
 import type { PaymentHandoff } from "./PaymentPage";
 import type { Amounts, Contact, FulfillmentType } from "@/types";
 import { readCheckoutDraft, saveCheckoutDraft } from "@/features/storefront/checkoutDraft";
+import { loadGooglePlaces, type PlacesAutocomplete } from "@/services/googleMaps";
 
 /** The answers a delivery quote gives about the address rather than the
  *  cart. They belong beside the address field, where retyping can fix them. */
@@ -122,6 +123,7 @@ export function CheckoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
+  const addressInput = useRef<HTMLInputElement>(null);
   const [draftReady, setDraftReady] = useState(false);
   // A quote in flight. The last answer stays on screen, dimmed, and payment
   // waits for the fresh one rather than sending a total the server is about
@@ -197,6 +199,36 @@ export function CheckoutPage() {
   useEffect(() => {
     if (portal.data && !portal.data.delivery_offered) setFulfillment("PICKUP");
   }, [portal.data]);
+
+  // Suggestions are optional. If Google or the Places API is unavailable,
+  // manual entry and the authoritative server-side address check still work.
+  useEffect(() => {
+    const key = portal.data?.maps_browser_key;
+    if (!delivering || !key || !addressInput.current) return;
+    let alive = true;
+    let autocomplete: PlacesAutocomplete | null = null;
+    let listener: { remove(): void } | null = null;
+    loadGooglePlaces(key)
+      .then((places) => {
+        if (!alive || !addressInput.current) return;
+        autocomplete = new places.Autocomplete(addressInput.current, {
+          fields: ["formatted_address"],
+          types: ["address"],
+        });
+        listener = autocomplete.addListener("place_changed", () => {
+          const selected = autocomplete?.getPlace().formatted_address?.trim();
+          if (!selected) return;
+          setAddressProblem(null);
+          setProblemCode(null);
+          setContact((current) => ({ ...current, address: selected }));
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      listener?.remove();
+    };
+  }, [delivering, portal.data?.maps_browser_key]);
 
   useEffect(() => {
     const timer = setTimeout(() => setSettledAddress(collapse(contact.address)), ADDRESS_SETTLE_MS);
@@ -479,12 +511,16 @@ export function CheckoutPage() {
                       : "The email on your account. Receipts go here."
                 }
                 addressLabel={delivering ? "Delivery address" : "Address"}
+                addressAutocomplete={delivering && !!restaurant.maps_browser_key}
+                addressInputRef={addressInput}
                 addressHint={
                   !delivering
                     ? undefined
                     : priced && deliveryMiles !== null
                       ? `About ${deliveryMiles.toFixed(1)} miles from ${restaurant.name}.`
-                      : "Street, city and ZIP code, so we can check we deliver there."
+                      : restaurant.maps_browser_key
+                        ? "Start typing, then choose an address from Google's suggestions."
+                        : "Street, city and ZIP code, so we can check we deliver there."
                 }
                 disabled={busy}
               />

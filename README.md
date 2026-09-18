@@ -312,6 +312,15 @@ days), but Google refuses every request until billing exists. Restrict the key
 to the Geocoding API by IP or not at all: it is used server-side and never
 reaches a browser, so an HTTP-referrer restriction would break it.
 
+For address suggestions and the delivery tracking map, create a separate
+browser key in the same billed project and set `GOOGLE_MAPS_BROWSER_KEY`.
+Enable **Maps JavaScript API** and **Places API (Legacy)** for that key, then
+restrict it to those APIs and to the storefront HTTP referrers (for example,
+`http://spicehouse.zenoeats.local:8080/*` in local development). Keep the
+server key above separate; it must never be sent to a browser. A Map ID in
+`GOOGLE_MAPS_MAP_ID` enables tracking-map markers but is not required for
+checkout address suggestions.
+
 **Stripe.** Enable Connect in test mode. Copy the secret and publishable
 keys. Create a webhook endpoint **on the Connect tab** (not the account tab)
 pointing at `/api/v1/webhooks/stripe/connect`, subscribed to

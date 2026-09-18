@@ -94,7 +94,7 @@ async function setup(options = {}) {
       user: anonymous ? null : user, signOut: async () => {}, client: { signIn: {}, signUp: {} } };
     if (withCart) localStorage.setItem("zenoeats.cart.v2.qa-kitchen", JSON.stringify(cart));
   }, { session: state.session, cart, withCart: options.cart ?? false, anonymous: options.anonymous ?? false });
-  if (options.mapsFixture) await context.addInitScript(({ failFirst }) => {
+  if (options.mapsFixture || options.placesFixture) await context.addInitScript(({ failFirst }) => {
     const calls = window.__qaMapCalls = [];
     let first = failFirst;
     class MapFixture {
@@ -107,10 +107,23 @@ async function setup(options = {}) {
     }
     class Bounds { extend() { return this; } }
     class Marker { constructor(options) { Object.assign(this, options); } }
+    class Autocomplete {
+      constructor(input) { this.input = input; this.listeners = []; window.__qaAutocomplete = this; }
+      addListener(_name, handler) {
+        this.listeners.push(handler);
+        return { remove: () => { this.listeners = this.listeners.filter(item => item !== handler); } };
+      }
+      getPlace() { return this.place ?? {}; }
+      select(address) {
+        this.place = { formatted_address: address };
+        for (const handler of this.listeners) handler();
+      }
+    }
     window.google = { maps: { async importLibrary(name) {
       if (first) { first = false; throw new Error("Map provider fixture unavailable"); }
       return name === "maps" ? { Map: MapFixture } :
-        name === "marker" ? { AdvancedMarkerElement: Marker } : { LatLngBounds: Bounds };
+        name === "marker" ? { AdvancedMarkerElement: Marker } :
+          name === "places" ? { Autocomplete } : { LatLngBounds: Bounds };
     } } };
   }, { failFirst: options.mapsFixture === "fail-first" });
   const page = await context.newPage();
@@ -270,6 +283,20 @@ await check("A9-quote-invalidated-on-address-edit", { cart:true }, async ({page,
   await page.locator("#contact-address").fill("Outside delivery area");
   assert(await page.getByRole("button",{name:/Continue to payment/}).isDisabled());
   await textIncludes(page,"outside our delivery area");
+});
+await check("A9-google-address-suggestion", {
+  cart:true, placesFixture:true, portal:{maps_browser_key:"test-browser-key"}
+}, async ({page,state}) => {
+  await page.goto(origin+"/checkout");
+  await page.getByRole("radio",{name:/Delivery/}).check();
+  const address=page.locator("#contact-address");
+  await address.fill("6542 N Maple");
+  await page.waitForFunction(()=>!!window.__qaAutocomplete);
+  await page.evaluate(()=>window.__qaAutocomplete.select("6542 N Maplewood Ave, Chicago, IL 60645, USA"));
+  await page.waitForFunction(()=>document.querySelector("#contact-address")?.value.includes("60645"));
+  await textIncludes(page,"$4.00");
+  const quote=state.calls.filter(c=>c.path==="/orders/quote"&&c.body?.fulfillment_type==="DELIVERY").at(-1);
+  assert.equal(quote.body.delivery_address,"6542 N Maplewood Ave, Chicago, IL 60645, USA");
 });
 await check("A13-save-failure-retains-draft-and-verified-email", { cart:true }, async ({page,state}) => {
   await page.goto(origin+"/account/profile"); await textIncludes(page,"Personal details");
