@@ -13,8 +13,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN useradd --create-home --shell /bin/false zeno && chown -R zeno:zeno /srv
-USER zeno
+# Use a fixed high UID/GID in image metadata. Docker can start the process by
+# numeric identity even if a host/runtime user database is unavailable, while
+# the named account remains present for tools that resolve HOME or ownership.
+RUN groupadd --gid 10001 zeno \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin zeno \
+    && chown -R 10001:10001 /srv
+USER 10001:10001
 
 # Process settings, read by uvicorn itself and overridable per deployment
 # without a rebuild.
