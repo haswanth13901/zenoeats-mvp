@@ -624,6 +624,30 @@ Uploaded menu images under `/images/` are served by the API. Both development
 and production nginx configurations route that prefix to the API, including
 when the frontend runs as a static Docker container.
 
+The local edge prefers the `api` and `web` containers directly when the app
+profile is running. Docker DNS refreshes their addresses after recreation;
+native development uses the host gateway backup. This avoids intermittent
+timeouts caused by routing container traffic through Windows port forwarding.
+The configuration requires nginx 1.27.3 or newer (the Compose image supplies
+1.27.5). After editing it, run `docker compose exec nginx nginx -t` and
+`docker compose exec nginx nginx -s reload`. A temporary menu failure also
+offers **Try again**, which only refetches the public menu and restaurant details.
+Check the real edge after startup or upgrades with
+`python scripts/check_storefront.py --slug spicehouse`. It makes 20 read-only
+requests, reports latency, and exits unsuccessfully for errors or responses
+taking 10 seconds or longer. Use your restaurant's slug if different.
+
+Run one local application mode at a time. With `--profile app`, stop native
+Uvicorn, Vite and Celery terminals first. To switch back to native development,
+run `docker compose --profile app stop api web worker beat` before starting
+those terminals; leave PostgreSQL, Redis and nginx running. Duplicate app
+stacks waste memory, can compete for published ports, and run extra task
+consumers. On an 8 GB laptop, avoid concurrent frontend builds while serving
+the app: memory pressure can cause API worker restarts and request timeouts.
+Local Compose defaults to one API worker to reduce memory usage and avoid
+multiprocess watchdog restarts on a busy laptop. Set `API_WORKERS` explicitly
+for a production host after sizing its resources and database pools.
+
 **What a customer-facing release still needs.** Stripe Tax
 sources tax at the restaurant's address, which is right for collection and
 wrong for a delivery in a destination-sourced state, so the customer's

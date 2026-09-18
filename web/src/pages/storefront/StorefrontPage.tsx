@@ -101,7 +101,22 @@ export function StorefrontPage() {
     (menu.error ? errorMessage(menu.error) : null);
 
   if (loadError) {
-    return <StatePage title="This menu isn't available">{loadError}</StatePage>;
+    const retrying = portal.isFetching || menu.isFetching;
+    return (
+      <StatePage
+        title="This menu isn't available"
+        action={
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={retrying}
+            onClick={() => { void portal.refetch(); void menu.refetch(); }}
+          >
+            {retrying ? "Trying again…" : "Try again"}
+          </button>
+        }
+      >{loadError}</StatePage>
+    );
   }
 
   if (!portal.data || !menu.data) {

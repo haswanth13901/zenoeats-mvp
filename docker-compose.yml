@@ -108,7 +108,10 @@ services:
       IMAGES_DIR: /srv/images
       # Worker processes, and the proxies uvicorn believes forwarding
       # headers from. See backend/Dockerfile for how to size and set them.
-      WEB_CONCURRENCY: ${API_WORKERS:-2}
+      # One process avoids the multiprocess watchdog restart loop when a
+      # development laptop is under build/memory pressure. Production can
+      # explicitly set API_WORKERS after sizing its memory and DB pools.
+      WEB_CONCURRENCY: ${API_WORKERS:-1}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
     depends_on:
       postgres: {condition: service_healthy}
@@ -244,9 +247,9 @@ services:
       - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "8080:80"
-    # No depends_on: proxy_pass targets zenoeats-host, the host gateway, not
-    # these containers. nginx fronts whatever is listening on the host, which
-    # in development is the native api and web processes.
+    # No depends_on: nginx also supports native api/web processes without
+    # the app profile. It prefers Docker service DNS when available and uses
+    # zenoeats-host as the backup for native development.
 
 volumes:
   pgdata:

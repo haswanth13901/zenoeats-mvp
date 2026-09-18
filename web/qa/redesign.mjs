@@ -227,6 +227,20 @@ async function check(name, options, fn) {
   }
 }
 const origin = process.env.ZENOEATS_QA_URL ?? "http://127.0.0.1:3100";
+for (const endpoint of ["/portal", "/menu"]) {
+  await check("A1-retry-" + endpoint.slice(1), {
+    errors: { [endpoint]: "The server took too long to respond." },
+  }, async ({page,state}) => {
+    await page.goto(origin);
+    await textIncludes(page, "The server took too long to respond.");
+    delete state.errors[endpoint];
+    await page.getByRole("button", {name: "Try again", exact: true}).click();
+    await textIncludes(page, item.name);
+    assert.equal(await page.getByRole("button", {name: "Try again", exact: true}).count(), 0);
+    assert(state.calls.filter(c => c.path === endpoint).length >= 2);
+    assert.equal(state.calls.some(c => c.method === "POST" && c.path === "/orders"), false);
+  });
+}
 for (const width of [390,1024,1440]) {
   await check("A1-home-" + width, { width }, async ({page}) => {
     await page.goto(origin); await textIncludes(page, item.name);
