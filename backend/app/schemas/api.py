@@ -2,7 +2,7 @@ from datetime import datetime, time
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 
 # ---------- Portal / menu ------------------------------------------------
@@ -252,10 +252,17 @@ class ContactIn(BaseModel):
     @field_validator("address")
     @classmethod
     def _addressed(cls, value: str) -> str:
-        cleaned = _collapse(value)
-        if len(cleaned) < 5:
+        return _collapse(value)
+
+
+class ProfileContactIn(ContactIn):
+    """Saved profile details always include an address for future delivery."""
+
+    @model_validator(mode="after")
+    def _has_address(self):
+        if len(self.address) < 5:
             raise ValueError("Enter your address.")
-        return cleaned
+        return self
 
 
 class CreateOrderIn(BaseModel):
@@ -279,6 +286,12 @@ class CreateOrderIn(BaseModel):
     # server total always wins; a mismatch returns PRICE_CHANGED so the
     # customer re-confirms rather than being silently charged a new amount.
     expected_total_minor: int | None = None
+
+    @model_validator(mode="after")
+    def _delivery_has_address(self):
+        if self.fulfillment_type == "DELIVERY" and len(self.contact.address) < 5:
+            raise ValueError("Enter your delivery address.")
+        return self
 
 
 class GuestSessionIn(BaseModel):

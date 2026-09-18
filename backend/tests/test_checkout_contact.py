@@ -1,8 +1,8 @@
 """Checkout asks who is ordering, and whether it is coming to them.
 
-Name, phone and address are required on every order. A registered email is
-verified by Clerk; a guest may correct the receipt destination for this order
-without changing identity or previous order snapshots.
+Name and phone are required on every order; delivery also requires an address.
+A registered email is verified by Clerk; a guest may correct the receipt
+destination for this order without changing identity or previous snapshots.
 
 The details land twice: on the order as a snapshot, which is what the
 restaurant calls and what the driver reads, and on the customer as what to
@@ -118,10 +118,25 @@ def test_an_order_with_no_contact_at_all_is_refused(shop):
 
 @pytest.mark.parametrize(
     "field, value",
-    [("full_name", "   "), ("phone", "call me"), ("phone", "12345"), ("address", "x")],
+    [("full_name", "   "), ("phone", "call me"), ("phone", "12345")],
 )
 def test_details_nobody_could_use_are_refused(shop, field, value):
     res = _order(_guest(shop), shop, contact={**CONTACT, field: value})
+    assert res.status_code == 422
+
+
+def test_pickup_does_not_require_an_address(shop):
+    res = _order(_guest(shop), shop, contact={**CONTACT, "address": ""})
+    assert res.status_code == 201, res.text
+    assert res.json()["delivery_address"] is None
+
+
+@pytest.mark.parametrize("address", ["", "x"])
+def test_delivery_requires_a_usable_address(shop, address):
+    res = _order(
+        _guest(shop), shop,
+        contact={**CONTACT, "address": address}, fulfillment_type="DELIVERY",
+    )
     assert res.status_code == 422
 
 

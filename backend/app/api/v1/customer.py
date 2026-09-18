@@ -27,7 +27,7 @@ from app.core.ratelimit import per_user
 from app.models import (
     CustomerFavourite, Item, Order, OrderStatus, Restaurant, User, UserKind,
 )
-from app.schemas.api import ContactIn, CustomerSessionOut
+from app.schemas.api import CustomerSessionOut, ProfileContactIn
 from app.services import clerk_customers, customer_profile
 
 router = APIRouter(prefix="/customer", tags=["customer"])
@@ -56,7 +56,7 @@ def _session_out(user: User) -> CustomerSessionOut:
     dependencies=[Depends(per_user("customer_profile", limit=30))],
 )
 def update_profile(
-    body: ContactIn,
+    body: ProfileContactIn,
     user: User = Depends(get_current_user),
     _restaurant: Restaurant = Depends(current_restaurant),
 ):

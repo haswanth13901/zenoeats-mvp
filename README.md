@@ -299,27 +299,61 @@ nothing to set up at Google). Copy the publishable key into
 webhook endpoint at `https://yourdomain/api/v1/webhooks/clerk` for
 `user.created`, `user.updated` and `user.deleted`.
 
-**Google Maps (delivery only).** Needed to turn an address into a distance,
-which is what picks a delivery ring. Leave `GOOGLE_MAPS_API_KEY` empty and
-delivery simply cannot be switched on: the portal says address lookup is
-unavailable rather than offering a button that cannot work. There is no
-fallback on purpose, because a fee guessed without a distance is a fee charged
-wrongly. In the Google Cloud console enable **Geocoding API** -- not Places,
-which is billed per keystroke and several times dearer -- then create an API
-key under Credentials, and **attach a billing account to the project**. The
-free allowance covers normal volume (one lookup per delivery order, cached 30
-days), but Google refuses every request until billing exists. Restrict the key
-to the Geocoding API by IP or not at all: it is used server-side and never
-reaches a browser, so an HTTP-referrer restriction would break it.
+**Google Maps (delivery only).** Attach a billing account to the Google Cloud
+project and enable **Maps JavaScript API**, **Places API (Legacy)**,
+**Geocoding API**, and **Routes API**. API activation itself is not billed;
+Google charges for usage after the applicable free allowances.
 
-For address suggestions and the delivery tracking map, create a separate
-browser key in the same billed project and set `GOOGLE_MAPS_BROWSER_KEY`.
-Enable **Maps JavaScript API** and **Places API (Legacy)** for that key, then
-restrict it to those APIs and to the storefront HTTP referrers (for example,
-`http://spicehouse.zenoeats.local:8080/*` in local development). Keep the
-server key above separate; it must never be sent to a browser. A Map ID in
-`GOOGLE_MAPS_MAP_ID` enables tracking-map markers but is not required for
-checkout address suggestions.
+Create two separate credentials and put them in the root `.env`:
+
+```dotenv
+# Private backend credential. Never expose this value to browser code.
+GOOGLE_MAPS_API_KEY=replace_with_server_key
+
+# Public browser credential. Its website and API restrictions protect it.
+GOOGLE_MAPS_BROWSER_KEY=replace_with_browser_key
+
+# Fine for local development; use a Cloud Map ID for production styling.
+GOOGLE_MAPS_MAP_ID=DEMO_MAP_ID
+```
+
+Configure the **server key** with API restrictions for **Geocoding API** and
+**Routes API**. In production, add an IP-address application restriction for
+the API server's fixed outbound IP. An HTTP-referrer restriction will break
+this key because calls originate from the backend.
+
+Configure the **browser key** with the **Websites** application restriction,
+allow `http://spicehouse.zenoeats.local:8080/*` for local development, and add
+each deployed storefront origin before release. Restrict this key to **Maps
+JavaScript API** and **Places API (Legacy)**. Do not reuse the server key as
+the browser key.
+
+The server key geocodes delivery addresses and calculates arrival estimates.
+The browser key provides the checkout suggestion list and customer tracking
+map. Delivery cannot be quoted when server geocoding is unavailable; checkout
+continues to accept manual addresses if browser suggestions fail. Coordinates
+are cached in Redis for 30 days to reduce requests.
+
+After changing these settings, restart the API so the public portal response
+contains the browser configuration. For the normal native development setup,
+stop the terminal running `make api` and start it again:
+
+```bash
+make api
+```
+
+When rehearsing the containerized application instead, run:
+
+```bash
+docker compose --profile app restart api
+```
+
+Open the checkout page, choose **Delivery**, and type part of an address. A
+Google suggestion list should appear. Select a suggestion and confirm that a
+delivery quote replaces the address-checking message. If Google reports
+`REQUEST_DENIED`, verify billing, key restrictions, enabled APIs, and allowed
+website referrers; Google configuration changes can take several minutes to
+propagate.
 
 **Stripe.** Enable Connect in test mode. Copy the secret and publishable
 keys. Create a webhook endpoint **on the Connect tab** (not the account tab)

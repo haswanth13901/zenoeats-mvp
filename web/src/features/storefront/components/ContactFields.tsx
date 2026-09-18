@@ -1,6 +1,6 @@
 import type { ReactNode, Ref } from "react";
 import type { Contact } from "@/types";
-import { contactInputId, type ContactErrors, type ContactField } from "../contact";
+import { contactInputId, formatPhone, normalizeEmail, type ContactErrors, type ContactField } from "../contact";
 
 /**
  * Name, phone, email and address: everything checkout requires to know who is
@@ -25,6 +25,7 @@ export function ContactFields({
   addressHint,
   addressAutocomplete = false,
   addressInputRef,
+  showAddress = true,
   disabled = false,
   columns = false,
 }: {
@@ -41,6 +42,7 @@ export function ContactFields({
   /** Use a single-line input so Google Places can attach suggestions. */
   addressAutocomplete?: boolean;
   addressInputRef?: Ref<HTMLInputElement>;
+  showAddress?: boolean;
   disabled?: boolean;
   /** Name and phone side by side from 640px, the address across the full
    *  width. For a page with room, such as the profile. */
@@ -63,9 +65,9 @@ export function ContactFields({
       <Field
         field="phone"
         label="Phone number"
-        value={contact.phone}
+        value={formatPhone(contact.phone)}
         error={errors.phone}
-        onChange={set("phone")}
+        onChange={(value) => set("phone")(formatPhone(value))}
         disabled={disabled}
         autoComplete="tel"
         type="tel"
@@ -81,9 +83,12 @@ export function ContactFields({
           id="contact-email"
           value={email}
           onChange={onEmailChange ? e => onEmailChange(e.target.value) : undefined}
+          onBlur={onEmailChange ? e => onEmailChange(normalizeEmail(e.target.value)) : undefined}
           readOnly={!onEmailChange}
           disabled={disabled || !onEmailChange}
           autoComplete="email"
+          autoCapitalize="none"
+          spellCheck={false}
           required
           maxLength={320}
           aria-invalid={emailError ? true : undefined}
@@ -95,20 +100,22 @@ export function ContactFields({
           </span>
         )}
       </label>
-      <Field
-        field="address"
-        label={addressLabel}
-        value={contact.address}
-        error={errors.address}
-        onChange={set("address")}
-        disabled={disabled}
-        autoComplete="street-address"
-        maxLength={300}
-        hint={addressHint}
-        multiline={!addressAutocomplete}
-        inputRef={addressInputRef}
-        className={columns ? "sm:col-span-2" : undefined}
-      />
+      {showAddress && (
+        <Field
+          field="address"
+          label={addressLabel}
+          value={contact.address}
+          error={errors.address}
+          onChange={set("address")}
+          disabled={disabled}
+          autoComplete="street-address"
+          maxLength={300}
+          hint={addressHint}
+          multiline={!addressAutocomplete}
+          inputRef={addressInputRef}
+          className={columns ? "sm:col-span-2" : undefined}
+        />
+      )}
     </div>
   );
 }

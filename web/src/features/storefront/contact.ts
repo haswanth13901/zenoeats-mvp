@@ -14,7 +14,7 @@ export function collapse(value: string): string {
   return value.split(/\s+/).filter(Boolean).join(" ");
 }
 
-export function contactErrors(contact: Contact): ContactErrors {
+export function contactErrors(contact: Contact, addressRequired = true): ContactErrors {
   const errors: ContactErrors = {};
 
   if (!collapse(contact.full_name)) errors.full_name = "Enter your name.";
@@ -29,9 +29,31 @@ export function contactErrors(contact: Contact): ContactErrors {
     errors.phone = "Enter a phone number a driver could call.";
   }
 
-  if (collapse(contact.address).length < 5) errors.address = "Enter your address.";
+  if (addressRequired && collapse(contact.address).length < 5) errors.address = "Enter your address.";
 
   return errors;
+}
+
+/** Format North American numbers while preserving valid international input. */
+export function formatPhone(value: string): string {
+  const raw = value.trim();
+  const digits = raw.replace(/\D/g, "").slice(0, 15);
+  if (!digits) return "";
+
+  if (raw.startsWith("+") && !digits.startsWith("1")) return `+${digits}`;
+  if (digits.length > 11 || (digits.length > 10 && !digits.startsWith("1"))) return `+${digits}`;
+  const northAmerican = digits.length > 10 && digits.startsWith("1")
+    ? digits.slice(1, 11)
+    : digits.slice(0, 10);
+  const prefix = digits.startsWith("1") && digits.length > 10 ? "+1 " : "";
+  if (northAmerican.length <= 3) return prefix + northAmerican;
+  if (northAmerican.length <= 6)
+    return `${prefix}(${northAmerican.slice(0, 3)}) ${northAmerican.slice(3)}`;
+  return `${prefix}(${northAmerican.slice(0, 3)}) ${northAmerican.slice(3, 6)}-${northAmerican.slice(6)}`;
+}
+
+export function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 /** The order fields appear in, so the first mistake is the one focused. */

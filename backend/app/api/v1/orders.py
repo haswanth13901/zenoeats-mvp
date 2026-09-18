@@ -262,10 +262,11 @@ def create_order(
     if replay is not None:
         return OrderOut.model_validate(replay)
 
-    # Name, phone and address are required by the body itself; the email is
-    # the identity's. A signed-in customer whose address Clerk has not
-    # supplied yet has none a receipt or a restaurant could use, and every
-    # later request asks Clerk again, so this clears itself in a moment.
+    # Name and phone are required by the body itself, with an address required
+    # for delivery; the email is the identity's. A signed-in customer whose
+    # address Clerk has not supplied yet has none a receipt or a restaurant
+    # could use, and every later request asks Clerk again, so this clears
+    # itself in a moment.
     if clerk_customers.has_placeholder_email(user):
         raise errors.ApiError(
             503, "EMAIL_PENDING",
@@ -306,7 +307,9 @@ def create_order(
         body.guest_email if user.kind == UserKind.GUEST.value and body.guest_email
         else clerk_customers.receipt_address(user)
     )
-    order.contact_address = body.contact.address
+    # New pickup forms send an empty address, while older clients may still
+    # provide one. Preserve a supplied snapshot without requiring it.
+    order.contact_address = body.contact.address or None
     db.flush()
     db.refresh(order)
     # An order-specific address must not overwrite a registered profile.

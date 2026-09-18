@@ -1,8 +1,8 @@
 """A customer's saved details: name, phone, address.
 
-Checkout requires all three on every order and keeps them on the order as a
-snapshot. This is the other copy -- the one offered back next time -- so it is
-refreshed whenever someone orders, and never read to decide what an order
+Checkout requires the name and phone on every order and the address for
+delivery. This is the other copy -- the one offered back next time -- so it is
+refreshed whenever someone supplies it, and never read to decide what an order
 says.
 
 Guests get the same treatment. Their row lives exactly as long as their
@@ -32,4 +32,7 @@ def save_contact(user_id, contact: ContactIn) -> None:
             return
         user.full_name = contact.full_name
         user.phone = contact.phone
-        user.address = contact.address
+        # A pickup form has no address field. Do not erase an address saved by
+        # an earlier delivery or through the profile page.
+        if contact.address:
+            user.address = contact.address

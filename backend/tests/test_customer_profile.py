@@ -112,6 +112,7 @@ def test_details_follow_checkouts_rules(shop):
     client.post("/api/v1/orders/guest-session", json={"email": "sam@example.com"})
     assert client.put("/api/v1/customer/profile", json={**CONTACT, "phone": "no"}).status_code == 422
     assert client.put("/api/v1/customer/profile", json={**CONTACT, "full_name": ""}).status_code == 422
+    assert client.put("/api/v1/customer/profile", json={**CONTACT, "address": ""}).status_code == 422
 
 
 def test_the_profile_needs_someone_to_belong_to(shop):

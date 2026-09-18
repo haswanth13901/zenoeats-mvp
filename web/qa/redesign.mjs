@@ -257,10 +257,16 @@ await check("A3-combo-sheet", {}, async ({page}) => {
 });
 await check("A9-guest-validation-draft-and-retry", { guest: true, cart: true }, async ({page,state}) => {
   await page.goto(origin+"/checkout"); await textIncludes(page,"Your items");
+  assert.equal(await page.locator("#contact-address").count(),0);
+  assert.equal(await page.locator("#contact-phone").inputValue(),"(312) 555-0123");
   await page.locator("#contact-full_name").fill("Guest Draft");
-  await page.locator("#contact-email").fill("corrected@example.com");
-  await page.locator("#contact-address").fill("30 Draft Street");
+  await page.locator("#contact-phone").fill("15736472362");
+  assert.equal(await page.locator("#contact-phone").inputValue(),"+1 (573) 647-2362");
+  await page.locator("#contact-email").fill("Corrected@Example.COM ");
+  await page.locator("#contact-email").blur();
+  assert.equal(await page.locator("#contact-email").inputValue(),"corrected@example.com");
   await page.getByRole("radio",{name:/Delivery/}).check();
+  await page.locator("#contact-address").fill("30 Draft Street");
   await textIncludes(page,"$4.00"); await capture(page,"A9-delivery-app-390");
   await page.reload(); await textIncludes(page,"Your items");
   assert.equal(await page.locator("#contact-full_name").inputValue(),"Guest Draft");

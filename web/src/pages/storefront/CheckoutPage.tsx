@@ -168,7 +168,7 @@ export function CheckoutPage() {
 
   const empty = lines.length === 0 && combos.length === 0;
   const delivering = fulfillment === "DELIVERY";
-  const errors = contactErrors(contact);
+  const errors = contactErrors(contact, delivering);
   const emailError = session.data?.is_guest && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim())
     ? "Enter an email address for your receipt." : undefined;
 
@@ -333,7 +333,7 @@ export function CheckoutPage() {
         contact: {
           full_name: collapse(contact.full_name),
           phone: collapse(contact.phone),
-          address: collapse(contact.address),
+          address: delivering ? collapse(contact.address) : "",
         },
         fulfillment_type: fulfillment,
         expected_total_minor: amounts.total_minor,
@@ -466,9 +466,8 @@ export function CheckoutPage() {
               </fieldset>
             )}
 
-            {/* Everything checkout requires to know who is ordering and where
-                to reach them. Name, phone and address are mandatory on every
-                order; the email is the account's and is shown, not edited. */}
+            {/* Pickup needs contact details only; delivery also needs the
+                destination used for its authoritative server-side quote. */}
             <section
               className="rounded-banner border border-hairline bg-surface p-5 sm:p-6"
               aria-labelledby="details-heading"
@@ -511,6 +510,7 @@ export function CheckoutPage() {
                       : "The email on your account. Receipts go here."
                 }
                 addressLabel={delivering ? "Delivery address" : "Address"}
+                showAddress={delivering}
                 addressAutocomplete={delivering && !!restaurant.maps_browser_key}
                 addressInputRef={addressInput}
                 addressHint={
