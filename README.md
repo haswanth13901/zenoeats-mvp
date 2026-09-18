@@ -636,6 +636,9 @@ Check the real edge after startup or upgrades with
 `python scripts/check_storefront.py --slug spicehouse`. It makes 20 read-only
 requests, reports latency, and exits unsuccessfully for errors or responses
 taking 10 seconds or longer. Use your restaurant's slug if different.
+For failures, `docker compose logs --tail 50 nginx` includes total request,
+upstream connection and response times. Query strings, cookies and request
+bodies are excluded from these access logs.
 
 Run one local application mode at a time. With `--profile app`, stop native
 Uvicorn, Vite and Celery terminals first. To switch back to native development,
