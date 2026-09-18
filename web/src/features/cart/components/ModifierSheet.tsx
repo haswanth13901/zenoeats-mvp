@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { MenuImage } from "@/components/common/MenuImage";
+import { QuantityStepper, Sheet } from "@/components/common/Sheet";
 import { money } from "@/utils/format";
 import type { Item, Option } from "@/types";
 import {
@@ -39,97 +40,65 @@ export function ModifierSheet({
 
   const unmet = useMemo(() => unmetGroups(item, selected), [item, selected]);
   const price = unitPriceOf(item, selected);
+  const helper = unmet.length > 0 ? `Choose an option for ${unmet.join(", ")}.` : null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Customize ${item.name}`}
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-xl bg-surface sm:rounded-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Above the header rather than in it. The header sticks while the
-            choices scroll, and a photo stuck there would take half a phone
-            screen away from the options a customer is trying to read. */}
+    <Sheet
+      title={item.name}
+      description={item.description}
+      onClose={onClose}
+      // Above the header rather than in it. The header sticks while the
+      // choices scroll, and a photo stuck there would take half a phone
+      // screen away from the options a customer is trying to read.
+      hero={
         <MenuImage
           src={item.image_url}
-          className="aspect-[16/9] w-full bg-paper object-cover"
+          className="block h-[175px] w-full bg-paper object-cover sm:h-[200px]"
         />
-        <header className="sticky top-0 border-b border-hairline bg-surface px-5 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="font-display text-2xl leading-tight">{item.name}</h2>
-              {item.description && (
-                <p className="mt-1 max-w-prose text-sm text-muted">{item.description}</p>
-              )}
-            </div>
-            <button onClick={onClose} className="btn-quiet px-2 py-1" aria-label="Close">
-              ✕
-            </button>
-          </div>
-        </header>
-
-        <div className="space-y-6 px-5 py-5">
-          <ModifierGroups
-            item={item}
-            currency={currency}
-            selected={selected}
-            scope={item.id}
-            onToggle={toggle}
-          />
-
-          <label className="block">
-            <span className="text-sm font-medium">Note for the kitchen</span>
-            <input
-              className="field mt-2"
-              value={note}
-              maxLength={280}
-              placeholder="Allergies, how you'd like it cooked"
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <footer className="sticky bottom-0 border-t border-hairline bg-surface px-5 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center rounded-md border border-hairline">
-              <button
-                className="px-3 py-2 text-lg leading-none"
-                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                aria-label="Decrease quantity"
-              >
-                −
-              </button>
-              <span className="tnum w-8 text-center text-sm">{quantity}</span>
-              <button
-                className="px-3 py-2 text-lg leading-none"
-                onClick={() => setQuantity((q) => Math.min(20, q + 1))}
-                aria-label="Increase quantity"
-              >
-                +
-              </button>
-            </div>
+      }
+      footer={
+        <>
+          {helper && (
+            <p id="sheet-helper" className="mb-2.5 text-caption text-danger">
+              {helper}
+            </p>
+          )}
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <QuantityStepper value={quantity} min={1} max={20} label="items" onChange={setQuantity} />
             <button
-              className="btn-primary flex-1"
+              type="button"
+              className="btn-primary flex-1 rounded-full px-[11px] sm:px-[19px]"
               disabled={unmet.length > 0}
+              aria-describedby={helper ? "sheet-helper" : undefined}
               onClick={() => {
                 onAdd(selected, quantity, note.trim() || undefined);
                 onClose();
               }}
             >
-              Add {quantity > 1 ? `${quantity} ` : ""}·{" "}
-              <span className="tnum ml-1">{money(price * quantity, currency)}</span>
+              Add {quantity} · <span className="tnum">{money(price * quantity, currency)}</span>
             </button>
           </div>
-          {unmet.length > 0 && (
-            <p className="mt-2 text-xs text-brick">Choose an option for {unmet.join(", ")}.</p>
-          )}
-        </footer>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <ModifierGroups
+        item={item}
+        currency={currency}
+        selected={selected}
+        scope={item.id}
+        onToggle={toggle}
+      />
+
+      <label className="block">
+        <span className="label">Note for the kitchen</span>
+        <textarea
+          className="field mt-[7px]"
+          value={note}
+          maxLength={280}
+          placeholder="Allergies, how you'd like it cooked"
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </label>
+    </Sheet>
   );
 }

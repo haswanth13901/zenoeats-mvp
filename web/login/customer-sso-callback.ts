@@ -1,5 +1,5 @@
 import { getClerk } from "@/services/clerk";
-import { accountUrl, nextPath } from "./customer-shared";
+import { accountUrl, nextPath, paintWordmarks } from "./customer-shared";
 
 /**
  * Where Google, Apple or Facebook send the browser back to, by way of Clerk.
@@ -20,6 +20,8 @@ import { accountUrl, nextPath } from "./customer-shared";
 function backToSignIn(): void {
   window.location.replace(accountUrl("/account/sign-in", { error: "social_failed" }));
 }
+
+void paintWordmarks();
 
 void (async () => {
   try {

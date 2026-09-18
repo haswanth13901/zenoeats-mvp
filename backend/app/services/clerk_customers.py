@@ -91,6 +91,10 @@ def has_placeholder_email(user: User) -> bool:
 def receipt_address(user: User) -> str | None:
     """Where a payment receipt may be sent, or None for nowhere.
 
+    Also asked of guests, who have no Clerk profile at all: they typed their
+    address at checkout, so it is real by construction and comes straight
+    back. The placeholder case below simply never applies to them.
+
     A customer whose profile Clerk could not supply yet carries a
     user_...@pending.local placeholder. That is not an address anyone reads,
     and handing it to Stripe as receipt_email would send a receipt into the
@@ -169,7 +173,10 @@ def upsert_customer(
 
     if email:
         user.email = email
-    if profile and profile.full_name:
+    # Only when we have none. A customer can change their name on their
+    # profile page, which does not write back to Clerk, and a later
+    # user.updated webhook must not quietly undo that.
+    if profile and profile.full_name and not user.full_name:
         user.full_name = profile.full_name
     session.flush()
     return user

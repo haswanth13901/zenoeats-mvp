@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
-import { loadStripe } from "@stripe/stripe-js";
+import { loadStripe, type Appearance } from "@stripe/stripe-js";
 import { useAppDispatch } from "@/app/hooks";
+import { ErrorNote, Loading, Spinner, StatePage } from "@/components/common/Feedback";
+import { Icon } from "@/components/common/icons";
 import { cartCleared } from "@/features/cart/cartSlice";
+import { useOpenCart } from "@/features/cart/useOpenCart";
 import {
   useCreatePaymentIntentMutation,
   useOrderQuery,
   usePortalQuery,
 } from "@/features/storefront/storefrontApi";
 import { ApiError, errorMessage, newIdempotencyKey } from "@/services/apiClient";
+import { clearCheckoutDrafts } from "@/features/storefront/checkoutDraft";
 import { money } from "@/utils/format";
+import { CustomerHeader } from "@/features/storefront/components/CustomerHeader";
+import type { FulfillmentType } from "@/types";
 
 /**
  * What /checkout hands over, so the ordinary path costs no extra request.
@@ -27,7 +33,33 @@ type IntentBundle = {
   publishableKey: string;
 };
 
-export type PaymentHandoff = IntentBundle & { totalMinor: number };
+export type PaymentHandoff = IntentBundle & {
+  totalMinor: number;
+  /** What the total was quoted for, so the customer sees what they are paying
+   *  for. Optional: a history entry from before these existed still pays. */
+  fulfillment?: FulfillmentType;
+  deliveryAddress?: string | null;
+};
+
+/**
+ * The Payment Element's look, from the design tokens: the customer surface's
+ * forest primary (revision 06). Stripe renders the element in its own iframe,
+ * so only these supported appearance variables reach it -- never its
+ * internal DOM, and never the 3-D Secure challenge, which belongs to the card
+ * issuer.
+ */
+const STRIPE_APPEARANCE: Appearance = {
+  theme: "flat",
+  variables: {
+    colorPrimary: "#174D39",
+    colorBackground: "#FFFFFF",
+    colorText: "#252620",
+    colorDanger: "#A61C35",
+    fontFamily: "system-ui, sans-serif",
+    borderRadius: "9px",
+    spacingUnit: "4px",
+  },
+};
 
 function readHandoff(state: unknown): PaymentHandoff | null {
   if (typeof state !== "object" || state === null) return null;
@@ -45,6 +77,8 @@ function readHandoff(state: unknown): PaymentHandoff | null {
     stripeAccountId: s.stripeAccountId,
     publishableKey: s.publishableKey,
     totalMinor: s.totalMinor,
+    fulfillment: s.fulfillment === "DELIVERY" || s.fulfillment === "PICKUP" ? s.fulfillment : undefined,
+    deliveryAddress: typeof s.deliveryAddress === "string" ? s.deliveryAddress : null,
   };
 }
 
@@ -55,6 +89,9 @@ function readHandoff(state: unknown): PaymentHandoff | null {
  * /checkout creates them, then navigates. This page only confirms the intent.
  * It still does not decide that the order is paid -- only the webhook does
  * that -- so it hands off to the order page, which polls the server.
+ *
+ * Static by design: no motion, depth or sticky control near the card fields,
+ * where a moving surface would cover a wallet sheet or a bank's challenge.
  */
 export function PaymentPage() {
   const { orderId = "" } = useParams<{ orderId: string }>();
@@ -64,6 +101,13 @@ export function PaymentPage() {
 
   const handed = useMemo(() => readHandoff(state), [state]);
 
+  // Binds the cart before anything can clear it. Paying is the one moment the
+  // cart must actually be emptied in storage, and an unbound cart clears only
+  // the copy in memory -- so a customer who reloaded this page (which this
+  // page is built to survive) paid, went back to the menu, and found the
+  // items they had just bought still sitting there.
+  useOpenCart();
+
   const portal = usePortalQuery();
   const [createPaymentIntent] = useCreatePaymentIntentMutation();
   const [recovered, setRecovered] = useState<IntentBundle | null>(null);
@@ -71,7 +115,10 @@ export function PaymentPage() {
 
   // Fetched only when the handoff is gone. It supplies the amount and, just as
   // importantly, says whether this order is still awaiting payment at all.
-  const { data: order } = useOrderQuery(orderId, { skip: handed !== null || !orderId });
+  const { data: order, error: orderError } = useOrderQuery(
+    { orderId },
+    { skip: handed !== null || !orderId },
+  );
 
   // Reload with no handoff. The endpoint is "create or return": its Stripe
   // idempotency key is derived from the order id, so this hands back the
@@ -115,6 +162,8 @@ export function PaymentPage() {
 
   const payment = handed ?? recovered;
   const total = handed?.totalMinor ?? order?.amounts.total_minor ?? null;
+  const fulfillment = handed?.fulfillment ?? order?.fulfillment_type ?? null;
+  const destination = handed?.deliveryAddress ?? order?.delivery_address ?? null;
 
   // loadStripe opens a connection, so it must not run again on every render.
   // Direct charges live on the connected account, which is why Stripe.js needs
@@ -127,31 +176,26 @@ export function PaymentPage() {
     [payment],
   );
 
+  const backToOrder = (
+    <Link to="/checkout" className="btn-primary">
+      Back to your order
+    </Link>
+  );
+
   if (!orderId) {
-    return (
-      <main className="mx-auto max-w-lg px-5 py-24 text-center">
-        <h1 className="font-display text-3xl">Nothing to pay for</h1>
-        <Link to="/checkout" className="btn-quiet mt-6">
-          Back to your order
-        </Link>
-      </main>
-    );
+    return <StatePage title="Nothing to pay for" action={backToOrder} />;
   }
 
-  if (error) {
+  if (error || orderError || portal.error) {
     return (
-      <main className="mx-auto max-w-lg px-5 py-24 text-center">
-        <h1 className="font-display text-3xl">We couldn&apos;t open payment</h1>
-        <p className="mt-3 text-sm text-muted">{error}</p>
-        <Link to="/checkout" className="btn-quiet mt-6">
-          Back to your order
-        </Link>
-      </main>
+      <StatePage title="We couldn't open payment" action={backToOrder}>
+        {error ?? errorMessage(orderError ?? portal.error)}
+      </StatePage>
     );
   }
 
   if (!payment || !stripePromise || total === null || !portal.data) {
-    return <main className="px-5 py-24 text-center text-muted">Opening payment…</main>;
+    return <StatePage busy>Opening payment…</StatePage>;
   }
 
   // Bound to a const after the guard: narrowing on portal.data does not survive
@@ -159,44 +203,71 @@ export function PaymentPage() {
   const restaurant = portal.data;
 
   return (
-    <main className="mx-auto max-w-lg px-5 py-10">
-      <h1 className="font-display text-3xl">Pay {restaurant.name}</h1>
-      <p className="mt-2 text-sm text-muted">
-        Your order is held while you pay. Nothing is charged until you confirm.
-      </p>
+    <div className="flex min-h-dvh flex-col">
+      <CustomerHeader restaurant={restaurant} />
+      <main className="mx-auto w-full max-w-[520px] px-5 pb-[50px] pt-5 sm:px-6 sm:pb-[70px] sm:pt-10">
+        <div className="sm:rounded-banner sm:border sm:border-hairline sm:bg-surface sm:p-8">
+          <h1 className="mb-4 font-display text-[34px] leading-[1.12] tracking-[-1px] [overflow-wrap:anywhere] sm:text-[38px]">
+            Pay {restaurant.name}
+          </h1>
+          <p className="text-muted">
+            Your order is held while you pay. Nothing is charged until you confirm.
+          </p>
 
-      <div className="mt-6 flex justify-between border-y border-hairline py-3 text-base font-medium">
-        <span>Total</span>
-        <span className="tnum">{money(total, restaurant.currency)}</span>
-      </div>
+          {/* What this total was quoted for. Read from the order, never
+              re-chosen here: changing it means going back to checkout, which
+              prices it again. */}
+          {fulfillment && (
+            <p className="mt-6 flex items-start gap-3 rounded-field bg-brickSoft/60 px-4 py-3 text-sm">
+              <Icon name={fulfillment === "DELIVERY" ? "bag" : "store"} className="mt-px h-5 w-5 shrink-0 text-brick" />
+              <span className="min-w-0 [overflow-wrap:anywhere]">
+                {fulfillment === "DELIVERY" ? (
+                  <>
+                    <strong className="font-semibold">Delivery</strong>
+                    {destination ? ` to ${destination}` : ""}
+                  </>
+                ) : (
+                  <>
+                    <strong className="font-semibold">Pick-up</strong> at {restaurant.name}
+                  </>
+                )}
+              </span>
+            </p>
+          )}
 
-      <div className="mt-8">
-        <Elements
-          stripe={stripePromise}
-          options={{
-            clientSecret: payment.clientSecret,
-            appearance: {
-              theme: "flat",
-              variables: { colorPrimary: "#B3341F", fontFamily: "system-ui, sans-serif" },
-            },
-          }}
-        >
-          <PayForm
-            orderId={orderId}
-            total={total}
-            currency={restaurant.currency}
-            onPaid={() => {
-              dispatch(cartCleared());
-              navigate(`/orders/${orderId}`, { replace: true });
-            }}
-          />
-        </Elements>
-      </div>
+          <div className="tnum mt-6 flex justify-between border-y border-hairline py-5 text-[25px] font-bold">
+            <span>Total</span>
+            <span>{money(total, restaurant.currency)}</span>
+          </div>
 
-      <Link to="/checkout" className="mt-6 block text-center text-sm text-muted underline">
-        Back to your order
-      </Link>
-    </main>
+          <div className="mt-6">
+            <Elements
+              stripe={stripePromise}
+              options={{ clientSecret: payment.clientSecret, appearance: STRIPE_APPEARANCE }}
+            >
+              <PayForm
+                orderId={orderId}
+                total={total}
+                currency={restaurant.currency}
+                onPaid={() => {
+                  dispatch(cartCleared());
+                  clearCheckoutDrafts();
+                  navigate(`/orders/${orderId}`, { replace: true });
+                }}
+              />
+            </Elements>
+          </div>
+
+          <Link
+            to="/checkout"
+            className="mt-4 flex min-h-[40px] items-center justify-center gap-2 text-caption text-muted underline underline-offset-[3px] hover:text-ink"
+          >
+            <Icon name="back" className="h-4 w-4" />
+            Back to your order
+          </Link>
+        </div>
+      </main>
+    </div>
   );
 }
 
@@ -215,6 +286,9 @@ function PayForm({
   const elements = useElements();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The iframe announces when its fields are ready to type in. Until then
+  // the space holds a loading line rather than an empty box.
+  const [ready, setReady] = useState(false);
 
   async function submit() {
     if (!stripe || !elements) return;
@@ -241,12 +315,36 @@ function PayForm({
 
   return (
     <div>
-      <PaymentElement options={{ layout: "tabs" }} />
-      {error && <p className="mt-4 text-sm text-brick">{error}</p>}
-      <button className="btn-primary mt-6 w-full" disabled={busy || !stripe} onClick={submit}>
-        {busy ? "Processing…" : `Pay ${money(total, currency)}`}
+      {!ready && <Loading>Loading secure payment…</Loading>}
+      <div className={ready ? "" : "h-0 overflow-hidden"}>
+        <PaymentElement
+          options={{ layout: "tabs" }}
+          onReady={() => setReady(true)}
+          onLoadError={(e) => {
+            // Never leave the page on a spinner: show Stripe's own reason.
+            setReady(true);
+            setError(e.error.message ?? "That payment didn't go through.");
+          }}
+        />
+      </div>
+      <ErrorNote message={error} className="mt-4" />
+      <button
+        type="button"
+        className="btn-primary mt-6 min-h-[50px] w-full rounded-full"
+        disabled={busy || !stripe || !ready}
+        onClick={submit}
+      >
+        {busy ? (
+          <>
+            <Spinner />
+            Processing…
+          </>
+        ) : (
+          `Pay ${money(total, currency)}`
+        )}
       </button>
-      <p className="mt-3 text-center text-xs text-muted">
+      <p className="mt-3 flex items-center justify-center gap-2 text-caption text-muted">
+        <Icon name="lock" className="h-4 w-4" />
         Your card is charged by the restaurant through Stripe.
       </p>
     </div>

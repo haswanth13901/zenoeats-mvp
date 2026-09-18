@@ -112,12 +112,19 @@ export type BoardOrder = {
   payment_status: string | null;
   /** Five wrong PINs. Only a manager override can hand it over now. */
   pin_locked: boolean;
-  /** PICKUP until a manager hands the order to one of the restaurant's
-   *  drivers; customers cannot order a delivery. */
+  /** DELIVERY when the customer chose it at checkout, or when a manager
+   *  handed a phone order to one of the restaurant's drivers. */
   fulfillment_type: "PICKUP" | "DELIVERY";
   delivery_address: string | null;
+  /** Non-zero when the customer paid for delivery at checkout. Such an order
+   *  cannot be turned back into a collection. */
+  delivery_fee_minor: number;
   /** The driver's name, once one is assigned. */
   driver: string | null;
+  /** Who to call and whose name to call out, as given at checkout. Null on
+   *  orders from before checkout asked. */
+  contact_name: string | null;
+  contact_phone: string | null;
   items: {
     name: string;
     quantity: number;
@@ -163,6 +170,8 @@ export type Delivery = {
   paid_at: string | null;
   delivery_address: string | null;
   customer_note: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
   driver: string | null;
   /** Assigned to whoever is reading. A manager sees every delivery. */
   mine: boolean;
@@ -223,6 +232,8 @@ export type LibraryItem = {
   base_price_minor: number;
   currency: string;
   is_available: boolean;
+  /** Charged no sales tax: left out of the tax on every order it is in. */
+  tax_exempt: boolean;
   /** The storage key, sent back unchanged when an edit leaves the photo
    *  alone, and null when there is none. */
   image_path: string | null;
@@ -241,6 +252,7 @@ export type ItemDraft = {
   item_type_id: string;
   description: string | null;
   base_price_minor: number;
+  tax_exempt: boolean;
   modifier_group_ids: string[];
   meal_ids: string[];
   included_option_ids: string[];
@@ -542,6 +554,15 @@ export const restaurantApi = api.injectEndpoints({
     pickedUp: build.mutation<unknown, string>({
       query: (orderId) => ({ url: `/restaurant/orders/${orderId}/picked-up`, method: "POST" }),
       invalidatesTags: ["Board"],
+    }),
+
+    /** The signed-in driver's position, for their customers' maps. Refused
+     *  (NOT_ON_A_DELIVERY) unless they have an order of their own on the road. */
+    sendDriverLocation: build.mutation<
+      { sharing: boolean; orders: number },
+      { latitude: number; longitude: number; heading: number | null }
+    >({
+      query: (body) => ({ url: "/restaurant/driver/location", method: "POST", body }),
     }),
 
     delivered: build.mutation<unknown, string>({
@@ -936,6 +957,7 @@ export const {
   useDriversQuery,
   useAssignDriverMutation,
   useUnassignDriverMutation,
+  useSendDriverLocationMutation,
   usePickedUpMutation,
   useDeliveredMutation,
   useMarkReadyMutation,

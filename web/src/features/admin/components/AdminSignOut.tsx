@@ -16,7 +16,7 @@ export function AdminSignOut() {
 
   return (
     <button
-      className="btn-quiet px-3 py-1.5 text-sm"
+      className="btn-quiet btn-compact sm:min-h-[46px] sm:px-[19px] sm:text-sm"
       disabled={isLoading}
       onClick={async () => {
         // A failed logout still means the operator wants out; the cookie
@@ -27,7 +27,7 @@ export function AdminSignOut() {
         window.location.assign("/admin/login");
       }}
     >
-      Sign out
+      {isLoading ? "Signing out…" : "Sign out"}
     </button>
   );
 }

@@ -24,7 +24,7 @@ function home(me: StaffMe): string {
 function nextPath(): string {
   const raw = new URLSearchParams(window.location.search).get("next");
   // Same-origin paths only. An absolute URL here would be an open redirect.
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/manage";
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/manage";
   return raw;
 }
 

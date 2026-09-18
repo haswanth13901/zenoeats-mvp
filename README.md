@@ -11,6 +11,7 @@ board.
 |---|---|
 | Tenancy | Wildcard subdomain resolution, PostgreSQL RLS, three-role DB model |
 | Identity | Customers: Clerk (email/password, Google) behind our own `/account` pages. Staff: platform-issued passwords. Admins: `ADMIN_USERS` |
+| Customer profile | `/profile`: name, phone and address; order history at this restaurant; favourite items (accounts only), saved from a heart on the menu |
 | Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
 | Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
 | Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
@@ -20,17 +21,18 @@ board.
 
 ## What is deliberately not here
 
-Choosing delivery at checkout, driver GPS and routing, WebSockets, cash
-payments, reconciliation, promotions, reviews, SMS, push, PITR. All of it
-stays in the v3.0 baseline for later releases. See "Adding delivery" at the
-bottom.
+Route planning, a native driver app, WebSockets, cash payments, reconciliation, promotions,
+reviews, SMS, push, PITR. All of it stays in the v3.0 baseline for later
+releases. See "Adding delivery" at the bottom.
 
-Delivery is half built, and the halves are worth telling apart. A restaurant
-can draw its delivery area, price it by distance and run an order out with one
-of its own drivers. A **customer** still cannot choose delivery: the address is
-typed by staff for a phone order, and nothing is charged for the journey. The
-pricing that would charge for it exists and is tested; what is missing is the
-checkout that would use it.
+Checkout requires a name, phone number and address on every order, plus the
+email the customer signed in or started their guest session with. A customer
+of a restaurant that delivers chooses Pickup or Delivery there: the address is
+priced against the restaurant's rings on the quote and again when the order is
+created, and the fee is charged with the food. A manager still assigns the
+driver. Name and phone are kept on the order as a snapshot and shown on the
+kitchen ticket and the driver's card; the customer's row keeps the latest copy
+to fill in next time.
 
 ## The payment sequence
 
@@ -62,10 +64,16 @@ This is the part worth reading before changing anything.
    PENDING_PAYMENT → AUTO_ACCEPTED → PREPARING.
 
 6. The customer's page polls GET /orders/{id} and sees the real state.
+   If the payment has sat in PROCESSING for 10 seconds with no webhook, the
+   poll also reads the PaymentIntent back from Stripe (after responding, at
+   most every 10 seconds per payment) and applies it through the same
+   handlers as step 5. The 5-minute expiry sweep does the same before it
+   expires anything, so a lost webhook cannot expire a charged order.
 ```
 
 Three rules hold this together. The order row exists before any charge. Only
-a verified webhook can say PAID. A partial unique index on
+Stripe can say PAID: a verified webhook, or the intent read back from Stripe
+with the platform key, never the browser. A partial unique index on
 `payments (order_id) WHERE succeeded_at IS NOT NULL` means a second
 successful payment on one order is impossible at the database level, even
 after a refund.
@@ -340,6 +348,18 @@ stripe listen --forward-connect-to localhost:8000/api/v1/webhooks/stripe/connect
 Copy the `whsec_` it prints into `STRIPE_CONNECT_WEBHOOK_SECRET` and restart
 the api container.
 
+The CLI listens on whichever Stripe account it is logged in to, which is not
+necessarily the one `STRIPE_SECRET_KEY` belongs to. If they differ, nothing is
+forwarded and every order sits on "Confirming your payment" even though Stripe
+took the money. Either `stripe login` to the same account, or pass the key:
+`stripe listen --api-key "$STRIPE_SECRET_KEY" --forward-connect-to ...`. The
+secret it prints depends on the account, so copy it again after switching.
+
+Keep `make worker` running too. The webhook only stores the event; the worker
+is what marks the order paid. Without either, the order page still gets there
+by asking Stripe after about 10 seconds, but that is the fallback, so a slow
+confirmation locally usually means one of the two is not running.
+
 ### 6. Pay
 
 Card `4242 4242 4242 4242`, any future expiry, any CVC. The order page will
@@ -518,10 +538,11 @@ The production edge and deployment shape are in `docker-compose.prod.yml` and
 
 ## Adding delivery later
 
-Everything below the checkout is here; the checkout is not.
+Customers can choose delivery at checkout. What is missing is everything after
+the driver sets off.
 
-**What works.** `Order.fulfillment_type` is `PICKUP` until an order is sent
-out, and the transition matrix in `app/models/commerce.py` carries
+**What works.** `Order.fulfillment_type` is `DELIVERY` when the customer chose
+it at checkout, or when a manager sends a paid collection out, and the transition matrix in `app/models/commerce.py` carries
 READY_FOR_DELIVERY and OUT_FOR_DELIVERY. Who is delivering is a column,
 `orders.driver_user_id`, rather than the baseline's DRIVER_ASSIGNED and
 DRIVER_ACCEPTED states: a manager may assign or reassign at any point, which as
@@ -533,16 +554,27 @@ total, and `TaxService` taxes it per the restaurant's answer under a flat rate
 or hands it to Stripe as `shipping_cost` under Stripe Tax. An order keeps the
 fee and the distance it was charged for.
 
-**What a customer-facing release still needs.** Delivery as a choice at
-checkout, with the address collected there instead of typed by staff
-afterwards -- which is the one thing everything else waits on. Then: Stripe Tax
+**Live tracking.** From payment, a delivery's order page shows its steps --
+paid, driver assigned, ready, picked up, delivered -- read from
+`order_events`. Once the driver presses Picked up, the Deliveries page on
+their phone shares GPS every five seconds (`POST
+/restaurant/driver/location`, refused unless they have an order of their own
+on the road) and keeps the screen awake. The position lives in Redis for
+minutes, never in Postgres, and the customer's map (Google Maps JavaScript
+API, `GOOGLE_MAPS_BROWSER_KEY`) shows it while fresh. The arrival time comes
+from the Routes API with the server key, asked after the poll's response and
+at most once per `DELIVERY_ETA_REFRESH_SECONDS` per order. The browser only
+reports position while the page is open, so a native driver app is the next
+step if drivers need to lock their phones.
+
+**What a customer-facing release still needs.** Stripe Tax
 sources tax at the restaurant's address, which is right for collection and
 wrong for a delivery in a destination-sourced state, so the customer's
 structured address has to reach `stripe_tax.calculate`. Then DELIVERY_FAILED
 with the retry and refund handling around it, a minimum order value if that is
-wanted, and driver location if that is. Polling in the order page is the thing
-to replace with WebSockets, and section 12 of the baseline already specifies
-how.
+wanted. Polling in the order page is the thing to replace with WebSockets if
+five-second updates stop being enough, and section 12 of the baseline already
+specifies how.
 
 **What was decided along the way**, so it is not relitigated. Distance is
 straight-line rather than driving distance: routing costs more per lookup and

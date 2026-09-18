@@ -98,6 +98,7 @@ export type Meal = {
 };
 
 export type Portal = {
+  pickup_address?: string | null;
   restaurant_id: string;
   slug: string;
   name: string;
@@ -107,6 +108,72 @@ export type Portal = {
   accepting_orders: boolean;
   stripe_publishable_key: string;
   stripe_account_id: string | null;
+  /** Whether checkout offers delivery at all. Whether a particular address
+   *  can be delivered to is the quote's answer. */
+  delivery_offered: boolean;
+  /** For the live delivery map: a browser key restricted to this site, and
+   *  the Map ID its markers need. Null when there is no map to show. */
+  maps_browser_key: string | null;
+  maps_map_id: string | null;
+};
+
+/** Who is ordering, as the server sees them. A guest is a real identity for
+ *  every purpose except being recoverable: it lives in one browser's cookie
+ *  and cannot be signed back into. */
+export type CustomerSession = {
+  email: string;
+  full_name: string | null;
+  /** What checkout saved last time, offered back so nobody types it twice. */
+  phone: string | null;
+  address: string | null;
+  /** A signed-in customer whose email Clerk has not supplied yet. Checkout
+   *  cannot place an order until it has. */
+  email_pending: boolean;
+  is_guest: boolean;
+};
+
+export type FulfillmentType = "PICKUP" | "DELIVERY";
+
+export type MapPoint = { latitude: number; longitude: number };
+
+/** What has happened so far, in order. Any step can be missing. */
+export type TrackingStep = "PAID" | "DRIVER_ASSIGNED" | "READY" | "PICKED_UP" | "DELIVERED";
+
+export type Tracking = {
+  steps: { step: TrackingStep; at: string }[];
+  /** First name only. */
+  driver_name: string | null;
+  restaurant: MapPoint | null;
+  destination: MapPoint | null;
+  /** Only while the order is on the road and the driver's phone is reporting. */
+  driver_location: (MapPoint & { heading: number | null; recorded_at: string }) | null;
+  eta_seconds: number | null;
+  eta_computed_at: string | null;
+};
+
+/** A row of the customer's order history: enough to recognise an order, with
+ *  a meal deal as one line under its own name. */
+export type OrderSummary = {
+  order_id: string;
+  order_number: number;
+  status: string;
+  fulfillment_type: FulfillmentType;
+  currency: string;
+  total_minor: number;
+  created_at: string;
+  lines: string[];
+};
+
+/** A saved item. Price, photo and availability come from the menu, which is
+ *  also how the page knows whether it is being served right now. */
+export type Favourite = { item_id: string; name: string; saved_at: string };
+
+/** Who is ordering, as checkout requires it. The email is not here: it is the
+ *  account's, or the one a guest session began with. */
+export type Contact = {
+  full_name: string;
+  phone: string;
+  address: string;
 };
 
 export type CartModifier = {
@@ -153,8 +220,26 @@ export type CartComboLine = {
 export type Amounts = {
   subtotal_minor: number;
   discount_minor: number;
+  /** Zero on a collection. */
+  delivery_fee_minor: number;
   tax_minor: number;
   total_minor: number;
+};
+
+/** One line of a placed order.
+ *
+ *  Lines that came from a meal deal carry its name and a group number, so the
+ *  three rows of a combo can be shown as the one thing the customer bought
+ *  rather than as unrelated food that happened to be cheap. */
+export type OrderLine = {
+  name: string;
+  combo_name: string | null;
+  combo_group: number | null;
+  quantity: number;
+  unit_price_minor: number;
+  line_total_minor: number;
+  item_note: string | null;
+  modifiers: { group_name: string; option_name: string; unit_price_delta_minor: number; quantity: number }[];
 };
 
 export type Order = {
@@ -164,15 +249,12 @@ export type Order = {
   payment_status: string;
   currency: string;
   amounts: Amounts;
-  items: {
-    name: string;
-    quantity: number;
-    unit_price_minor: number;
-    line_total_minor: number;
-    item_note: string | null;
-    modifiers: { group_name: string; option_name: string; unit_price_delta_minor: number; quantity: number }[];
-  }[];
+  items: OrderLine[];
+  fulfillment_type: FulfillmentType;
   pickup_pin: string | null;
+  delivery_address: string | null;
+  /** A paid delivery, as its customer follows it. Null for a collection. */
+  tracking: Tracking | null;
   expires_at: string | null;
   created_at: string;
 };

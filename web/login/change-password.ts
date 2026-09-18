@@ -63,7 +63,7 @@ function validate(): void {
   const tooShort = next.length > 0 && next.length < MIN_LENGTH;
   const mismatch = confirm.length > 0 && next !== confirm;
 
-  lengthHint.className = `mt-1 block text-xs ${tooShort ? "text-brick" : "text-muted"}`;
+  lengthHint.className = `mt-2 block text-caption ${tooShort ? "text-danger" : "text-muted"}`;
   matchHint.hidden = !mismatch;
   submitButton.disabled = !(
     currentInput.value &&

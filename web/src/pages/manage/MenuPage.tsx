@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ErrorNote } from "@/components/common/Feedback";
+import { ErrorNote, Loading } from "@/components/common/Feedback";
+import { PageTitle } from "@/components/layout/Shell";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import { ItemLibrary } from "@/features/restaurant/components/ItemLibrary";
 import { MenuPreview } from "@/features/restaurant/components/MenuPreview";
@@ -40,7 +41,8 @@ type Tab = (typeof TABS)[number]["id"];
  *
  * Only routing between the tabs and surfacing errors lives here; the tabs
  * themselves own their forms and mutations. RTK Query tags handle the
- * refresh, so the children need no manual onChange threading.
+ * refresh, so the children need no manual onChange threading. Every tab's
+ * errors land in the one banner above the tabs, and switching tab clears it.
  */
 export function MenuPage() {
   const [tab, setTab] = useState<Tab>("preview");
@@ -59,59 +61,73 @@ export function MenuPage() {
     (combos.error ? errorMessage(combos.error) : null) ??
     (groups.error ? errorMessage(groups.error) : null);
 
+  // Until the first answers land, every tab would describe an empty menu.
+  const loading =
+    menu.isLoading || items.isLoading || itemTypes.isLoading || combos.isLoading || groups.isLoading;
+
   const meals = menu.data?.meals ?? [];
   const types = itemTypes.data ?? [];
 
   return (
     <ManageShell>
+      <PageTitle title="Your menu" subtitle="One library. Every meal period." />
+
       <ErrorNote message={error ?? loadError} />
 
-      <div className="mb-6 flex gap-1 border-b border-hairline">
+      <nav
+        aria-label="Menu builder"
+        className="mb-6 flex gap-6 overflow-x-auto border-b border-hairline sm:mb-[30px] sm:gap-7"
+      >
         {TABS.map((t) => (
           <button
             key={t.id}
+            type="button"
+            aria-current={tab === t.id ? "page" : undefined}
             onClick={() => {
               setError(null);
               setTab(t.id);
             }}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm ${
-              tab === t.id ? "border-brick text-ink" : "border-transparent text-muted"
+            className={`-mb-px whitespace-nowrap border-b-2 py-3.5 text-[13px] transition-colors duration-tab ease-standard ${
+              tab === t.id
+                ? "border-brick font-semibold text-ink"
+                : "border-transparent text-muted hover:text-ink"
             }`}
           >
             {t.label}
           </button>
         ))}
-      </div>
+      </nav>
 
-      {tab === "preview" && <MenuPreview meals={meals} types={types} />}
-      {tab === "items" && (
-        <ItemLibrary
-          items={items.data ?? []}
-          meals={meals}
-          types={types}
-          groups={groups.data ?? []}
-          onError={setError}
-        />
-      )}
-      {tab === "periods" && (
-        <MealPeriods
-          meals={meals}
-          items={items.data ?? []}
-          types={types}
-          onError={setError}
-        />
-      )}
-      {tab === "combos" && (
-        <ComboBuilder
-          combos={combos.data ?? []}
-          meals={meals}
-          items={items.data ?? []}
-          types={types}
-          onError={setError}
-        />
-      )}
-      {tab === "groups" && (
-        <ModifierLibrary groups={groups.data ?? []} types={types} onError={setError} />
+      {loading ? (
+        <Loading />
+      ) : (
+        <div key={tab} className="animate-fade">
+          {tab === "preview" && <MenuPreview meals={meals} types={types} />}
+          {tab === "items" && (
+            <ItemLibrary
+              items={items.data ?? []}
+              meals={meals}
+              types={types}
+              groups={groups.data ?? []}
+              onError={setError}
+            />
+          )}
+          {tab === "periods" && (
+            <MealPeriods meals={meals} items={items.data ?? []} types={types} onError={setError} />
+          )}
+          {tab === "combos" && (
+            <ComboBuilder
+              combos={combos.data ?? []}
+              meals={meals}
+              items={items.data ?? []}
+              types={types}
+              onError={setError}
+            />
+          )}
+          {tab === "groups" && (
+            <ModifierLibrary groups={groups.data ?? []} types={types} onError={setError} />
+          )}
+        </div>
       )}
     </ManageShell>
   );

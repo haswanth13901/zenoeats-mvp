@@ -99,7 +99,7 @@ type SocialProvider = {
   icon: string;
 };
 
-const BUTTON_LAYOUT = "flex w-full items-center justify-center gap-3";
+const BUTTON_LAYOUT = "w-full gap-3";
 
 // Logos are static markup written by us, never data from a request.
 const SOCIAL_PROVIDERS: SocialProvider[] = [
@@ -112,13 +112,13 @@ const SOCIAL_PROVIDERS: SocialProvider[] = [
   {
     strategy: "oauth_apple",
     name: "Apple",
-    className: `btn ${BUTTON_LAYOUT} bg-black text-white hover:bg-black/85`,
+    className: `btn ${BUTTON_LAYOUT} border-black bg-black text-white hover:bg-black/85`,
     icon: `<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>`,
   },
   {
     strategy: "oauth_facebook",
     name: "Facebook",
-    className: `btn ${BUTTON_LAYOUT} bg-[#1877F2] text-white hover:bg-[#166FE5]`,
+    className: `btn ${BUTTON_LAYOUT} border-[#1877F2] bg-[#1877F2] text-white hover:bg-[#166FE5]`,
     icon: `<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M9.101 23.691v-7.98H6.627v-3.667h2.474v-1.58c0-4.085 1.848-5.978 5.858-5.978.401 0 .955.042 1.468.103a8.68 8.68 0 0 1 1.141.195v3.325a8.623 8.623 0 0 0-.653-.036 26.805 26.805 0 0 0-.733-.009c-.707 0-1.259.096-1.675.309a1.686 1.686 0 0 0-.679.622c-.258.42-.374.995-.374 1.752v1.297h3.919l-.386 2.103-.287 1.564h-3.246v8.245C19.396 23.238 24 18.179 24 12.044c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.628 3.874 10.35 9.101 11.647Z"/></svg>`,
   },
 ];
@@ -205,13 +205,50 @@ export async function activateAndContinue(clerk: ClerkInstance, sessionId: strin
 }
 
 /** "Sign in to order from Spice House", when the page is on a restaurant's
- *  address. The platform root has no restaurant, and says so by failing. */
-export async function paintRestaurantName(target: HTMLElement, template: (name: string) => string) {
+ *  address. The platform root has no restaurant, and says so by failing.
+ *
+ *  Resolves to whether there was one, because the guest panel turns on the
+ *  same answer: a guest session is created against a restaurant, so there is
+ *  nothing to continue as on an address that names none. */
+export async function paintRestaurantName(
+  target: HTMLElement,
+  template: (name: string) => string,
+): Promise<boolean> {
   try {
-    const portal = await request<{ name: string }>("/portal");
+    const portal = await restaurant();
     target.textContent = template(portal.name);
+    return true;
   } catch {
     /* keep the generic heading */
+    return false;
+  }
+}
+
+/** The restaurant this address belongs to, read once however many parts of
+ *  the page want it. */
+let pending: Promise<{ name: string }> | null = null;
+
+function restaurant(): Promise<{ name: string }> {
+  pending ??= request<{ name: string }>("/portal");
+  return pending;
+}
+
+/** Put the restaurant's own name in the wordmarks, as the storefront header
+ *  does. These pages belong to the restaurant being ordered from, not to the
+ *  platform; on the platform root there is no restaurant and the Zenoeats
+ *  wordmark in the markup stands. */
+export async function paintWordmarks(): Promise<void> {
+  try {
+    const { name } = await restaurant();
+    const initial = name.trim().charAt(0).toUpperCase();
+    document.querySelectorAll("[data-wordmark-name]").forEach((el) => {
+      el.textContent = name;
+    });
+    document.querySelectorAll("[data-wordmark-mark]").forEach((el) => {
+      el.textContent = initial;
+    });
+  } catch {
+    /* keep the platform wordmark */
   }
 }
 
@@ -236,7 +273,7 @@ export function wirePasswordPair(
   const validate = () => {
     const tooShort = password.value.length > 0 && password.value.length < minLength;
     const mismatch = confirm.value.length > 0 && password.value !== confirm.value;
-    lengthHint.className = `mt-1 block text-xs ${tooShort ? "text-brick" : "text-muted"}`;
+    lengthHint.className = `mt-2 block text-caption ${tooShort ? "text-danger" : "text-muted"}`;
     matchHint.hidden = !mismatch;
     onChange(password.value.length >= minLength && password.value === confirm.value);
   };

@@ -18,13 +18,13 @@ export const DELIVERY_ROLES = ["ADMIN", "MANAGER", "DRIVER"];
 export type ManageNavItem = NavItem & { roles: string[] };
 
 export const MANAGE_NAV: ManageNavItem[] = [
-  { href: "/manage", label: "Kitchen", roles: ALL_STAFF_ROLES },
-  { href: "/manage/deliveries", label: "Deliveries", roles: DELIVERY_ROLES },
-  { href: "/manage/stock", label: "Stock", roles: ALL_STAFF_ROLES },
-  { href: "/manage/menu", label: "Menu", roles: MANAGER_ROLES },
-  { href: "/manage/staff", label: "Staff", roles: ADMIN_ROLES },
-  { href: "/manage/reports", label: "Reports", roles: MANAGER_ROLES },
-  { href: "/manage/settings", label: "Settings", roles: ADMIN_ROLES },
+  { href: "/manage", label: "Kitchen", icon: "kitchen", roles: ALL_STAFF_ROLES },
+  { href: "/manage/deliveries", label: "Deliveries", icon: "bag", roles: DELIVERY_ROLES },
+  { href: "/manage/stock", label: "Stock", icon: "stock", roles: ALL_STAFF_ROLES },
+  { href: "/manage/menu", label: "Menu", icon: "menu", roles: MANAGER_ROLES },
+  { href: "/manage/staff", label: "Staff", icon: "team", roles: ADMIN_ROLES },
+  { href: "/manage/reports", label: "Reports", icon: "report", roles: MANAGER_ROLES },
+  { href: "/manage/settings", label: "Settings", icon: "edit", roles: ADMIN_ROLES },
 ];
 
 /** The tabs this role can use. No role yet -- the guard has not answered --

@@ -312,6 +312,7 @@ class FakeItem:
         self.item_type_id = uuid.uuid4()
         self.description = None
         self.base_price_minor = 1095
+        self.tax_exempt = False
         self.image_path = image_path
         self.price_delta_minor = 0
         self.deleted_at = None

@@ -26,6 +26,7 @@ def _order(**overrides):
     values = dict(
         id=uuid.uuid4(), order_number=1042, currency="USD", items=[item],
         subtotal_minor=2400, discount_minor=240, tax_minor=178, total_minor=2338,
+        fulfillment_type="PICKUP", delivery_fee_minor=0,
     )
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -58,6 +59,22 @@ def test_the_confirmation_never_contains_the_pickup_pin():
         assert "123456" not in body
         assert "gAAAA" not in body
         assert "pickup PIN is on your order page" in body
+
+
+def test_a_delivery_confirmation_promises_no_pin_and_shows_its_fee():
+    """A delivery is not collected at a counter, and its fee is part of the total."""
+    order = _order(
+        fulfillment_type="DELIVERY", delivery_fee_minor=399, discount_minor=0,
+        tax_minor=178, total_minor=2977,
+    )
+    _, body_html, body_text = notifications.compose_order_confirmation(
+        restaurant_name="Spice House", slug="spicehouse", order=order, customer_name=None
+    )
+    for body in (body_html, body_text):
+        assert "PIN" not in body
+        assert "Delivery fee" in body
+        assert "$3.99" in body
+        assert "where your driver is" in body
 
 
 @pytest.mark.parametrize("has_temporary_password", [True, False])
@@ -214,7 +231,7 @@ def test_the_payment_webhook_queues_the_confirmation(queued_emails, monkeypatch)
 
     class FakeTenantSession:
         def __enter__(self):
-            return SimpleNamespace(get=lambda model, _id: SimpleNamespace(
+            return SimpleNamespace(get=lambda model, _id, **kw: SimpleNamespace(
                 order_id=order_id, succeeded_at=utcnow()))
 
         def __exit__(self, *exc):

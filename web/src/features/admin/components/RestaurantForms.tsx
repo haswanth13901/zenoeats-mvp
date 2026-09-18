@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Spinner } from "@/components/common/Feedback";
+import { OneTimeSecret } from "@/components/common/Secret";
 import type { Restaurant } from "../adminApi";
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -33,7 +35,7 @@ export function CreateRestaurantForm({
 
   return (
     <form
-      className="mb-4 border border-hairline bg-surface p-4"
+      className="editor mb-6 animate-disclose"
       onSubmit={(e) => {
         e.preventDefault();
         onCreate({
@@ -44,11 +46,12 @@ export function CreateRestaurantForm({
         });
       }}
     >
-      <div className="grid gap-3 sm:grid-cols-3">
+      <h3 className="mb-5 text-lg font-semibold">Add a restaurant</h3>
+      <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-3">
         <label className="block">
-          <span className="text-xs text-muted">Restaurant name</span>
+          <span className="label">Restaurant name</span>
           <input
-            className="field mt-1"
+            className="field mt-[7px]"
             required
             autoFocus
             value={name}
@@ -56,24 +59,26 @@ export function CreateRestaurantForm({
           />
         </label>
         <label className="block">
-          <span className="text-xs text-muted">Subdomain</span>
+          <span className="label">Subdomain</span>
           <input
-            className="field mt-1"
+            className="field mt-[7px]"
             required
             placeholder="spicehouse"
             value={slug}
+            aria-invalid={!slugValid || undefined}
+            aria-describedby={!slugValid ? "slug-rule" : undefined}
             onChange={(e) => setSlug(e.target.value)}
           />
           {!slugValid && (
-            <span className="mt-1 block text-xs text-brick">
+            <span id="slug-rule" className="mt-2 block text-caption text-danger">
               Lowercase letters, numbers and hyphens; must start with a letter or number.
             </span>
           )}
         </label>
         <label className="block">
-          <span className="text-xs text-muted">Tax rate %</span>
+          <span className="label">Tax rate %</span>
           <input
-            className="field tnum mt-1"
+            className="field tnum mt-[7px]"
             inputMode="decimal"
             value={taxPct}
             onChange={(e) => setTaxPct(e.target.value)}
@@ -81,17 +86,15 @@ export function CreateRestaurantForm({
         </label>
       </div>
 
-      <div className="mt-4 flex items-center gap-3">
-        <button
-          className="btn-primary px-3 py-1.5 text-sm"
-          disabled={busy || !name || !cleanSlug || !slugValid}
-        >
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <button type="submit" className="btn-primary" disabled={busy || !name || !cleanSlug || !slugValid}>
+          {busy && <Spinner />}
           {busy ? "Creating…" : "Create as draft"}
         </button>
-        <button type="button" className="btn-quiet px-3 py-1.5 text-sm" onClick={onCancel}>
+        <button type="button" className="link" onClick={onCancel}>
           Cancel
         </button>
-        <span className="text-xs text-muted">
+        <span className="w-full text-caption text-muted">
           Created restaurants stay in draft until Stripe is connected and you activate them.
         </span>
       </div>
@@ -124,14 +127,14 @@ export function OwnerForm({
 
   return (
     <form
-      className="mb-4 border border-hairline bg-surface p-4"
+      className="editor mb-6 animate-disclose"
       onSubmit={(e) => {
         e.preventDefault();
         onCreate(clean, fullName.trim());
       }}
     >
-      <h3 className="text-sm font-medium">Owner login for {restaurant.name}</h3>
-      <p className="mt-1 text-sm text-muted">
+      <h3 className="text-lg font-semibold">Owner login for {restaurant.name}</h3>
+      <p className="mt-2 max-w-prose text-caption text-muted">
         Makes this person the restaurant&apos;s owner (ADMIN). A new address gets a
         temporary password they replace at first sign-in. Someone who already runs
         another Zenoeats restaurant keeps their own password: they&apos;re emailed an
@@ -139,22 +142,23 @@ export function OwnerForm({
         owner who has forgotten theirs.
       </p>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className="mt-5 grid grid-cols-1 gap-[18px] sm:grid-cols-2">
         <label className="block">
-          <span className="text-xs text-muted">Owner email</span>
+          <span className="label">Owner email</span>
           <input
-            className="field mt-1"
+            className="field mt-[7px]"
             type="email"
             required
             autoFocus
+            autoComplete="off"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
         </label>
         <label className="block">
-          <span className="text-xs text-muted">Full name (optional)</span>
+          <span className="label">Full name (optional)</span>
           <input
-            className="field mt-1"
+            className="field mt-[7px]"
             value={fullName}
             maxLength={160}
             onChange={(e) => setFullName(e.target.value)}
@@ -162,20 +166,21 @@ export function OwnerForm({
         </label>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button className="btn-primary px-3 py-1.5 text-sm" disabled={busy || !clean}>
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <button type="submit" className="btn-primary" disabled={busy || !clean}>
+          {busy && <Spinner />}
           {busy ? "Working…" : "Create login"}
         </button>
         {/* type="button" so it does not submit the create form. */}
         <button
           type="button"
-          className="btn-quiet px-3 py-1.5 text-sm"
+          className="btn-quiet"
           disabled={busy || !clean}
           onClick={() => onReset(clean)}
         >
           Reset password
         </button>
-        <button type="button" className="btn-quiet px-3 py-1.5 text-sm" onClick={onCancel}>
+        <button type="button" className="link" onClick={onCancel}>
           Cancel
         </button>
       </div>
@@ -201,43 +206,44 @@ export function IssuedCredentialPanel({
   if (password === null) {
     // An existing login, invited rather than issued anything.
     return (
-      <div className="mb-4 border border-hairline bg-surface p-4">
-        <h3 className="text-sm font-medium">Owner invited</h3>
-        <p className="mt-1 text-sm text-muted">
+      <OneTimeSecret
+        title="Owner invited"
+        footer={
+          <button type="button" className="btn-quiet" onClick={onDismiss}>
+            Done
+          </button>
+        }
+      >
+        <p>
           {email} already has a Zenoeats staff login, so no password was issued and theirs
           is unchanged. They&apos;ve been emailed an invitation to own {restaurant.name}: they
           sign in to its portal with their existing password and accept it.
         </p>
-        <button className="btn-quiet mt-4 px-3 py-1.5 text-sm" onClick={onDismiss}>
-          Done
-        </button>
-      </div>
+      </OneTimeSecret>
     );
   }
 
   return (
-    <div className="mb-4 border border-hairline bg-surface p-4">
-      <h3 className="text-sm font-medium">
-        Temporary password issued{status === "INVITED" ? " (invitation still to accept)" : ""}
-      </h3>
-      <p className="mt-1 text-sm text-muted">
+    <OneTimeSecret
+      title={`Temporary password issued${status === "INVITED" ? " (invitation still to accept)" : ""}`}
+      secret={password}
+      footer={
+        <button type="button" className="btn-quiet" onClick={onDismiss}>
+          I have saved it
+        </button>
+      }
+    >
+      <p>
         Give these to the owner now. The password is not stored and cannot be shown
         again — only reissued. They must replace it at first sign-in before the
         portal will do anything else.
       </p>
-      <dl className="mt-3 grid gap-1 text-sm">
+      <dl className="mt-3 grid gap-1">
         <div className="flex gap-2">
           <dt className="w-20 text-muted">Email</dt>
-          <dd>{email}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="w-20 text-muted">Password</dt>
-          <dd className="tnum font-medium tracking-wide">{password}</dd>
+          <dd className="[overflow-wrap:anywhere]">{email}</dd>
         </div>
       </dl>
-      <button className="btn-quiet mt-4 px-3 py-1.5 text-sm" onClick={onDismiss}>
-        I have saved it
-      </button>
-    </div>
+    </OneTimeSecret>
   );
 }

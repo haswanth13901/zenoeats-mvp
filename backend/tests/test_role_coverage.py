@@ -43,6 +43,7 @@ EXPECTED = {
     ("GET", "/restaurant/deliveries"): DELIVERY,
     ("POST", "/restaurant/orders/{order_id}/picked-up"): DELIVERY,
     ("POST", "/restaurant/orders/{order_id}/delivered"): DELIVERY,
+    ("POST", "/restaurant/driver/location"): DELIVERY,
     # Managers: the exceptions to the counter's rules.
     ("POST", "/restaurant/orders/{order_id}/assign-driver"): MANAGERS,
     ("POST", "/restaurant/orders/{order_id}/unassign-driver"): MANAGERS,

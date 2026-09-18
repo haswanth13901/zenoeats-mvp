@@ -375,6 +375,8 @@ _PURGE_ORDER = [
     "modifier_options",
     "modifier_groups",
     "meal_items",
+    # Before menu_items: a favourite points at the item it saved.
+    "customer_favourites",
     "menu_items",
     "item_types",
     "meals",

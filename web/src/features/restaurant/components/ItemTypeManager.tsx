@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { PencilIcon } from "@/components/common/icons";
+import { Spinner } from "@/components/common/Feedback";
+import { Icon, PencilIcon } from "@/components/common/icons";
 import { errorMessage } from "@/services/apiClient";
 import { childrenOf, topLevel } from "../itemTypes";
 import {
@@ -103,16 +104,16 @@ export function ItemTypeManager({
   }
 
   return (
-    <div className="mb-6 border border-hairline bg-surface px-4 py-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-        <span className="mr-1 flex items-center gap-1 text-xs text-muted">
+    <section className="mb-8">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
           Item types
           {types.length > 0 && (
             <button
               type="button"
               aria-label="Edit item types"
               title="Rename, nest or delete item types"
-              className="hover:text-ink"
+              className="link min-h-[32px] px-1 text-base no-underline"
               onClick={() => {
                 onError(null);
                 setAdding(false);
@@ -122,10 +123,26 @@ export function ItemTypeManager({
               <PencilIcon />
             </button>
           )}
-        </span>
+        </h2>
+        <button
+          type="button"
+          className="link"
+          onClick={() => {
+            if (adding) {
+              close();
+              return;
+            }
+            onError(null);
+            setAdding(true);
+          }}
+        >
+          {adding ? "cancel" : "add a type"}
+        </button>
+      </div>
 
+      <div className="flex flex-wrap gap-2">
         <Chip on={filter === null} onClick={() => onFilter(null)}>
-          All <span className="opacity-60">{total}</span>
+          All <span className="tnum opacity-60">{total}</span>
         </Chip>
 
         {types.map((type) => {
@@ -141,93 +158,85 @@ export function ItemTypeManager({
               nested={!!type.parent_id}
               onClick={() => onFilter(filter === type.id ? null : type.id)}
             >
-              {type.name} <span className="opacity-60">{shown}</span>
+              {type.name} <span className="tnum opacity-60">{shown}</span>
             </Chip>
           );
         })}
-
-        <button
-          className="text-xs text-muted underline"
-          onClick={() => {
-            if (adding) {
-              close();
-              return;
-            }
-            onError(null);
-            setAdding(true);
-          }}
-        >
-          {adding ? "cancel" : "add a type"}
-        </button>
       </div>
 
       {adding && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <input
-            className="field w-48 text-sm"
-            placeholder="Tiffins, Thalis, Desserts…"
-            value={name}
-            autoFocus
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void add();
-              }
-            }}
-          />
-          {/* Offered only once there is something to nest under, so a
-              restaurant setting up its first types is not asked a question
-              that has one answer. */}
-          {headings.length > 0 && (
-            <select
-              className="field w-48 text-sm"
-              aria-label="Where the new type goes"
-              value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
+        <form
+          className="mt-6 flex animate-disclose flex-col gap-[17px]"
+          onSubmit={(e) => {
+            // Enter adds, and the row stays open for the next one.
+            e.preventDefault();
+            void add();
+          }}
+        >
+          <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2">
+            <label className="block">
+              <span className="label">Type name</span>
+              <input
+                className="field mt-[7px]"
+                placeholder="Tiffins, Thalis, Desserts…"
+                value={name}
+                autoFocus
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            {/* Offered only once there is something to nest under, so a
+                restaurant setting up its first types is not asked a question
+                that has one answer. */}
+            {headings.length > 0 && (
+              <label className="block">
+                <span className="label">Where it goes</span>
+                <select
+                  className="field mt-[7px]"
+                  value={parentId}
+                  onChange={(e) => setParentId(e.target.value)}
+                >
+                  <option value="">as a heading of its own</option>
+                  {headings.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      inside {h.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="submit" className="btn-primary" disabled={creating}>
+              {creating && <Spinner />}
+              {creating ? "Adding…" : "Add type"}
+            </button>
+            {/* The way out. Add type keeps the row open so a restaurant can
+                file its whole vocabulary in one pass; this is what ends that
+                pass, and it saves a name still sitting in the box first. */}
+            <button
+              type="button"
+              className="btn-quiet"
+              disabled={creating}
+              onClick={() => void done()}
             >
-              <option value="">as a heading of its own</option>
-              {headings.map((h) => (
-                <option key={h.id} value={h.id}>
-                  inside {h.name}
-                </option>
-              ))}
-            </select>
+              Done
+            </button>
+          </div>
+          {added > 0 && (
+            <p className="text-caption text-muted" aria-live="polite">
+              {added} {added === 1 ? "type" : "types"} added and saved. Add another,
+              or choose Done to close this row.
+            </p>
           )}
-          <button
-            className="btn-primary px-3 py-1.5 text-sm"
-            disabled={creating}
-            onClick={() => void add()}
-          >
-            {creating ? "Adding…" : "Add type"}
-          </button>
-          {/* The way out. Add type keeps the row open so a restaurant can
-              file its whole vocabulary in one pass; this is what ends that
-              pass, and it saves a name still sitting in the box first. */}
-          <button
-            type="button"
-            className="px-3 py-1.5 text-sm text-muted underline"
-            disabled={creating}
-            onClick={() => void done()}
-          >
-            Done
-          </button>
-        </div>
+        </form>
       )}
-
-      {adding && added > 0 && (
-        <p className="mt-2 text-xs text-muted">
-          {added} {added === 1 ? "type" : "types"} added and saved. Add another,
-          or choose Done to close this row.
-        </p>
-      )}
-    </div>
+    </section>
   );
 }
 
 /** A type, its count, and whether the list below is showing only it.
  *
- *  A subcategory is indented and quieter than the heading it follows, so the
+ *  A subcategory is indented, with a dashed edge and a branch marker, so the
  *  strip reads as one list at two levels rather than as a row of equals. */
 function Chip({
   on,
@@ -245,15 +254,9 @@ function Chip({
       type="button"
       aria-pressed={on}
       onClick={onClick}
-      className={`rounded border px-2.5 py-1 text-xs ${nested ? "ml-1" : ""} ${
-        on
-          ? "border-ink bg-ink text-white"
-          : nested
-            ? "border-dashed border-hairline bg-surface text-muted"
-            : "border-hairline bg-surface"
-      }`}
+      className={`chip ${nested ? "chip-nested" : ""}`}
     >
-      {nested && <span className="mr-1 opacity-50">└</span>}
+      {nested && <Icon name="branch" className="h-3.5 w-3.5 opacity-60" />}
       {children}
     </button>
   );
@@ -344,92 +347,101 @@ function TypesEditor({
   }
 
   return (
-    <div className="mb-6 border border-ink bg-surface px-4 py-3">
-      <div className="flex flex-wrap items-start gap-x-2 gap-y-2">
-        <span className="mr-1 mt-1.5 text-xs text-muted">Item types</span>
+    <section className="editor mb-8 animate-disclose">
+      <h2 className="text-lg font-semibold">Edit item types</h2>
 
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {types.map((type) => {
           const going = !!removed[type.id];
           const kids = childrenOf(types, type.id);
           return (
-            <span
+            <div
               key={type.id}
-              className="flex flex-col gap-1 rounded border border-hairline px-2 py-1"
+              className={`flex flex-col gap-3 rounded-button border border-hairline p-4 transition-colors duration-stage ${
+                going ? "bg-[#FCF2F2]" : ""
+              }`}
             >
-              <span className="flex items-center gap-1.5">
-                {going ? (
-                  <span className="text-xs text-muted line-through">{type.name}</span>
-                ) : (
+              {going ? (
+                <p className="min-h-[46px] py-3 text-muted line-through">{type.name}</p>
+              ) : (
+                <label className="block">
+                  <span className="label">Name</span>
                   <input
-                    className="field w-28 text-xs"
+                    className="field mt-[7px]"
                     value={names[type.id] ?? ""}
                     disabled={saving}
                     aria-label={`${type.name} name`}
-                    onChange={(e) =>
-                      setNames((n) => ({ ...n, [type.id]: e.target.value }))
-                    }
+                    onChange={(e) => setNames((n) => ({ ...n, [type.id]: e.target.value }))}
                   />
-                )}
-                {/* Direct only. It is the number the deletion rule reads, so
-                    a heading shows what is filed on the heading itself. */}
-                <span className="text-[11px] text-muted">{type.items}</span>
-                <button
-                  className={`text-[11px] underline ${going ? "" : "text-brick"}`}
-                  disabled={saving}
-                  onClick={() =>
-                    setRemoved((r) => {
-                      const next = { ...r };
-                      if (next[type.id]) delete next[type.id];
-                      else next[type.id] = true;
-                      return next;
-                    })
-                  }
-                >
-                  {going ? "keep it" : "delete"}
-                </button>
-              </span>
+                </label>
+              )}
+              {/* Direct only. It is the number the deletion rule reads, so
+                  a heading shows what is filed on the heading itself. */}
+              <p className="text-caption text-muted">
+                {type.items} direct {type.items === 1 ? "item" : "items"}
+              </p>
 
               {!going && (
-                <select
-                  className="field w-32 text-[11px]"
-                  aria-label={`Where ${type.name} sits`}
-                  value={parents[type.id] ?? ""}
-                  // A heading with subcategories of its own cannot move
-                  // under a third: a menu goes two levels deep. Moving the
-                  // subcategories out first is what opens this back up.
-                  disabled={saving || kids.length > 0}
-                  title={
-                    kids.length
-                      ? `${type.name} has subcategories, so it stays a heading.`
-                      : undefined
-                  }
-                  onChange={(e) =>
-                    setParents((p) => ({ ...p, [type.id]: e.target.value }))
-                  }
-                >
-                  <option value="">a heading</option>
-                  {headings
-                    .filter((h) => h.id !== type.id)
-                    .map((h) => (
-                      <option key={h.id} value={h.id}>
-                        inside {h.name}
-                      </option>
-                    ))}
-                </select>
+                <label className="block">
+                  <span className="label">Placement</span>
+                  <select
+                    className="field mt-[7px]"
+                    aria-label={`Where ${type.name} sits`}
+                    value={parents[type.id] ?? ""}
+                    // A heading with subcategories of its own cannot move
+                    // under a third: a menu goes two levels deep. Moving the
+                    // subcategories out first is what opens this back up.
+                    disabled={saving || kids.length > 0}
+                    title={
+                      kids.length ? `${type.name} has subcategories, so it stays a heading.` : undefined
+                    }
+                    onChange={(e) => setParents((p) => ({ ...p, [type.id]: e.target.value }))}
+                  >
+                    <option value="">a heading</option>
+                    {headings
+                      .filter((h) => h.id !== type.id)
+                      .map((h) => (
+                        <option key={h.id} value={h.id}>
+                          inside {h.name}
+                        </option>
+                      ))}
+                  </select>
+                  {kids.length > 0 && (
+                    <span className="field-hint block">
+                      {type.name} has subcategories, so it stays a heading.
+                    </span>
+                  )}
+                </label>
               )}
-            </span>
+
+              <button
+                type="button"
+                className={`${going ? "link" : "link-danger"} self-start`}
+                disabled={saving}
+                onClick={() =>
+                  setRemoved((r) => {
+                    const next = { ...r };
+                    if (next[type.id]) delete next[type.id];
+                    else next[type.id] = true;
+                    return next;
+                  })
+                }
+              >
+                {going ? "keep it" : "delete"}
+              </button>
+            </div>
           );
         })}
+      </div>
 
-        <button
-          className="btn-primary mt-0.5 px-3 py-1.5 text-sm"
-          disabled={saving}
-          onClick={() => void save()}
-        >
+      <footer className="mt-6 flex flex-wrap items-center gap-3.5 border-t border-hairline pt-[18px]">
+        <button type="button" className="btn-primary" disabled={saving} onClick={() => void save()}>
+          {saving && <Spinner />}
           {saving ? "Saving…" : "Save types"}
         </button>
         <button
-          className="mt-2 text-xs text-muted underline"
+          type="button"
+          className="link"
           disabled={saving}
           onClick={() => {
             onError(null);
@@ -438,22 +450,14 @@ function TypesEditor({
         >
           cancel
         </button>
-      </div>
-
-      <p className="mt-2 text-xs text-muted">
-        {doomed.length ? (
-          <span className="text-brick">
-            Saving will delete {doomed.length}{" "}
-            {doomed.length === 1 ? "type" : "types"}. A type still on items, or
-            a heading with subcategories under it, is refused, and the message
-            says what is in the way.
-          </span>
-        ) : (
-          "Renaming a type changes its heading everywhere at once. No item moves. " +
-          "A subcategory is a subheading on the storefront only: combos and " +
-          "modifier groups read the heading above it."
-        )}
-      </p>
-    </div>
+        <p className={`w-full text-caption ${doomed.length ? "text-danger" : "text-muted"}`}>
+          {doomed.length
+            ? `Saving will delete ${doomed.length} ${doomed.length === 1 ? "type" : "types"}. A type still on items, or a heading with subcategories under it, is refused, and the message says what is in the way.`
+            : "Renaming a type changes its heading everywhere at once. No item moves. " +
+              "A subcategory is a subheading on the storefront only: combos and " +
+              "modifier groups read the heading above it."}
+        </p>
+      </footer>
+    </section>
   );
 }

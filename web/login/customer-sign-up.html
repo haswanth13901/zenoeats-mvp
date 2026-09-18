@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-surface="customer">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,104 +11,114 @@
     <script src="/config.js"></script>
   </head>
   <body>
-    <main class="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-5 py-10">
-      <h1 class="font-display text-3xl">Create an account</h1>
+    <main class="auth">
+      <aside class="auth-art" aria-hidden="true">
+        <div class="auth-brand"><span class="brand-mark" data-wordmark-mark>Z</span><span data-wordmark-name>Zenoeats</span></div>
+        <div>
+          <div class="cloche ml-10 mt-10 scale-150"><span class="cloche-plate"></span><span class="cloche-dome"></span><span class="cloche-knob"></span></div>
+          <p class="auth-art-caption">Good food.<br />A little closer.</p>
+        </div>
+        <p class="auth-art-foot text-caption">From their kitchen to your hands.</p>
+      </aside>
 
-      <p id="error" class="mt-6 border-l-2 border-brick bg-brick/5 px-3 py-2 text-sm text-brick" hidden></p>
+      <section class="auth-form">
+        <div class="auth-brand"><span class="brand-mark" aria-hidden="true" data-wordmark-mark>Z</span><span data-wordmark-name>Zenoeats</span></div>
+        <h1>Create an account</h1>
 
-      <section id="form-section">
-        <p class="mt-2 text-sm text-muted">
-          We&apos;ll email you a 6-digit code to confirm the address.
-        </p>
+        <p id="error" class="note-error mb-5" role="alert" hidden></p>
 
-        <!-- One button per social sign-in switched on in Clerk (Google, Apple,
-             Facebook), rendered by customer-shared.ts. Hidden when there are none. -->
-        <section id="social-section" class="mt-8" hidden>
-          <div id="social-buttons" class="space-y-3"></div>
-          <div class="my-6 flex items-center gap-3 text-xs text-muted">
-            <span class="h-px flex-1 bg-hairline"></span>or<span class="h-px flex-1 bg-hairline"></span>
-          </div>
+        <section id="form-section">
+          <p class="auth-intro">
+            We&apos;ll email you a 6-digit code to confirm the address.
+          </p>
+
+          <!-- One button per social sign-in switched on in Clerk (Google, Apple,
+               Facebook), rendered by customer-shared.ts. Hidden when there are none. -->
+          <section id="social-section" class="mb-[17px]" hidden>
+            <div id="social-buttons" class="flex flex-col gap-[9px]"></div>
+            <div class="divider mt-[17px]">or</div>
+          </section>
+
+          <form id="sign-up-form" class="auth-stack" novalidate>
+            <label id="name-field" class="block" hidden>
+              <span class="label">Name <span class="font-normal text-muted">(optional)</span></span>
+              <input id="full-name" class="field mt-[7px]" type="text" autocomplete="name" maxlength="160" />
+            </label>
+
+            <label class="block">
+              <span class="label">Email</span>
+              <input id="email" class="field mt-[7px]" type="email" autocomplete="email" required />
+            </label>
+
+            <label class="block">
+              <span class="label">Password</span>
+              <input id="password" class="field mt-[7px]" type="password" autocomplete="new-password" required aria-describedby="length-hint" />
+              <span id="length-hint" class="mt-2 block text-caption text-muted"></span>
+            </label>
+
+            <label class="block">
+              <span class="label">Confirm password</span>
+              <input id="confirm" class="field mt-[7px]" type="password" autocomplete="new-password" required aria-describedby="match-hint" />
+              <span id="match-hint" class="mt-2 block text-caption text-danger" hidden>These do not match.</span>
+            </label>
+
+            <!-- Clerk's bot protection renders its challenge here when it decides
+                 one is needed. Custom sign-up flows must provide this element. -->
+            <div id="clerk-captcha"></div>
+
+            <button id="submit" class="btn-primary w-full" type="submit" disabled>Create account</button>
+          </form>
+
+          <p class="auth-foot">
+            Already have an account?
+            <a id="sign-in" class="text-ink underline underline-offset-[3px]" href="/account/sign-in">Sign in</a>
+          </p>
         </section>
 
-        <form id="sign-up-form" class="mt-6 space-y-4" novalidate>
-          <label id="name-field" class="block" hidden>
-            <span class="text-sm font-medium">Name <span class="font-normal text-muted">(optional)</span></span>
-            <input id="full-name" class="field mt-2" type="text" autocomplete="name" maxlength="160" />
-          </label>
+        <!-- After Google, Apple or Facebook, when Clerk still needs something the
+             provider did not supply: an email (some Facebook accounts have none),
+             a name, or agreement to the terms. -->
+        <section id="continue-section" hidden>
+          <p class="auth-intro">
+            Almost done. We need a little more to finish your account.
+          </p>
+          <form id="continue-form" class="auth-stack" novalidate>
+            <label id="continue-email-field" class="block" hidden>
+              <span class="label">Email</span>
+              <input id="continue-email" class="field mt-[7px]" type="email" autocomplete="email" />
+              <span class="mt-2 block text-caption text-muted">Your order updates and receipts go here.</span>
+            </label>
 
-          <label class="block">
-            <span class="text-sm font-medium">Email</span>
-            <input id="email" class="field mt-2" type="email" autocomplete="email" required />
-          </label>
+            <label id="continue-name-field" class="block" hidden>
+              <span class="label">Name</span>
+              <input id="continue-name" class="field mt-[7px]" type="text" autocomplete="name" maxlength="160" />
+            </label>
 
-          <label class="block">
-            <span class="text-sm font-medium">Password</span>
-            <input id="password" class="field mt-2" type="password" autocomplete="new-password" required />
-            <span id="length-hint" class="mt-1 block text-xs text-muted"></span>
-          </label>
+            <label id="continue-legal-field" class="flex min-h-[40px] items-start gap-2.5 text-sm" hidden>
+              <input id="continue-legal" class="mt-0.5 h-5 w-5 shrink-0" type="checkbox" />
+              <span>I agree to the Terms of Service and Privacy Policy.</span>
+            </label>
 
-          <label class="block">
-            <span class="text-sm font-medium">Confirm password</span>
-            <input id="confirm" class="field mt-2" type="password" autocomplete="new-password" required />
-            <span id="match-hint" class="mt-1 block text-xs text-brick" hidden>These do not match.</span>
-          </label>
+            <button id="continue-submit" class="btn-primary w-full" type="submit">Continue</button>
+          </form>
+        </section>
 
-          <!-- Clerk's bot protection renders its challenge here when it decides
-               one is needed. Custom sign-up flows must provide this element. -->
-          <div id="clerk-captcha"></div>
-
-          <button id="submit" class="btn-primary w-full" type="submit" disabled>Create account</button>
-        </form>
-
-        <p class="mt-6 text-sm text-muted">
-          Already have an account?
-          <a id="sign-in" class="underline" href="/account/sign-in">Sign in</a>
-        </p>
-      </section>
-
-      <!-- After Google, Apple or Facebook, when Clerk still needs something the
-           provider did not supply: an email (some Facebook accounts have none),
-           a name, or agreement to the terms. -->
-      <section id="continue-section" hidden>
-        <p class="mt-2 text-sm text-muted">
-          Almost done. We need a little more to finish your account.
-        </p>
-        <form id="continue-form" class="mt-6 space-y-4" novalidate>
-          <label id="continue-email-field" class="block" hidden>
-            <span class="text-sm font-medium">Email</span>
-            <input id="continue-email" class="field mt-2" type="email" autocomplete="email" />
-            <span class="mt-1 block text-xs text-muted">Your order updates and receipts go here.</span>
-          </label>
-
-          <label id="continue-name-field" class="block" hidden>
-            <span class="text-sm font-medium">Name</span>
-            <input id="continue-name" class="field mt-2" type="text" autocomplete="name" maxlength="160" />
-          </label>
-
-          <label id="continue-legal-field" class="flex items-start gap-3 text-sm" hidden>
-            <input id="continue-legal" class="mt-1" type="checkbox" />
-            <span>I agree to the Terms of Service and Privacy Policy.</span>
-          </label>
-
-          <button id="continue-submit" class="btn-primary w-full" type="submit">Continue</button>
-        </form>
-      </section>
-
-      <section id="code-section" hidden>
-        <p class="mt-4 text-[15px]">
-          We sent a 6-digit code to <span id="sent-to" class="font-medium"></span>.
-        </p>
-        <form id="code-form" class="mt-6 space-y-4" novalidate>
-          <label class="block">
-            <span class="text-sm font-medium">Verification code</span>
-            <input id="code" class="field mt-2 tracking-[0.3em]" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required />
-          </label>
-          <button id="code-submit" class="btn-primary w-full" type="submit">Create account</button>
-        </form>
-        <p class="mt-6 text-sm text-muted">
-          Nothing arrived? Check spam, or
-          <button id="resend" type="button" class="underline">send a new code</button>.
-        </p>
+        <section id="code-section" hidden>
+          <p class="auth-intro">
+            We sent a 6-digit code to <strong id="sent-to" class="font-semibold text-ink"></strong>.
+          </p>
+          <form id="code-form" class="auth-stack" novalidate>
+            <label class="block">
+              <span class="label">Verification code</span>
+              <input id="code" class="field code-input mt-[7px]" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required />
+            </label>
+            <button id="code-submit" class="btn-primary w-full" type="submit">Create account</button>
+          </form>
+          <p class="auth-foot">
+            Nothing arrived? Check spam, or
+            <button id="resend" type="button" class="text-ink underline underline-offset-[3px] disabled:cursor-not-allowed disabled:text-muted">send a new code</button>.
+          </p>
+        </section>
       </section>
     </main>
 

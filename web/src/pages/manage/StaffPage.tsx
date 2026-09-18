@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Empty, ErrorNote, Panel } from "@/components/common/Feedback";
+import { Empty, ErrorNote, Loading, Panel, Spinner } from "@/components/common/Feedback";
+import { OneTimeSecret } from "@/components/common/Secret";
+import { PageTitle } from "@/components/layout/Shell";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import {
   useChangeStaffRoleMutation,
@@ -98,37 +100,80 @@ export function StaffPage() {
     (m) => m.role_code === "ADMIN" && m.status === "ACTIVE",
   ).length;
 
+  const signIn = `${window.location.origin}/manage/login`;
+
   return (
     <ManageShell>
+      <PageTitle title="Your team" subtitle="The right access for every role." />
+
       <ErrorNote message={error ?? (staff.error ? errorMessage(staff.error) : null)} />
 
       <Panel title="Invite someone">
-        <div className="flex flex-wrap gap-2">
-          <input
-            className="field flex-1"
-            type="email"
-            placeholder="name@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <select
-            className="field w-40"
-            value={role}
-            onChange={(e) => setRole(e.target.value as Role)}
+        <form
+          className="flex flex-col gap-[17px]"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy && email.includes("@")) void invite();
+          }}
+        >
+          <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2">
+            <label className="block">
+              <span className="label">Email</span>
+              <input
+                className="field mt-[7px]"
+                type="email"
+                autoComplete="off"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="label">Role</span>
+              <select
+                className="field mt-[7px]"
+                value={role}
+                aria-describedby="role-help"
+                onChange={(e) => setRole(e.target.value as Role)}
+              >
+                {ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {r.toLowerCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p id="role-help" className="-mt-2 text-caption text-muted" aria-live="polite">
+            {ROLE_HELP[role]}
+          </p>
+          <div>
+            <button type="submit" className="btn-primary" disabled={busy || !email.includes("@")}>
+              {busy && <Spinner />}
+              {busy ? "Inviting…" : "Invite"}
+            </button>
+          </div>
+        </form>
+
+        {issued && (
+          <OneTimeSecret
+            title={
+              <span>
+                Invited <span className="[overflow-wrap:anywhere]">{issued.email}</span>.
+              </span>
+            }
+            secret={issued.temporary_password}
+            link={signIn}
           >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r.toLowerCase()}
-              </option>
-            ))}
-          </select>
-          <button className="btn-primary" disabled={busy || !email.includes("@")} onClick={invite}>
-            {busy ? "Inviting…" : "Invite"}
-          </button>
-        </div>
-        <p className="mt-2 text-xs text-muted">{ROLE_HELP[role]}</p>
-        {issued && <IssuedInvite invite={issued} />}
-        <p className="mt-3 border-l-2 border-hairline pl-3 text-xs text-muted">
+            <p>
+              {issued.temporary_password
+                ? "We've emailed them the sign-in link. Give them this temporary password yourself; it is never emailed, is shown once, and cannot be looked up again."
+                : "We've emailed them the sign-in link. They already have a Zenoeats staff login and sign in with the password they have. If they've lost it and work only here, you can reset it from the team list; otherwise Zenoeats support can."}
+            </p>
+          </OneTimeSecret>
+        )}
+
+        <p className="mt-6 max-w-[78ch] text-caption text-muted">
           An invitation grants nothing on its own. We email the person a link to this
           restaurant&apos;s sign-in page, where they accept it before the role becomes
           active. Someone new also needs the temporary password shown here, which is never
@@ -138,22 +183,47 @@ export function StaffPage() {
       </Panel>
 
       <Panel title="Team">
-        {reset && <IssuedReset reset={reset} onDone={() => setReset(null)} />}
+        {reset && (
+          <OneTimeSecret
+            title={
+              <span>
+                New temporary password for{" "}
+                <span className="[overflow-wrap:anywhere]">{reset.email}</span>.
+              </span>
+            }
+            secret={reset.temporary_password}
+            link={signIn}
+            footer={
+              <button type="button" className="link" onClick={() => setReset(null)}>
+                done
+              </button>
+            }
+          >
+            <p>
+              Give it to them yourself; it is shown once and cannot be looked up again. They choose
+              their own the next time they sign in.
+            </p>
+          </OneTimeSecret>
+        )}
         {staff.isLoading ? (
-          <Empty>Loading…</Empty>
+          <Loading />
         ) : !staff.data?.length ? (
           <Empty>Just you so far.</Empty>
         ) : (
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-y border-hairline text-left text-xs text-muted">
-                <th className="py-2 font-medium">Person</th>
-                <th className="font-medium">Role</th>
-                <th className="font-medium">Status</th>
-                <th className="text-right font-medium"></th>
+          // A table on a tablet and up; labelled cards on a phone, where four
+          // columns of names, selects and links would not fit.
+          <table className="data-table block md:table">
+            <thead className="hidden md:table-header-group">
+              <tr>
+                <th>Person</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-hairline">
+            <tbody className="block md:table-row-group">
               {staff.data.map((m) => {
                 const invited = m.status !== "ACTIVE";
                 const onlyAdmin = !invited && m.role_code === "ADMIN" && activeAdmins === 1;
@@ -162,36 +232,43 @@ export function StaffPage() {
                 if (confirming?.id === m.id) {
                   const removing = confirming.kind === "remove";
                   return (
-                    <tr key={m.id} className="bg-brick/5">
-                      <td colSpan={4} className="px-3 py-3">
-                        <p className="text-sm">
-                          {!removing
-                            ? `Reset ${name}'s password? Their current password stops working and they are signed out on every device. You'll get a temporary password to pass on.`
-                            : invited
-                              ? `Cancel ${name}'s invitation? The invitation stops working.`
-                              : `Remove ${name} from the team? They lose access to this restaurant straight away.`}
-                        </p>
-                        <div className="mt-2 flex items-center gap-4">
-                          <button
-                            className="btn-primary px-3 py-1.5 text-sm"
-                            disabled={acting}
-                            onClick={() => void confirm(m)}
-                          >
-                            {acting
-                              ? "Working…"
-                              : !removing
-                                ? "Reset password"
-                                : invited
-                                  ? "Cancel invitation"
-                                  : "Remove"}
-                          </button>
-                          <button
-                            className="text-xs underline"
-                            disabled={acting}
-                            onClick={() => setConfirming(null)}
-                          >
-                            keep
-                          </button>
+                    <tr key={m.id} className="block md:table-row">
+                      <td colSpan={4} className="block md:table-cell">
+                        {/* Replaces its own row, never a modal: the person it
+                            is about stays exactly where they were. */}
+                        <div className="inline-confirm">
+                          <p>
+                            {!removing
+                              ? `Reset ${name}'s password? Their current password stops working and they are signed out on every device. You'll get a temporary password to pass on.`
+                              : invited
+                                ? `Cancel ${name}'s invitation? The invitation stops working.`
+                                : `Remove ${name} from the team? They lose access to this restaurant straight away.`}
+                          </p>
+                          <div className="mt-3.5 flex flex-wrap items-center gap-4">
+                            <button
+                              type="button"
+                              className="btn-danger"
+                              disabled={acting}
+                              onClick={() => void confirm(m)}
+                            >
+                              {acting && <Spinner />}
+                              {acting
+                                ? "Working…"
+                                : !removing
+                                  ? "Reset password"
+                                  : invited
+                                    ? "Cancel invitation"
+                                    : "Remove"}
+                            </button>
+                            <button
+                              type="button"
+                              className="link"
+                              disabled={acting}
+                              onClick={() => setConfirming(null)}
+                            >
+                              keep
+                            </button>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -199,12 +276,15 @@ export function StaffPage() {
                 }
 
                 return (
-                  <tr key={m.id}>
-                    <td className="py-3">
-                      {name}
-                      {m.full_name && <div className="text-xs text-muted">{m.email}</div>}
+                  <tr key={m.id} className="block border-b border-hairline py-[18px] md:table-row md:py-0">
+                    <td className="block border-0 py-1 md:table-cell md:border-b md:py-5">
+                      <strong className="font-semibold [overflow-wrap:anywhere]">{name}</strong>
+                      {m.full_name && (
+                        <p className="text-caption text-muted [overflow-wrap:anywhere]">{m.email}</p>
+                      )}
                     </td>
-                    <td>
+                    <td className="block border-0 py-1 md:table-cell md:border-b md:py-5">
+                      <span className="text-caption text-muted md:hidden">Role: </span>
                       {/* Your own role, and the only admin's, are not offered:
                           the API refuses both, since either could leave the
                           restaurant with no admin. */}
@@ -212,7 +292,7 @@ export function StaffPage() {
                         m.role_code.toLowerCase()
                       ) : (
                         <select
-                          className="field w-32 py-1 text-sm"
+                          className="field mt-1 max-w-[200px] md:mt-0 md:w-36"
                           aria-label={`${name}'s role`}
                           value={m.role_code}
                           disabled={savingRole === m.id}
@@ -226,31 +306,36 @@ export function StaffPage() {
                         </select>
                       )}
                     </td>
-                    <td>
+                    <td className="block border-0 py-1 md:table-cell md:border-b md:py-5">
+                      <span className="text-caption text-muted md:hidden">Status: </span>
                       {invited ? (
-                        <span className="text-xs text-brick">waiting to accept</span>
+                        <span className="pill-red">waiting to accept</span>
                       ) : (
-                        <span className="text-xs">active</span>
+                        <span className="pill-green">active</span>
                       )}
                     </td>
-                    <td className="text-right">
+                    <td className="block border-0 py-1 md:table-cell md:border-b md:py-5">
                       {m.is_you ? (
-                        <span className="text-xs text-muted">you</span>
+                        <span className="text-caption text-muted">you</span>
                       ) : (
-                        <span className="inline-flex gap-3">
+                        <span className="flex flex-wrap gap-x-3 md:justify-end">
                           {/* An admin's password goes through Zenoeats support,
                               so one admin cannot sign in as another. */}
                           {m.role_code !== "ADMIN" && (
-                            <RowAction onClick={() => openConfirm(m.id, "reset")}>
+                            <button type="button" className="link min-h-[30px] text-caption" onClick={() => openConfirm(m.id, "reset")}>
                               reset password
-                            </RowAction>
+                            </button>
                           )}
                           {onlyAdmin ? (
-                            <span className="text-xs text-muted">only admin</span>
+                            <span className="self-center text-caption text-muted">only admin</span>
                           ) : (
-                            <RowAction onClick={() => openConfirm(m.id, "remove")}>
+                            <button
+                              type="button"
+                              className="link-danger min-h-[30px] text-caption"
+                              onClick={() => openConfirm(m.id, "remove")}
+                            >
                               {invited ? "cancel invitation" : "remove"}
-                            </RowAction>
+                            </button>
                           )}
                         </span>
                       )}
@@ -269,63 +354,4 @@ export function StaffPage() {
     setError(null);
     setConfirming({ id, kind });
   }
-}
-
-function RowAction({ onClick, children }: { onClick: () => void; children: string }) {
-  return (
-    <button className="text-xs text-muted underline" onClick={onClick}>
-      {children}
-    </button>
-  );
-}
-
-function IssuedInvite({ invite }: { invite: StaffInvite }) {
-  const signIn = `${window.location.origin}/manage/login`;
-  return (
-    <div className="mt-4 rounded-md border border-brick/30 bg-brick/5 px-4 py-3 text-sm">
-      <p>
-        Invited <span className="font-medium">{invite.email}</span>.
-      </p>
-      {invite.temporary_password ? (
-        <>
-          <p className="mt-2 text-muted">
-            We&apos;ve emailed them the sign-in link. Give them this temporary password
-            yourself; it is never emailed, is shown once, and cannot be looked up again.
-          </p>
-          <p className="tnum mt-2 select-all font-display text-2xl tracking-wider">
-            {invite.temporary_password}
-          </p>
-        </>
-      ) : (
-        <p className="mt-2 text-muted">
-          We&apos;ve emailed them the sign-in link. They already have a Zenoeats staff login
-          and sign in with the password they have. If they&apos;ve lost it and work only
-          here, you can reset it from the team list; otherwise Zenoeats support can.
-        </p>
-      )}
-      <p className="mt-2 select-all text-xs text-muted">{signIn}</p>
-    </div>
-  );
-}
-
-function IssuedReset({ reset, onDone }: { reset: StaffPasswordReset; onDone: () => void }) {
-  const signIn = `${window.location.origin}/manage/login`;
-  return (
-    <div className="mb-4 rounded-md border border-brick/30 bg-brick/5 px-4 py-3 text-sm">
-      <p>
-        New temporary password for <span className="font-medium">{reset.email}</span>. Give it
-        to them yourself; it is shown once and cannot be looked up again. They choose their
-        own the next time they sign in.
-      </p>
-      <p className="tnum mt-2 select-all font-display text-2xl tracking-wider">
-        {reset.temporary_password}
-      </p>
-      <div className="mt-2 flex items-center justify-between gap-4">
-        <p className="select-all text-xs text-muted">{signIn}</p>
-        <button className="text-xs underline" onClick={onDone}>
-          done
-        </button>
-      </div>
-    </div>
-  );
 }

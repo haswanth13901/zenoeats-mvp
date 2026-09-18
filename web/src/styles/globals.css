@@ -2,21 +2,114 @@
 @tailwind components;
 @tailwind utilities;
 
-/* The Next build supplied --font-display and --font-body through next/font.
-   Nothing sets them now, and an undefined var() invalidates the entire
-   font-family declaration -- so every heading and every line of body text
-   silently fell back to the browser's default serif, ignoring the stacks in
-   tailwind.config.ts. Dropping in a webfont later means reassigning these two
-   variables and nothing else. */
+/* Design tokens (design/…/design-tokens.json, revision 06; the customer
+ * overrides are in `customerOverrides` there).
+ *
+ * Colours are bare RGB channels so Tailwind can apply opacity modifiers to
+ * them; tailwind.config.ts wraps each in rgb(). Everything else is a plain
+ * value. This block is the only place a token's value is written down: the
+ * Tailwind theme, the component classes below and the auth pages under
+ * login/ all read these variables.
+ *
+ * The Next build supplied --font-display and --font-body through next/font.
+ * Nothing sets them now, and an undefined var() invalidates the entire
+ * font-family declaration -- so every heading and every line of body text
+ * silently fell back to the browser's default serif, ignoring the stacks in
+ * tailwind.config.ts. Dropping in a webfont later means reassigning these two
+ * variables and nothing else. */
 :root {
+  --ze-paper: 247 244 239; /* #F7F4EF */
+  --ze-surface: 255 255 255; /* #FFFFFF */
+  --ze-ink: 37 38 32; /* #252620 */
+  --ze-muted: 103 105 95; /* #67695F */
+  --ze-line: 221 220 211; /* #DDDCD3 */
+  --ze-field-line: 184 186 174; /* #B8BAAE */
+  --ze-brand: 168 62 42; /* #A83E2A */
+  --ze-brand-hover: 135 48 31; /* #87301F */
+  --ze-brand-soft: 246 233 226; /* #F6E9E2 */
+  --ze-error: 166 28 53; /* #A61C35 */
+  --ze-error-soft: 255 240 242; /* #FFF0F2 */
+  --ze-warning: 128 81 0; /* #805100 */
+  --ze-warning-soft: 255 244 219; /* #FFF4DB */
+  --ze-success: 35 100 71; /* #236447 */
+  --ze-success-soft: 237 246 239; /* #EDF6EF */
+  --ze-focus: 35 90 198; /* #235AC6 */
+
+  --ze-elevation-card: 0 3px 7px #29291f03;
+  --ze-elevation-raised: 0 14px 48px #30291f12;
+  --ze-elevation-dialog: 0 32px 100px #12160b50;
+
+  --ze-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ze-motion-color: 120ms;
+  --ze-motion-tab: 120ms;
+  --ze-motion-disclose: 160ms;
+  --ze-motion-confirm: 160ms;
+  --ze-motion-stage: 120ms;
+  --ze-motion-cart: 180ms;
+  --ze-motion-sheet: 220ms;
+  --ze-motion-pin: 180ms;
+  --ze-motion-ticket: 180ms;
+  --ze-motion-stock: 180ms;
+
   --font-display: Georgia, "Times New Roman", serif;
   --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, sans-serif;
+
+  /* Customer-only accents (revision 06). Declared once here so the storefront
+     classes can name them; nothing on the staff or platform surfaces uses
+     them. */
+  --ze-gold: 241 201 88; /* #F1C958 banner action */
+  --ze-hero: 16 42 29; /* #102A1D banner ground */
+  --ze-accent: 175 119 45; /* #AF772D wordmark and period full stop */
+  --ze-sage: 240 241 230; /* #F0F1E6 meal-period selector */
+  --ze-cream: 255 253 248; /* #FFFDF8 product card */
+
+  color-scheme: light;
+}
+
+/* The customer surface (revision 06): cream page and forest primary in place
+ * of the staff brick. The same variables are overridden rather than a second
+ * set introduced, so every existing `brick`, `paper` and `brickSoft` class on
+ * a customer page changes with no per-class edits, and the staff and platform
+ * portals are untouched. Set on <html> by CustomerSurface in the app, and in
+ * the markup of the customer sign-in pages. */
+[data-surface="customer"] {
+  --ze-paper: 250 248 242; /* #FAF8F2 */
+  --ze-brand: 23 77 57; /* #174D39 */
+  --ze-brand-hover: 16 61 44; /* #103D2C */
+  --ze-brand-soft: 233 240 232; /* #E9F0E8 */
 }
 
 @layer base {
   body {
-    @apply bg-paper text-ink font-sans antialiased;
+    @apply bg-paper font-sans text-body text-ink antialiased;
+  }
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    touch-action: manipulation;
+  }
+  /* The sign-in pages show and hide whole sections with the hidden attribute.
+     Preflight's own rule is zero-specificity, so any display utility on the
+     same element (flex, grid) would quietly win and show what is meant to be
+     hidden. */
+  [hidden] {
+    display: none !important;
+  }
+  /* One focus treatment everywhere: a 3px blue ring set off from the control,
+     so it reads on brick, ink and paper alike. */
+  :focus-visible {
+    outline: 3px solid rgb(var(--ze-focus));
+    outline-offset: 3px;
+  }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: rgb(var(--ze-brand));
+  }
+  ::placeholder {
+    color: #77786f;
   }
   /* Prices line up in a column, so figures must be tabular. */
   .tnum {
@@ -25,27 +118,353 @@
 }
 
 @layer components {
+  /* ---------------------------------------------------------------- buttons */
   .btn {
-    @apply inline-flex items-center justify-center rounded-md px-4 py-2.5
-           text-sm font-medium transition-colors
-           focus-visible:outline focus-visible:outline-2
-           focus-visible:outline-offset-2 focus-visible:outline-brick
-           disabled:opacity-40 disabled:cursor-not-allowed;
+    @apply inline-flex min-h-[46px] items-center justify-center gap-2 rounded-button border
+           border-transparent px-[19px] py-[11px] text-sm font-semibold leading-normal
+           transition-[background-color,border-color,color,box-shadow,transform]
+           duration-color ease-standard
+           active:translate-y-px disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-[.44];
   }
   .btn-primary {
-    @apply btn bg-brick text-white hover:bg-brickDark;
+    @apply btn bg-brick text-white hover:bg-brickDark disabled:hover:bg-brick;
   }
   .btn-quiet {
-    @apply btn border border-hairline bg-surface hover:bg-paper;
+    @apply btn border-hairline bg-surface text-ink hover:bg-[#F0EEE8] disabled:hover:bg-surface;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-white hover:bg-danger/90 disabled:hover:bg-danger;
+  }
+  .btn-dark {
+    @apply btn bg-ink text-white hover:bg-ink/90;
+  }
+  /* Kitchen, stock and delivery targets: tapped on a greasy tablet mid-rush. */
+  .btn-touch {
+    @apply min-h-[56px];
+  }
+  .btn-compact {
+    @apply min-h-[40px] px-3 py-2 text-[13px];
+  }
+  .icon-btn {
+    @apply inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-hairline
+           bg-surface text-ink transition-colors duration-color ease-standard hover:bg-paper
+           disabled:cursor-not-allowed disabled:opacity-[.44];
+  }
+
+  /* Secondary actions: underlined text with a finger-sized hit area. Never an
+     icon alone, and never the only affordance for something destructive. */
+  .link {
+    @apply inline-flex min-h-[40px] items-center text-[13px] text-muted underline underline-offset-[3px]
+           transition-colors duration-color ease-standard hover:text-ink
+           disabled:cursor-not-allowed disabled:opacity-[.44] disabled:hover:text-muted;
+  }
+  .link-danger {
+    @apply link text-danger hover:text-danger;
+  }
+  /* Inline in running text or a dense row, where 40px would push the line. */
+  .link-inline {
+    @apply min-h-0;
+  }
+
+  /* ----------------------------------------------------------------- fields */
+  .label {
+    @apply block text-[13px] font-semibold;
   }
   .field {
-    @apply w-full rounded-md border border-hairline bg-surface px-3 py-2 text-sm
-           focus:border-brick focus:outline-none;
+    @apply w-full min-w-0 rounded-field border border-fieldline bg-surface px-[13px] py-[11px] text-base
+           leading-snug text-ink sm:min-h-[46px] sm:text-[15px] min-h-[48px]
+           disabled:bg-[#F0F0EB] disabled:text-muted
+           aria-[invalid=true]:border-danger;
   }
-  /* A row that scrolls sideways without a scrollbar sitting across it. Used
-     by the portal tab row on a phone, where the bar would cover the tabs it
-     belongs to and there is a finger to swipe with anyway. The active tab is
-     scrolled into view, so nothing is reachable only by knowing it is there. */
+  textarea.field {
+    @apply min-h-[82px] resize-y;
+  }
+  .field-hint {
+    @apply mt-2 text-caption text-muted;
+  }
+
+  /* --------------------------------------------------------------- surfaces */
+  .card {
+    @apply rounded-panel border border-hairline bg-surface p-5 sm:p-6;
+  }
+  /* A block in edit mode: the dark boundary says "you are changing this". */
+  .editor {
+    @apply rounded-ticket border border-ink bg-surface p-5 sm:p-6;
+  }
+  .empty {
+    @apply rounded-ticket border border-dashed border-hairline bg-[#FCFBF8] px-6 py-9 text-center text-sm text-muted;
+  }
+
+  /* ---------------------------------------------------------------- notices */
+  .note {
+    @apply rounded-field border-l-[3px] border-ink bg-[#EFEEE8] px-[18px] py-[15px] text-sm text-ink;
+    overflow-wrap: anywhere;
+  }
+  .note-error {
+    @apply note border-danger bg-dangerSoft text-danger;
+  }
+  .note-warning {
+    @apply note border-warning bg-warningSoft text-warning;
+  }
+  .note-success {
+    @apply note border-success bg-successSoft text-success;
+  }
+  /* A confirmation that replaces the row or card it belongs to. */
+  .inline-confirm {
+    @apply animate-confirm rounded-chip border-l-[3px] border-danger bg-dangerSoft p-5 text-left text-sm;
+  }
+
+  /* ------------------------------------------------------------ pills/chips */
+  .pill {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-status border border-hairline px-[9px] py-1
+           text-[11px] font-semibold leading-none;
+  }
+  .pill-on {
+    @apply pill border-ink bg-ink text-white;
+  }
+  .pill-red {
+    @apply pill border-[#EAC5CC] bg-dangerSoft text-danger;
+  }
+  .pill-green {
+    @apply pill border-[#BFD7C8] bg-successSoft text-success;
+  }
+  .pill-amber {
+    @apply pill border-[#EAD9B7] bg-warningSoft text-warning;
+  }
+  .chip {
+    @apply inline-flex min-h-[40px] items-center gap-[7px] rounded-chip border border-hairline bg-surface px-[13px]
+           py-[9px] text-left text-[13px] transition-colors duration-color ease-standard
+           hover:border-ink/40 aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-white
+           disabled:cursor-not-allowed disabled:opacity-[.44];
+  }
+  .chip-nested {
+    @apply ml-3 border-dashed;
+  }
+
+  .eyebrow {
+    @apply text-eyebrow uppercase;
+  }
+
+  /* ---------------------------------------------------------- one-time secret */
+  .secret {
+    @apply my-5 rounded-[12px] border border-[#CAA47E] border-l-4 border-l-warning bg-[#FBF4E7] p-[18px] text-[13px] leading-relaxed sm:p-[22px];
+  }
+  .secret-value {
+    @apply my-3.5 select-all font-mono text-[21px] leading-snug tracking-[1px] sm:text-[25px];
+    overflow-wrap: anywhere;
+  }
+
+  /* ------------------------------------------------------------------ tables */
+  .data-table {
+    @apply w-full border-collapse text-left text-sm;
+  }
+  .data-table th {
+    @apply whitespace-nowrap border-b border-hairline py-[13px] pr-[14px] text-[11px] font-[550] uppercase tracking-[.06em] text-muted;
+  }
+  .data-table td {
+    @apply border-b border-hairline py-4 pr-[14px] align-top sm:py-5;
+  }
+  .data-table th:last-child,
+  .data-table td:last-child {
+    @apply pr-0;
+  }
+
+  /* --------------------------------------------------------------- stat tiles */
+  .stats {
+    @apply mb-7 grid grid-cols-2 overflow-hidden rounded-ticket border border-hairline bg-surface sm:mb-9;
+  }
+  .stat {
+    @apply min-w-0 border-hairline p-[18px] sm:p-[23px];
+  }
+
+  /* ------------------------------------------------- CSS depth illustration */
+  /* The cloche: three local shapes with light, shadow and perspective. It is
+     decoration (always aria-hidden) beside text that says the same thing. */
+  .cloche {
+    position: relative;
+    width: 112px;
+    height: 112px;
+    perspective: 500px;
+  }
+  .cloche-plate {
+    position: absolute;
+    left: 0;
+    bottom: 16px;
+    width: 104px;
+    height: 34px;
+    border-radius: 50%;
+    background: linear-gradient(160deg, #fdfbf5, #d2c5b1);
+    box-shadow: 3px 10px 13px #7a66481f;
+    transform: rotateX(22deg) rotateZ(-12deg);
+  }
+  .cloche-dome {
+    position: absolute;
+    left: 8px;
+    top: 29px;
+    width: 87px;
+    height: 56px;
+    border-radius: 56px 56px 12px 12px;
+    background: linear-gradient(130deg, #ebc19b, #b56849);
+    border-bottom: 5px solid #9e4b31;
+    box-shadow: inset 5px 4px 10px #faebd599;
+    transform: rotateZ(-9deg);
+    transition: transform var(--ze-motion-pin) var(--ze-ease), background var(--ze-motion-pin) var(--ze-ease);
+  }
+  .cloche-knob {
+    position: absolute;
+    left: 44px;
+    top: 22px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #9f5339;
+  }
+  .cloche-ready .cloche-dome {
+    background: linear-gradient(130deg, #c8debe, #578666);
+    border-color: #2e6349;
+  }
+  .cloche-lifted .cloche-dome {
+    transform: translate(12px, -16px) rotateZ(10deg);
+  }
+
+  /* ------------------------------------------------------------ auth pages */
+  /* Shared by the sign-in HTML entry points outside React (login/*.html) and
+     the invitation screen inside it. A quiet warm panel beside the form from
+     1024px; a white card on paper below that; the bare form on a phone. */
+  .auth {
+    @apply min-h-dvh bg-paper lg:grid lg:grid-cols-2 lg:bg-surface;
+  }
+  .auth-art {
+    @apply relative hidden flex-col justify-between overflow-hidden bg-paper p-[42px] lg:flex xl:p-[60px];
+  }
+  .auth-art-caption {
+    @apply relative z-section mt-[70px] max-w-[260px] font-display text-4xl leading-[1.1] text-[#80644C];
+  }
+  .auth-form {
+    @apply mx-auto w-full max-w-[492px] px-6 py-[34px]
+           sm:my-[50px] sm:max-w-[440px] sm:rounded-panel sm:border sm:border-hairline sm:bg-surface sm:p-8
+           lg:m-auto lg:max-w-[492px] lg:rounded-none lg:border-0 lg:px-6 lg:py-[50px];
+  }
+  .auth-form h1 {
+    @apply mb-[15px] font-display text-4xl leading-[1.12] tracking-[-1px] sm:text-[39px];
+  }
+  .auth-intro {
+    @apply mb-[26px] text-sm text-muted;
+  }
+  .auth-foot {
+    @apply mt-[22px] text-caption text-muted;
+  }
+  .auth-brand {
+    @apply mb-[30px] flex items-center gap-[9px] font-display text-2xl sm:mb-[38px];
+  }
+  .brand-mark {
+    @apply inline-flex h-[26px] w-[26px] -rotate-3 items-center justify-center rounded-[7px] bg-brick font-display text-[23px] leading-none text-white;
+  }
+  .auth-stack {
+    @apply flex flex-col gap-[17px];
+  }
+  .divider {
+    @apply my-1 flex items-center gap-3 text-caption text-muted before:h-px before:flex-1 before:bg-hairline before:content-[''] after:h-px after:flex-1 after:bg-hairline after:content-[''];
+  }
+  .code-input {
+    @apply text-2xl tracking-[.24em];
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The customer sign-in pages (revision 06): the restaurant's own panel, in
+     its colours, rather than the platform's warm neutral one. The staff and
+     platform logins keep the panel above. */
+  [data-surface="customer"] .auth-art {
+    @apply bg-brick;
+  }
+  [data-surface="customer"] .auth-art .auth-brand {
+    @apply text-[#F1EEE2];
+  }
+  [data-surface="customer"] .auth-art .brand-mark {
+    @apply bg-white/10 text-gold;
+  }
+  [data-surface="customer"] .auth-art-caption {
+    @apply text-[#D9BE8E];
+  }
+  [data-surface="customer"] .auth-art-foot {
+    @apply text-[#B9C6B2];
+  }
+  /* The wordmark's mark: the restaurant's initial, as the storefront header
+     sets it. */
+  [data-surface="customer"] .brand-mark {
+    @apply rounded-[11px_11px_11px_2px] bg-brick pr-[3px] font-bold italic text-gold;
+  }
+  /* Pill actions, as everywhere else on the customer surface. */
+  [data-surface="customer"] .btn {
+    @apply rounded-full;
+  }
+
+  /* The storefront banner (revision 06): the restaurant's own menu photo
+     behind separate HTML text, on forest green. The photo is decoration; the
+     words and the action render whether or not it ever loads.
+     --tilt-x/--tilt-y are set by a fine-pointer handler only (never touch,
+     never under reduced motion), capped at 2.5 degrees. */
+  .home-banner {
+    @apply relative isolate flex min-h-[530px] flex-col overflow-hidden rounded-product bg-hero text-[#FFFAEA]
+           sm:min-h-[425px] sm:flex-row sm:items-center sm:rounded-banner lg:min-h-[450px] xl:min-h-[490px];
+  }
+  .home-banner-plain {
+    @apply min-h-[330px] sm:min-h-[380px];
+    background: radial-gradient(ellipse at 85% 100%, #547141 0, transparent 55%), rgb(var(--ze-hero));
+  }
+  .home-banner-media {
+    @apply absolute inset-x-0 bottom-0 -z-20 h-[280px] sm:inset-y-0 sm:left-[38%] sm:right-0 sm:h-auto;
+    transition: transform 250ms var(--ze-ease);
+  }
+  @media (min-width: 640px) {
+    .home-banner-media {
+      transform: perspective(1400px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)) scale(1.025);
+    }
+  }
+  .home-banner-media img {
+    @apply block h-full w-full object-cover;
+    object-position: right 63%;
+  }
+  @media (min-width: 640px) {
+    .home-banner-media img {
+      object-position: center 60%;
+    }
+  }
+  /* Keeps the copy legible over any photo: solid behind the words, clear
+     over the food. */
+  .home-banner:not(.home-banner-plain)::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(180deg, #102a1d 0%, #102a1d 44%, #102a1dcc 51%, transparent 68%);
+  }
+  @media (min-width: 640px) {
+    .home-banner:not(.home-banner-plain)::after {
+      background: linear-gradient(90deg, #102a1df5, #102a1dbb 35%, #102a1d20 84%);
+    }
+  }
+  @media (min-width: 1024px) {
+    .home-banner:not(.home-banner-plain)::after {
+      background: linear-gradient(90deg, #102a1df5 0%, #102a1ddd 28%, #102a1d35 59%, transparent 79%);
+    }
+  }
+
+  /* Photo depth on the storefront: a small scale inside its crop, under a
+     fine pointer only. */
+  @media (hover: hover) and (pointer: fine) {
+    .photo-zoom {
+      transition: transform 180ms var(--ze-ease);
+    }
+    .group:enabled:hover .photo-zoom {
+      transform: scale(1.035);
+    }
+  }
+
+  /* A row that scrolls sideways without a scrollbar sitting across it. The
+     active item is scrolled into view, so nothing is reachable only by
+     knowing it is there. */
   .no-scrollbar {
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -55,9 +474,22 @@
   }
 }
 
+/* Reduced motion: every transition and animation becomes instant, and no
+   transform-based depth or lift survives. State changes still happen and are
+   still announced; only the movement goes. */
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .btn:active,
+  .photo-zoom,
+  .group:hover .photo-zoom,
+  .home-banner-media {
+    transform: none !important;
   }
 }

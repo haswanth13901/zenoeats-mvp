@@ -164,6 +164,45 @@ def test_flat_rate_restaurants_never_call_stripe(stripe_calculations):
     assert stripe_calculations == []
 
 
+def test_a_flat_rate_leaves_tax_exempt_lines_out(stripe_calculations):
+    """A (exempt) and B (taxed): only B is taxed."""
+    result = TaxService.calculate(
+        None, _restaurant(tax_mode="FLAT", tax_rate_bps=1000),
+        [TaxLine(amount_minor=500, quantity=1, taxable=False), TaxLine(amount_minor=1000, quantity=1)],
+        discount_minor=0,
+    )
+    assert result.tax_minor == 100  # 10% of B alone
+
+
+def test_a_flat_rate_shares_the_discount_with_exempt_lines():
+    """The saving is spread over both lines, so the taxed line keeps only its
+    own share of it: 1000 of 1500 takes 200 of a 300 discount."""
+    result = TaxService.calculate(
+        None, _restaurant(tax_mode="FLAT", tax_rate_bps=1000),
+        [TaxLine(amount_minor=500, quantity=1, taxable=False), TaxLine(amount_minor=1000, quantity=1)],
+        discount_minor=300,
+    )
+    assert result.tax_minor == 80  # 10% of 800
+
+
+def test_an_all_exempt_cart_is_not_taxed():
+    result = TaxService.calculate(
+        None, _restaurant(tax_mode="FLAT", tax_rate_bps=1000),
+        [TaxLine(amount_minor=500, quantity=2, taxable=False)],
+        discount_minor=0,
+    )
+    assert result.tax_minor == 0
+
+
+def test_stripe_tax_sends_exempt_lines_as_nontaxable(stripe_calculations):
+    stripe_tax.calculate(
+        _restaurant(), "acct_rest",
+        [TaxLine(amount_minor=500, quantity=1, taxable=False), TaxLine(amount_minor=1000, quantity=1)],
+    )
+    codes = [i["tax_code"] for i in stripe_calculations[0]["line_items"]]
+    assert codes == [stripe_tax.NONTAXABLE_TAX_CODE, "txcd_40060003"]
+
+
 def test_stripe_tax_lines_carry_the_discount(stripe_calculations):
     class Session:
         def execute(self, _):

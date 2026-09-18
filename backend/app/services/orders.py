@@ -76,6 +76,8 @@ def create_pending_order(
     cart: PricedCart,
     customer_note: str | None,
     delivery: "DeliveryDetails | None" = None,
+    contact_name: str | None = None,
+    contact_phone: str | None = None,
 ) -> Order:
     """Create the order and its immutable snapshots. Commits nothing.
 
@@ -113,6 +115,8 @@ def create_pending_order(
         total_minor=cart.total_minor,
         tax_calculation_id=cart.tax_calculation_id,
         customer_note=customer_note,
+        contact_name=contact_name,
+        contact_phone=contact_phone,
         pickup_pin_encrypted=encrypt_field(generate_pickup_pin()),
         expires_at=now + timedelta(minutes=settings.PENDING_PAYMENT_TTL_MINUTES),
     )

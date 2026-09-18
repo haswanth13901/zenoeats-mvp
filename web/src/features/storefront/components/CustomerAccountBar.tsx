@@ -1,7 +1,13 @@
+import { clearCheckoutDrafts } from "../checkoutDraft";
 import { useState } from "react";
-import { useAppDispatch, useAppSelector } from "@/app/hooks";
-import { selectSession, sessionEnded } from "@/features/session/sessionSlice";
+import {
+  useCustomerSessionQuery,
+  useEndGuestSessionMutation,
+} from "@/features/storefront/storefrontApi";
+import { ErrorNote } from "@/components/common/Feedback";
+import { errorMessage } from "@/services/apiClient";
 import { getClerk } from "@/services/clerk";
+import { GUEST_WARNING, GuestSessionConfirm } from "./GuestSession";
 
 /**
  * Who is ordering, and a way to stop being them.
@@ -10,32 +16,65 @@ import { getClerk } from "@/services/clerk";
  * signed in as someone else, and the order, its receipt and its pickup PIN all
  * go to whoever that is. Saying so before payment is cheaper than a refund.
  *
- * The session is Clerk's, so Clerk ends it.
+ * A guest gets the address spelled out rather than a name, because it is the
+ * one they typed minutes ago and the only copy of the order that will leave
+ * this browser. Ending a guest session is irreversible, so it asks first;
+ * signing a customer out does not need to.
  */
 export function CustomerAccountBar() {
-  const dispatch = useAppDispatch();
-  const session = useAppSelector(selectSession);
+  const { data: session } = useCustomerSessionQuery();
+  const [endGuest] = useEndGuestSessionMutation();
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  if (session.portal !== "customer" || !session.email) return null;
+  if (!session) return null;
+
+  async function leave() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (session?.is_guest) await endGuest().unwrap();
+      else await getClerk().then(c => c.signOut());
+      clearCheckoutDrafts();
+      window.location.assign("/");
+    } catch (e) {
+      setError(errorMessage(e));
+      setBusy(false);
+    }
+  }
 
   return (
-    <div className="mb-6 flex items-center justify-between gap-3 text-xs text-muted">
-      <span className="truncate">Ordering as {session.fullName ?? session.email}</span>
-      <button
-        className="shrink-0 underline"
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          await getClerk()
-            .then((clerk) => clerk.signOut())
-            .catch(() => undefined);
-          dispatch(sessionEnded());
-          window.location.assign("/");
-        }}
-      >
-        Not you? Sign out
-      </button>
+    <div className="pb-3 sm:pb-6">
+      <div className="flex items-center justify-between gap-2.5 pt-3.5 text-caption sm:gap-5">
+        {/* Wraps rather than truncating: for a guest the address is the whole
+            point, and a clipped one cannot be checked. */}
+        <span className="min-w-0 [overflow-wrap:anywhere]">
+          {session.is_guest ? (
+            <>
+              Ordering as a guest · receipt to <strong className="font-semibold">{session.email}</strong>
+            </>
+          ) : (
+            <>
+              Ordering as <strong className="font-semibold">{session.full_name ?? session.email}</strong>
+            </>
+          )}
+        </span>
+        <button
+          type="button"
+          className="link min-h-[24px] shrink-0 text-caption"
+          disabled={busy}
+          aria-expanded={session.is_guest ? confirming : undefined}
+          onClick={session.is_guest ? () => setConfirming(true) : leave}
+        >
+          {session.is_guest ? "End guest session" : busy ? "Signing out…" : "Not you? Sign out"}
+        </button>
+      </div>
+      {session.is_guest && <p className="field-hint max-w-prose">{GUEST_WARNING}</p>}
+      <ErrorNote message={error} className="mt-3" />
+      {confirming && session.is_guest && (
+        <GuestSessionConfirm busy={busy} onEnd={leave} onKeep={() => setConfirming(false)} />
+      )}
     </div>
   );
 }

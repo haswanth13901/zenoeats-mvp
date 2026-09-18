@@ -33,9 +33,17 @@ class UserKind(str, enum.Enum):
     the credentials the restaurant issued. Keeping them apart is what stops a
     customer sign-in from ever opening a staff portal, and an email match from
     ever merging the two.
+
+    GUEST is the one kind that is not a person we can name. It is created for
+    a checkout with no account behind it, holds only what the customer typed
+    for their receipt, and is reachable exclusively by the cookie minted with
+    it (core/guest_auth.py). One row per guest checkout session, never looked
+    up by email: an address nobody verified must not find another guest's
+    orders.
     """
 
     CUSTOMER = "CUSTOMER"
+    GUEST = "GUEST"
     STAFF = "STAFF"
     PLATFORM_ADMIN = "PLATFORM_ADMIN"
 
@@ -61,6 +69,10 @@ class User(Base, TimestampMixin):
     )
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     full_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    # Customers and guests: the details checkout last saved, offered again
+    # next time. Null until the first order; checkout is what requires them.
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(300), nullable=True)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Restaurant staff only. Customers authenticate through Clerk and platform

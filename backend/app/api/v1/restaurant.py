@@ -39,7 +39,7 @@ from app.schemas.api import (
     ChangePasswordIn, MenuOut, StaffInviteOut, StaffLoginIn, StaffMeOut,
     StaffPasswordResetOut, known_timezone,
 )
-from app.services import geocoding, images, restaurant_profile
+from app.services import geocoding, images, restaurant_profile, tracking
 from app.services.images import ImageKind
 from app.services.menu import load_item_types, load_menu
 from app.services.orders import transition
@@ -893,6 +893,7 @@ class ItemUpdateIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=180)
     description: str | None = None
     base_price_minor: int | None = Field(default=None, ge=0)
+    tax_exempt: bool | None = None
     item_type_id: UUID | None = None
     meal_ids: list[UUID] | None = None
     modifier_group_ids: list[UUID] | None = None
@@ -913,6 +914,8 @@ class ItemIn(BaseModel):
     item_type_id: UUID
     description: str | None = None
     base_price_minor: int = Field(ge=0)
+    # Left out of the tax on every order it is part of.
+    tax_exempt: bool = False
     sort_order: int = 0
     modifier_group_ids: list[UUID] = Field(default_factory=list)
     meal_ids: list[UUID] = Field(default_factory=list)
@@ -2480,6 +2483,7 @@ def list_items(
             "base_price_minor": item.base_price_minor,
             "currency": item.currency,
             "is_available": item.is_available,
+            "tax_exempt": item.tax_exempt,
             # The key is what an edit sends back unchanged; the URL is what the
             # thumbnail shows.
             "image_path": item.image_path,
@@ -2508,7 +2512,7 @@ def create_item(
     item = Item(
         restaurant_id=restaurant.id, name=name, item_type_id=item_type.id,
         description=(body.description or "").strip() or None,
-        base_price_minor=body.base_price_minor,
+        base_price_minor=body.base_price_minor, tax_exempt=body.tax_exempt,
         currency=restaurant.currency, sort_order=body.sort_order,
         image_path=images.accept(body.image_path, restaurant.id, ImageKind.ITEMS),
     )
@@ -2569,6 +2573,11 @@ def update_item(
     if "base_price_minor" in sent:
         item.base_price_minor = sent["base_price_minor"]
 
+    # Like a price, it changes what the next order is charged and nothing
+    # before it: an order keeps the tax it was charged.
+    if sent.get("tax_exempt") is not None:
+        item.tax_exempt = sent["tax_exempt"]
+
     if sent.get("item_type_id") is not None:
         # Changing the type moves the item to another heading and changes
         # which groups the builder offers it. The groups it already carries
@@ -2604,6 +2613,7 @@ def update_item(
         "item_type_id": str(item.item_type_id),
         "description": item.description,
         "base_price_minor": item.base_price_minor,
+        "tax_exempt": item.tax_exempt,
     }
 
 
@@ -2770,7 +2780,15 @@ def order_board(
             # is every order until a manager assigns a driver.
             "fulfillment_type": o.fulfillment_type,
             "delivery_address": o.delivery_address,
+            # Non-zero when the customer chose and paid for delivery at
+            # checkout, which is what stops it being turned back into a
+            # collection from the board.
+            "delivery_fee_minor": o.delivery_fee_minor,
             "driver": driver_names.get(o.driver_user_id),
+            # Who to call and whose name to call out. Null on orders from
+            # before checkout asked for them.
+            "contact_name": o.contact_name,
+            "contact_phone": o.contact_phone,
             # combo_name and combo_group ride along so the screen can draw a
             # meal deal as one block. Without them a combo reads as three
             # unrelated items and gets plated as three separate orders.
@@ -3093,10 +3111,11 @@ def cancel_order(
 
 # ------------------------------------------------------------- delivery ----
 #
-# A customer cannot order a delivery in this build. This is for the order a
-# restaurant agrees over the phone to run out itself: a manager gives a paid
-# order to one of its drivers with the address, and the driver's screen is
-# that order and no more of the portal.
+# Two ways an order becomes a delivery. The customer chooses it at checkout,
+# with their address and a fee priced from it. Or a restaurant agrees over the
+# phone to run a collection out itself, and a manager gives the paid order to
+# a driver with the address they were told. Either way a manager assigns the
+# driver, and the driver's screen is that order and no more of the portal.
 
 
 class AssignDriverIn(BaseModel):
@@ -3154,9 +3173,10 @@ def assign_driver(
 ):
     """Give a paid order to one of the restaurant's drivers, with the address.
 
-    This is what turns a pickup order into a delivery, because nothing else
-    does: checkout has no delivery option and no address to collect. Managers
-    only, like the other two exceptions to the counter's rules.
+    For a phone order this is what turns a collection into a delivery. For a
+    delivery the customer chose at checkout, the address arrives already
+    filled in and this only names the driver. Managers only, like the other
+    two exceptions to the counter's rules.
 
     Reassigning is the same call again -- a driver who called in sick has
     their orders handed on, and each assignment is recorded with who did it
@@ -3218,6 +3238,13 @@ def unassign_driver(
         raise errors.order_not_found()
     if order.fulfillment_type != FulfillmentType.DELIVERY.value:
         raise errors.order_state_conflict("This order is already a collection.")
+    if order.delivery_fee_minor:
+        # The customer paid for this delivery. Turning it into a collection
+        # would keep their fee for a journey nobody makes -- and the database
+        # refuses a fee on a collection anyway.
+        raise errors.order_state_conflict(
+            "The customer paid for delivery. Change the driver, or cancel and refund it."
+        )
     if order.status == OrderStatus.OUT_FOR_DELIVERY.value:
         raise errors.order_state_conflict(
             "The driver already has this order. Cancel it, or let them deliver it."
@@ -3308,6 +3335,8 @@ def deliveries(
             "paid_at": o.paid_at.isoformat() if o.paid_at else None,
             "delivery_address": o.delivery_address,
             "customer_note": o.customer_note,
+            "contact_name": o.contact_name,
+            "contact_phone": o.contact_phone,
             "driver": names.get(o.driver_user_id),
             "mine": o.driver_user_id == membership.user_id,
             "items": [
@@ -3361,6 +3390,50 @@ def delivered(
     order.completed_at = utcnow()
     _record(db, order, membership, OrderEventAction.DELIVERED)
     return {"order_id": str(order.id), "status": order.status}
+
+
+class DriverLocationIn(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    # Degrees clockwise from north, when the phone knows it.
+    heading: float | None = Field(default=None, ge=0, le=360)
+
+
+@router.post(
+    "/driver/location",
+    # A phone sends one every five seconds or so. Twice that, with room for a
+    # flaky connection flushing a few at once.
+    dependencies=[Depends(per_staff_user("driver_location", limit=30))],
+)
+def driver_location(
+    body: DriverLocationIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(DELIVERY),
+):
+    """Where the signed-in driver is right now, for their customers' maps.
+
+    Accepted only while they have an order of their own on the road. A driver
+    between deliveries, or a manager who is not carrying anything, is not
+    tracked -- the position is refused, not quietly kept. One position covers
+    every order they are carrying, since they are in one place.
+
+    Kept for minutes in Redis, never in the database: see services/tracking.
+    """
+    carrying = db.execute(
+        select(func.count()).select_from(Order).where(
+            Order.driver_user_id == membership.user_id,
+            Order.status == OrderStatus.OUT_FOR_DELIVERY.value,
+        )
+    ).scalar_one()
+    if not carrying:
+        raise errors.ApiError(
+            409, "NOT_ON_A_DELIVERY", "Your location is only shared while you have an order on the road."
+        )
+    stored = tracking.record_location(
+        restaurant.id, membership.user_id, body.latitude, body.longitude, body.heading
+    )
+    return {"sharing": stored, "orders": carrying}
 
 
 # ---------------------------------------------------------------- staff ----

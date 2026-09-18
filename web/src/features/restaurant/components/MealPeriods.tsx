@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Empty, Panel } from "@/components/common/Feedback";
+import { Empty, Panel, Spinner } from "@/components/common/Feedback";
 import { PencilIcon } from "@/components/common/icons";
 import { mealHours, money } from "@/utils/format";
 import type { Item, Meal } from "@/types";
@@ -63,38 +63,40 @@ export function MealPeriods({
   return (
     <>
       <Panel title="Meal periods">
-        <div className="flex gap-2">
-          <input
-            className="field"
-            placeholder="Breakfast, Lunch, Late night…"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <button
-            className="btn-primary shrink-0"
-            onClick={async () => {
-              if (!name.trim()) {
-                onError("Enter a name for the meal period, like Breakfast.");
-                return;
-              }
-              try {
-                await createMeal({ name: name.trim(), sort_order: meals.length }).unwrap();
-                setName("");
-                onError(null);
-              } catch (e) {
-                onError(errorMessage(e));
-              }
-            }}
-          >
+        <form
+          className="grid grid-cols-1 items-end gap-[18px] sm:grid-cols-[minmax(0,1fr)_auto]"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!name.trim()) {
+              onError("Enter a name for the meal period, like Breakfast.");
+              return;
+            }
+            try {
+              await createMeal({ name: name.trim(), sort_order: meals.length }).unwrap();
+              setName("");
+              onError(null);
+            } catch (err) {
+              onError(errorMessage(err));
+            }
+          }}
+        >
+          <label className="block">
+            <span className="label">Period name</span>
+            <input
+              className="field mt-[7px]"
+              placeholder="Breakfast, Lunch, Late night…"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <button type="submit" className="btn-primary">
             Add period
           </button>
-        </div>
+        </form>
       </Panel>
 
       {!meals.length && (
-        <Empty>
-          No meal periods yet. Add one above, then choose which items it serves.
-        </Empty>
+        <Empty>No meal periods yet. Add one above, then choose which items it serves.</Empty>
       )}
 
       {meals.map((meal) => (
@@ -139,21 +141,18 @@ function MealSection({
   const hours = mealHours(meal.starts_at, meal.ends_at);
 
   return (
-    <section className="mb-10 border border-hairline bg-surface">
-      <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-hairline px-4 py-3">
-        {editingName ? (
-          <MealEditor meal={meal} onDone={() => setEditingName(false)} onError={onError} />
-        ) : (
-          <>
-            <span className="flex flex-wrap items-baseline gap-1.5">
-              <h2 className="font-display text-xl">{meal.name}</h2>
-              {/* Only where there is something to say. A period with no hours
-                  set reads as the plain name it has always been. */}
-              {hours && <span className="text-xs text-muted">{hours}</span>}
+    <section className="card mt-[22px]" aria-label={meal.name}>
+      {editingName ? (
+        <MealEditor meal={meal} onDone={() => setEditingName(false)} onError={onError} />
+      ) : (
+        <>
+          <header className="mb-1 flex flex-wrap items-center justify-between gap-x-5 gap-y-1">
+            <span className="flex items-center gap-3">
+              <h2 className="font-display text-[26px] leading-tight tracking-[-.5px]">{meal.name}</h2>
               <button
                 type="button"
                 aria-label={`Edit ${meal.name}`}
-                className="text-muted hover:text-ink"
+                className="link min-h-[32px] px-1 text-base no-underline"
                 onClick={() => {
                   onError(null);
                   setEditingName(true);
@@ -163,7 +162,9 @@ function MealSection({
               </button>
             </span>
             <button
-              className="text-xs text-muted underline"
+              type="button"
+              className="link"
+              aria-expanded={picking}
               onClick={() => {
                 onError(null);
                 setPicking((open) => !open);
@@ -171,9 +172,12 @@ function MealSection({
             >
               {picking ? "cancel" : "add items"}
             </button>
-          </>
-        )}
-      </header>
+          </header>
+          {/* Only where there is something to say. A period with no hours
+              set reads as the plain name it has always been. */}
+          {hours && <p className="text-caption text-muted">{hours}</p>}
+        </>
+      )}
 
       {picking && (
         <ItemPicker
@@ -186,12 +190,13 @@ function MealSection({
       )}
 
       {folded > 0 && (
-        <p className="border-b border-hairline bg-paper px-4 py-2.5 text-xs text-muted">
+        <p className="note mt-6">
           {folded} {folded === 1 ? "item is" : "items are"} on every period, so{" "}
           {folded === 1 ? "it is" : "they are"} served all day.{" "}
           <button
             type="button"
-            className="underline hover:text-ink"
+            className="link link-inline"
+            aria-expanded={showAllDay}
             onClick={() => setShowAllDay((was) => !was)}
           >
             {showAllDay ? "fold them away" : `show ${folded === 1 ? "it" : "them"}`}
@@ -200,38 +205,36 @@ function MealSection({
       )}
 
       {!served ? (
-        <p className="px-4 py-6 text-sm text-muted">
-          Nothing served in this period yet. Add items from the library, or
-          write a new one on the Items tab and tick this period.
-        </p>
+        <div className="mt-6">
+          <Empty>
+            Nothing served in this period yet. Add items from the library, or write a new one on
+            the Items tab and tick this period.
+          </Empty>
+        </div>
       ) : !shown.length ? (
-        <p className="px-4 py-6 text-sm text-muted">
-          Everything {meal.name} serves is served all day. Nothing is on this
-          period alone.
+        <p className="field-hint mt-6">
+          Everything {meal.name} serves is served all day. Nothing is on this period alone.
         </p>
       ) : (
-        shown.map((section) => (
-          <div
-            key={section.item_type_id}
-            className="border-b border-hairline last:border-0"
-          >
-            <h3 className="px-4 py-2.5 text-sm font-medium">{section.label}</h3>
-            {section.items.length > 0 && (
-              <ServedRows items={section.items} mealId={meal.id} onError={onError} />
-            )}
+        <div className="mt-6 animate-disclose">
+          {shown.map((section) => (
+            <div key={section.item_type_id} className="mb-5 last:mb-0">
+              <h3 className="mb-1 text-caption font-[650] uppercase tracking-[1.7px]">{section.label}</h3>
+              {section.items.length > 0 && (
+                <ServedRows items={section.items} mealId={meal.id} onError={onError} />
+              )}
 
-            {/* Subcategories of this heading, each with a subheading of its
-                own. Most menus send none and this loop does nothing. */}
-            {section.groups.map((group) => (
-              <div key={group.item_type_id}>
-                <h4 className="border-t border-hairline px-4 py-2 pl-7 text-[13px] text-muted">
-                  {group.label}
-                </h4>
-                <ServedRows items={group.items} mealId={meal.id} onError={onError} />
-              </div>
-            ))}
-          </div>
-        ))
+              {/* Subcategories of this heading, each with a subheading of its
+                  own. Most menus send none and this loop does nothing. */}
+              {section.groups.map((group) => (
+                <div key={group.item_type_id} className="mt-[18px] border-l-2 border-[#E4DED3] pl-4">
+                  <h4 className="my-3 text-caption font-medium text-muted">{group.label}</h4>
+                  <ServedRows items={group.items} mealId={meal.id} onError={onError} />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       )}
     </section>
   );
@@ -268,16 +271,19 @@ function MealEditor({
 
   if (removing) {
     return (
-      <div className="w-full">
-        <p className="text-sm text-brick">
+      <div className="inline-confirm">
+        <p className="font-semibold text-danger">
           {meal.name} will be deleted.{" "}
-          {served
-            ? `The ${served} ${served === 1 ? "item" : "items"} it serves are kept and stay on any other period serving them.`
-            : "It serves nothing, so nothing else changes."}
+          <span className="font-normal text-ink">
+            {served
+              ? `The ${served} ${served === 1 ? "item" : "items"} it serves are kept and stay on any other period serving them.`
+              : "It serves nothing, so nothing else changes."}
+          </span>
         </p>
-        <div className="mt-3 flex items-center gap-4">
+        <div className="mt-3.5 flex flex-wrap items-center gap-4">
           <button
-            className="btn-primary px-3 py-1.5 text-sm"
+            type="button"
+            className="btn-danger"
             disabled={saving}
             onClick={async () => {
               setSaving(true);
@@ -292,9 +298,10 @@ function MealEditor({
               }
             }}
           >
+            {saving && <Spinner />}
             Delete period
           </button>
-          <button className="text-xs underline" onClick={() => setRemoving(false)}>
+          <button type="button" className="link" disabled={saving} onClick={() => setRemoving(false)}>
             keep it
           </button>
         </div>
@@ -302,120 +309,133 @@ function MealEditor({
     );
   }
 
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      onError("Enter a name for the meal period. It cannot be left blank.");
+      return;
+    }
+    // The same pair rule the server keeps, answered here so a half-set
+    // range is caught while both boxes are still on screen.
+    if (!starts !== !ends) {
+      onError(
+        "Set both a start and an end time, or clear both to leave the " +
+          "hours unsaid.",
+      );
+      return;
+    }
+    if (starts && starts === ends) {
+      onError("The start and end times are the same. Set an end later than the start.");
+      return;
+    }
+
+    const changes: {
+      name?: string;
+      starts_at?: string | null;
+      ends_at?: string | null;
+    } = {};
+    if (trimmed !== meal.name) changes.name = trimmed;
+    // Sent only when they actually changed, so an untouched period is
+    // never rewritten and "" goes out as null rather than as a time.
+    if (starts !== (meal.starts_at ?? "")) changes.starts_at = starts || null;
+    if (ends !== (meal.ends_at ?? "")) changes.ends_at = ends || null;
+
+    if (!Object.keys(changes).length) {
+      onError(null);
+      onDone();
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await updateMeal({ mealId: meal.id, changes }).unwrap();
+      onError(null);
+      onDone();
+    } catch (e) {
+      onError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="flex w-full flex-wrap items-center gap-3">
-      <input
-        className="field w-56 font-display text-xl"
-        value={name}
-        autoFocus
-        disabled={saving}
-        aria-label="Meal period name"
-        onChange={(e) => setName(e.target.value)}
-      />
+    <form
+      className="flex animate-disclose flex-col gap-[17px]"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!saving) void save();
+      }}
+    >
+      <label className="block sm:max-w-[calc(50%-9px)]">
+        <span className="label">Name</span>
+        <input
+          className="field mt-[7px]"
+          value={name}
+          autoFocus
+          disabled={saving}
+          aria-label="Meal period name"
+          onChange={(e) => setName(e.target.value)}
+        />
+      </label>
 
       {/* Hours are optional and always a pair. They are for a customer to
           read: nothing here or on the server stops an order arriving outside
           them, because no restaurant carries a timezone to judge the clock
           against. */}
-      <span className="flex items-center gap-2 text-xs text-muted">
-        <label className="flex items-center gap-1.5">
-          served
+      <div className="grid grid-cols-2 gap-[18px]">
+        <label className="block">
+          <span className="label">Served from</span>
           <input
             type="time"
-            className="field w-32 text-sm"
+            className="field mt-[7px]"
             value={starts}
             disabled={saving}
-            aria-label="Served from"
             onChange={(e) => setStarts(e.target.value)}
           />
         </label>
-        <label className="flex items-center gap-1.5">
-          to
+        <label className="block">
+          <span className="label">Served until</span>
           <input
             type="time"
-            className="field w-32 text-sm"
+            className="field mt-[7px]"
             value={ends}
             disabled={saving}
-            aria-label="Served until"
             onChange={(e) => setEnds(e.target.value)}
           />
         </label>
-        {starts && ends && ends <= starts && (
-          <span className="text-ink">runs into the next day</span>
-        )}
-      </span>
-      <button
-        className="btn-primary px-3 py-1.5 text-sm"
-        disabled={saving}
-        onClick={async () => {
-          const trimmed = name.trim();
-          if (!trimmed) {
-            onError("Enter a name for the meal period. It cannot be left blank.");
-            return;
-          }
-          // The same pair rule the server keeps, answered here so a half-set
-          // range is caught while both boxes are still on screen.
-          if (!starts !== !ends) {
-            onError(
-              "Set both a start and an end time, or clear both to leave the " +
-                "hours unsaid.",
-            );
-            return;
-          }
-          if (starts && starts === ends) {
-            onError("The start and end times are the same. Set an end later than the start.");
-            return;
-          }
+      </div>
+      <p className="-mt-2 text-caption text-muted" aria-live="polite">
+        {starts && ends && ends <= starts
+          ? "runs into the next day"
+          : "Clear both times to leave the hours unsaid."}
+      </p>
 
-          const changes: {
-            name?: string;
-            starts_at?: string | null;
-            ends_at?: string | null;
-          } = {};
-          if (trimmed !== meal.name) changes.name = trimmed;
-          // Sent only when they actually changed, so an untouched period is
-          // never rewritten and "" goes out as null rather than as a time.
-          if (starts !== (meal.starts_at ?? "")) changes.starts_at = starts || null;
-          if (ends !== (meal.ends_at ?? "")) changes.ends_at = ends || null;
-
-          if (!Object.keys(changes).length) {
+      <div className="flex flex-wrap items-center gap-4">
+        <button type="submit" className="btn-primary" disabled={saving}>
+          {saving && <Spinner />}
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          className="link"
+          disabled={saving}
+          onClick={() => {
             onError(null);
             onDone();
-            return;
-          }
-
-          setSaving(true);
-          try {
-            await updateMeal({ mealId: meal.id, changes }).unwrap();
-            onError(null);
-            onDone();
-          } catch (e) {
-            onError(errorMessage(e));
-          } finally {
-            setSaving(false);
-          }
-        }}
-      >
-        Save
-      </button>
-      <button
-        className="text-xs text-muted underline"
-        disabled={saving}
-        onClick={() => {
-          onError(null);
-          onDone();
-        }}
-      >
-        cancel
-      </button>
-      <button
-        className="ml-auto text-xs text-brick underline"
-        disabled={saving}
-        onClick={() => setRemoving(true)}
-      >
-        delete period
-      </button>
-    </div>
+          }}
+        >
+          cancel
+        </button>
+        <button
+          type="button"
+          className="link-danger sm:ml-auto"
+          disabled={saving}
+          onClick={() => setRemoving(true)}
+        >
+          delete period
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -446,18 +466,19 @@ function ItemPicker({
 
   if (!available.length) {
     return (
-      <p className="border-b border-hairline bg-paper px-4 py-4 text-xs text-muted">
-        Every item in the library is already on {meal.name}. Write a new one on
-        the Items tab.
-      </p>
+      <div className="editor mt-6 animate-disclose">
+        <p className="text-caption text-muted">
+          Every item in the library is already on {meal.name}. Write a new one on the Items tab.
+        </p>
+      </div>
     );
   }
 
   return (
-    <div className="border-b border-hairline bg-paper px-4 py-4">
-      <p className="text-xs text-muted">
-        Items not yet on {meal.name}. Adding one lists it here; it stays on
-        every other period serving it.
+    <div className="editor mt-6 animate-disclose">
+      <p className="text-caption">
+        Items not yet on {meal.name}. Adding one lists it here; it stays on every other period
+        serving it.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         {available.map((item) => {
@@ -469,25 +490,20 @@ function ItemPicker({
               aria-pressed={on}
               disabled={saving}
               onClick={() =>
-                setChosen((prev) =>
-                  on ? prev.filter((x) => x !== item.id) : [...prev, item.id],
-                )
+                setChosen((prev) => (on ? prev.filter((x) => x !== item.id) : [...prev, item.id]))
               }
-              className={`rounded border px-2.5 py-1 text-xs ${
-                on ? "border-ink bg-ink text-white" : "border-hairline bg-surface"
-              }`}
+              className="chip"
             >
               {item.name}
-              <span className="ml-1.5 opacity-60">
-                {typeName.get(item.item_type_id) ?? ""}
-              </span>
+              <span className="opacity-70">· {typeName.get(item.item_type_id) ?? ""}</span>
             </button>
           );
         })}
       </div>
-      <div className="mt-4 flex items-center gap-4">
+      <div className="mt-4 flex flex-wrap items-center gap-4">
         <button
-          className="btn-primary px-3 py-1.5 text-sm"
+          type="button"
+          className="btn-primary"
           disabled={saving}
           onClick={async () => {
             if (!chosen.length) {
@@ -506,11 +522,12 @@ function ItemPicker({
             }
           }}
         >
+          {saving && <Spinner />}
           {saving
             ? "Adding…"
-            : `Add ${chosen.length || ""} ${chosen.length === 1 ? "item" : "items"}`.trim()}
+            : `Add ${chosen.length || ""} ${chosen.length === 1 ? "item" : "items"}`.replace("  ", " ")}
         </button>
-        <button className="text-xs text-muted underline" disabled={saving} onClick={onDone}>
+        <button type="button" className="link" disabled={saving} onClick={onDone}>
           cancel
         </button>
       </div>
@@ -539,55 +556,61 @@ function ServedRows({
   const [removeMealItem] = useRemoveMealItemMutation();
 
   return (
-    <ul className="divide-y divide-hairline border-t border-hairline">
+    <ul>
       {items.map((item) => (
-        <li key={item.id} className="flex items-baseline gap-4 px-4 py-3">
-          <div className="flex-1">
-            <span className="text-sm">{item.name}</span>
+        <li
+          key={item.id}
+          className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-b border-hairline py-3.5 last:border-0"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">{item.name}</p>
             {item.modifier_groups.length > 0 && (
-              <span className="ml-2 text-xs text-muted">
+              <p className="mt-[3px] text-caption text-muted">
                 {item.modifier_groups.map((g) => g.name).join(" · ")}
-              </span>
+              </p>
             )}
           </div>
-          <span className="tnum text-sm">
-            {money(item.base_price_minor, item.currency)}
+          <span className="tnum">{money(item.base_price_minor, item.currency)}</span>
+          <span className="flex gap-4">
+            <button
+              type="button"
+              className={item.is_available ? "link" : "link-danger"}
+              aria-pressed={!item.is_available}
+              aria-label={`${item.name}: ${item.is_available ? "in stock" : "sold out"}`}
+              onClick={async () => {
+                try {
+                  await setAvailability({
+                    itemId: item.id,
+                    is_available: !item.is_available,
+                  }).unwrap();
+                  onError(null);
+                } catch (e) {
+                  onError(errorMessage(e));
+                }
+              }}
+            >
+              {item.is_available ? "in stock" : "sold out"}
+            </button>
+            {/* No confirmation, deliberately. This takes the item off
+                one period and nothing else -- the item, its price and
+                every other period keep going -- so the cost of a
+                misclick is one click back. */}
+            <button
+              type="button"
+              className="link-danger"
+              aria-label={`Remove ${item.name} from this period`}
+              onClick={async () => {
+                try {
+                  await removeMealItem({ mealId, itemId: item.id }).unwrap();
+                  onError(null);
+                } catch (e) {
+                  onError(errorMessage(e));
+                }
+              }}
+            >
+              remove
+            </button>
           </span>
-          <button
-            className={`text-xs underline ${
-              item.is_available ? "text-muted" : "text-brick"
-            }`}
-            onClick={async () => {
-              try {
-                await setAvailability({
-                  itemId: item.id,
-                  is_available: !item.is_available,
-                }).unwrap();
-                onError(null);
-              } catch (e) {
-                onError(errorMessage(e));
-              }
-            }}
-          >
-            {item.is_available ? "in stock" : "sold out"}
-          </button>
-          {/* No confirmation, deliberately. This takes the item off
-              one period and nothing else -- the item, its price and
-              every other period keep going -- so the cost of a
-              misclick is one click back. */}
-          <button
-            className="text-xs text-brick underline"
-            onClick={async () => {
-              try {
-                await removeMealItem({ mealId, itemId: item.id }).unwrap();
-                onError(null);
-              } catch (e) {
-                onError(errorMessage(e));
-              }
-            }}
-          >
-            remove
-          </button>
         </li>
       ))}
     </ul>

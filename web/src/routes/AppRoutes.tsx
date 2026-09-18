@@ -19,6 +19,10 @@ import { StorefrontPage } from "@/pages/storefront/StorefrontPage";
 import { CheckoutPage } from "@/pages/storefront/CheckoutPage";
 import { PaymentPage } from "@/pages/storefront/PaymentPage";
 import { OrderPage } from "@/pages/storefront/OrderPage";
+import { ProfilePage } from "@/pages/storefront/ProfilePage";
+import { CustomerSurface } from "@/components/layout/CustomerSurface";
+import { StatePage } from "@/components/common/Feedback";
+import { Cloche } from "@/components/common/icons";
 
 /**
  * Route table.
@@ -39,32 +43,45 @@ export function AppRoutes() {
     <BrowserRouter>
       <Routes>
         {/* Customer surface. The storefront is deliberately public; only the
-            two routes that need an identity are guarded. */}
-        <Route path="/" element={<StorefrontPage />} />
-        <Route
-          path="/checkout"
-          element={
-            <RequireCustomer>
-              <CheckoutPage />
-            </RequireCustomer>
-          }
-        />
-        <Route
-          path="/checkout/pay/:orderId"
-          element={
-            <RequireCustomer>
-              <PaymentPage />
-            </RequireCustomer>
-          }
-        />
-        <Route
-          path="/orders/:orderId"
-          element={
-            <RequireCustomer allowOrderToken>
-              <OrderPage />
-            </RequireCustomer>
-          }
-        />
+            routes that need an identity are guarded. */}
+        <Route element={<CustomerSurface />}>
+          <Route path="/" element={<StorefrontPage />} />
+          <Route
+            path="/checkout"
+            element={
+              <RequireCustomer>
+                <CheckoutPage />
+              </RequireCustomer>
+            }
+          />
+          <Route
+            path="/checkout/pay/:orderId"
+            element={
+              <RequireCustomer>
+                <PaymentPage />
+              </RequireCustomer>
+            }
+          />
+          <Route
+            path="/orders/:orderId"
+            element={
+              <RequireCustomer allowOrderToken>
+                <OrderPage />
+              </RequireCustomer>
+            }
+          />
+
+          <Route path="/account/profile" element={<RequireCustomer><ProfilePage /></RequireCustomer>} />
+          {/* Keep the existing profile URL for bookmarks and current links. */}
+          <Route
+            path="/profile"
+            element={
+              <RequireCustomer>
+                <ProfilePage />
+              </RequireCustomer>
+            }
+          />
+        </Route>
 
         {/* Restaurant portal. Credentials issued by the platform. */}
         <Route
@@ -110,11 +127,7 @@ export function AppRoutes() {
 }
 
 function NotFound() {
-  return (
-    <main className="mx-auto max-w-lg px-5 py-24 text-center">
-      <h1 className="font-display text-3xl">Page not found</h1>
-    </main>
-  );
+  return <StatePage title="Page not found" illustration={<Cloche />} />;
 }
 
 /**

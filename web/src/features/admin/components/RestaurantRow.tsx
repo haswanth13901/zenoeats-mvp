@@ -1,6 +1,7 @@
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { StatusPill } from "@/components/common/Feedback";
+import { Spinner, StatusPill } from "@/components/common/Feedback";
+import { Icon } from "@/components/common/icons";
 import { RestaurantEditForm } from "./RestaurantEditForm";
 import type { Restaurant, RestaurantPatch, StripeSync } from "../adminApi";
 import { storefrontUrl } from "@/utils/storefront";
@@ -25,6 +26,15 @@ export type RowActions = {
   onOwner: () => void;
 };
 
+/**
+ * One restaurant: who it is, whether it is live, where Stripe stands, and
+ * everything that can be done to it. The editor opens attached underneath,
+ * and the two confirmations replace the actions in place, so the restaurant
+ * they are about never leaves the screen.
+ *
+ * A grid rather than a table row, so a phone gets the same actions as a desk
+ * without a table scrolling sideways past them.
+ */
 export function RestaurantRow({
   restaurant: r,
   busy,
@@ -39,39 +49,49 @@ export function RestaurantRow({
   actions: RowActions;
 }) {
   const deleted = r.deleted_at !== null;
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const outstanding = stripeStatus
     ? [...new Set([...stripeStatus.past_due, ...stripeStatus.currently_due])]
     : [];
 
+  const action = "link min-h-[32px] text-caption";
+  // Deleted rows read as faded, but their Restore and Erase controls do not:
+  // a confirmation at half opacity looks disabled.
+  const faded = deleted ? "opacity-50" : "";
+
   return (
-    <Fragment>
-      <tr className={deleted ? "opacity-50" : undefined}>
-        <td className="py-3">
-          <div>
+    <li className="border-b border-hairline py-6 last:border-0">
+      <div
+        className={`grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 md:grid-cols-[minmax(0,1.2fr)_95px_minmax(0,1fr)] xl:grid-cols-[minmax(0,1.2fr)_100px_minmax(0,1fr)_minmax(0,1.6fr)] xl:gap-[22px]`}
+      >
+        <div className={`min-w-0 ${faded}`}>
+          <h3 className="flex flex-wrap items-center gap-2 font-semibold">
             {r.name}
-            {deleted && <span className="ml-2 text-xs text-brick">deleted</span>}
-          </div>
+            {deleted && <span className="pill-red">deleted</span>}
+          </h3>
           <a
             href={storefrontUrl(r.slug)}
-            className="text-xs text-muted underline"
+            className="mt-1 inline-flex items-center gap-1 text-caption text-muted underline underline-offset-[3px] hover:text-ink"
             target="_blank"
             rel="noreferrer"
           >
             {r.slug}
+            <Icon name="external" className="h-3.5 w-3.5" />
+            <span className="sr-only">(opens the storefront in a new tab)</span>
           </a>
-        </td>
+        </div>
 
-        <td>
+        <div className={faded}>
           <StatusPill status={r.status} />
-        </td>
+        </div>
 
-        <td className="text-xs">
+        <div className={`col-span-full text-caption md:col-span-1 ${faded}`}>
           {!r.stripe_account_id ? (
             <span className="text-muted">Not connected</span>
           ) : r.charges_enabled ? (
-            <span>Charges enabled</span>
+            <span className="font-semibold text-success">Charges enabled</span>
           ) : (
-            <span className="text-brick">Onboarding incomplete</span>
+            <span className="font-semibold text-danger">Onboarding incomplete</span>
           )}
 
           {/* Why, not just that. Without the outstanding requirement there is
@@ -80,114 +100,118 @@ export function RestaurantRow({
             <div className="mt-1 text-muted">
               {stripeStatus.disabled_reason && <div>Stripe: {stripeStatus.disabled_reason}</div>}
               {outstanding.length > 0 && (
-                <div>Needs: {outstanding.map(readableRequirement).join(", ")}</div>
+                <div className="[overflow-wrap:anywhere]">
+                  Needs: {outstanding.map(readableRequirement).join(", ")}
+                </div>
               )}
             </div>
           )}
-          {stripeStatus?.charges_enabled && (
-            <div className="mt-1 text-muted">Synced from Stripe.</div>
-          )}
-        </td>
+          {stripeStatus?.charges_enabled && <div className="mt-1 text-muted">Synced from Stripe.</div>}
+        </div>
 
-        <td className="py-3 text-right">
-          <div className="inline-flex flex-wrap justify-end gap-2">
-            {deleted ? (
-              <>
+        <div className="col-span-full flex flex-wrap items-center gap-x-[15px] gap-y-1 xl:col-span-1 xl:justify-end">
+          {deleted ? (
+            <>
+              <button type="button" className="btn-primary btn-compact" disabled={busy} onClick={actions.onRestore}>
+                {busy && <Spinner />}
+                Restore
+              </button>
+              {/* Two clicks, because this is the one action on this page
+                  with nothing behind it. The server refuses any restaurant
+                  holding an order or a payment, so the worst a misclick can
+                  reach is a menu nobody sold from. */}
+              <PurgeButton busy={busy} name={r.name} onPurge={actions.onPurge} />
+            </>
+          ) : (
+            <>
+              {r.status !== "ACTIVE" ? (
+                <button type="button" className="btn-primary btn-compact" disabled={busy} onClick={actions.onActivate}>
+                  {busy && <Spinner />}
+                  Activate
+                </button>
+              ) : (
+                <button type="button" className={action} disabled={busy} onClick={actions.onSuspend}>
+                  Suspend
+                </button>
+              )}
+              {!r.charges_enabled && (
+                // Leaves the app for Stripe-hosted onboarding.
+                <button type="button" className={`${action} gap-1`} disabled={busy} onClick={actions.onOnboard}>
+                  {r.stripe_account_id ? "Resume Stripe" : "Connect Stripe"}
+                  <Icon name="external" className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {r.stripe_account_id && (
+                <button type="button" className={action} disabled={busy} onClick={actions.onRefreshStripe}>
+                  Refresh Stripe
+                </button>
+              )}
+              <button
+                type="button"
+                className={action}
+                aria-expanded={editing}
+                onClick={editing ? actions.onCancelEdit : actions.onEdit}
+              >
+                {editing ? "Close" : "Edit"}
+              </button>
+              <button type="button" className={action} onClick={actions.onOwner}>
+                Owner login
+              </button>
+              <Link className={action} to={`/admin/restaurants/${r.id}/orders`}>
+                Orders
+              </Link>
+              {/* The API refuses to delete an ACTIVE restaurant. Hiding the
+                  button avoids offering a certain 409. */}
+              {r.status !== "ACTIVE" && !confirmingDelete && (
                 <button
-                  className="btn-primary px-2 py-1 text-xs"
+                  type="button"
+                  className="link-danger min-h-[32px] text-caption"
                   disabled={busy}
-                  onClick={actions.onRestore}
+                  onClick={() => setConfirmingDelete(true)}
                 >
-                  Restore
+                  Delete
                 </button>
-                {/* Two clicks, because this is the one action on this page
-                    with nothing behind it. The server refuses any restaurant
-                    holding an order or a payment, so the worst a misclick can
-                    reach is a menu nobody sold from. */}
-                <PurgeButton busy={busy} name={r.name} onPurge={actions.onPurge} />
-              </>
-            ) : (
-              <>
-                {!r.charges_enabled && (
-                  <button
-                    className="btn-quiet px-2 py-1 text-xs"
-                    disabled={busy}
-                    onClick={actions.onOnboard}
-                  >
-                    {r.stripe_account_id ? "Resume Stripe" : "Connect Stripe"}
-                  </button>
-                )}
-                {r.stripe_account_id && (
-                  <button
-                    className="btn-quiet px-2 py-1 text-xs"
-                    disabled={busy}
-                    onClick={actions.onRefreshStripe}
-                  >
-                    Refresh Stripe
-                  </button>
-                )}
-                {r.status !== "ACTIVE" ? (
-                  <button
-                    className="btn-primary px-2 py-1 text-xs"
-                    disabled={busy}
-                    onClick={actions.onActivate}
-                  >
-                    Activate
-                  </button>
-                ) : (
-                  <button
-                    className="btn-quiet px-2 py-1 text-xs"
-                    disabled={busy}
-                    onClick={actions.onSuspend}
-                  >
-                    Suspend
-                  </button>
-                )}
-                <button
-                  className="btn-quiet px-2 py-1 text-xs"
-                  onClick={editing ? actions.onCancelEdit : actions.onEdit}
-                >
-                  {editing ? "Close" : "Edit"}
-                </button>
-                <button className="btn-quiet px-2 py-1 text-xs" onClick={actions.onOwner}>
-                  Owner login
-                </button>
-                <Link
-                  className="btn-quiet px-2 py-1 text-xs"
-                  to={`/admin/restaurants/${r.id}/orders`}
-                >
-                  Orders
-                </Link>
-                {/* The API refuses to delete an ACTIVE restaurant. Hiding the
-                    button avoids offering a certain 409. */}
-                {r.status !== "ACTIVE" && (
-                  <button
-                    className="btn-quiet px-2 py-1 text-xs text-brick"
-                    disabled={busy}
-                    onClick={actions.onDelete}
-                  >
-                    Delete
-                  </button>
-                )}
-              </>
-            )}
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Reversible, but it still pulls a storefront offline, so it asks --
+          in the row rather than in a browser dialog that blocks the tab. */}
+      {confirmingDelete && !deleted && (
+        <div className="inline-confirm mt-4">
+          <p>Delete {r.name}? It can be restored, and its subdomain stays reserved.</p>
+          <div className="mt-3.5 flex flex-wrap items-center gap-4">
+            <button
+              type="button"
+              className="btn-danger"
+              disabled={busy}
+              onClick={() => {
+                setConfirmingDelete(false);
+                actions.onDelete();
+              }}
+            >
+              Delete
+            </button>
+            <button type="button" className="link" disabled={busy} onClick={() => setConfirmingDelete(false)}>
+              keep it
+            </button>
           </div>
-        </td>
-      </tr>
+        </div>
+      )}
 
       {editing && (
-        <tr>
-          <td colSpan={4} className="bg-paper px-3 py-4">
-            <RestaurantEditForm
-              restaurant={r}
-              busy={busy}
-              onCancel={actions.onCancelEdit}
-              onSave={actions.onSave}
-            />
-          </td>
-        </tr>
+        <div className="editor mt-[22px] animate-disclose">
+          <RestaurantEditForm
+            restaurant={r}
+            busy={busy}
+            onCancel={actions.onCancelEdit}
+            onSave={actions.onSave}
+          />
+        </div>
       )}
-    </Fragment>
+    </li>
   );
 }
 
@@ -213,7 +237,8 @@ function PurgeButton({
   if (!armed) {
     return (
       <button
-        className="btn-quiet px-2 py-1 text-xs text-brick"
+        type="button"
+        className="link-danger min-h-[32px] text-caption"
         disabled={busy}
         onClick={() => setArmed(true)}
       >
@@ -223,12 +248,11 @@ function PurgeButton({
   }
 
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className="text-xs text-brick">
-        Erase {name} and its menu? This cannot be undone.
-      </span>
+    <span className="inline-confirm mt-2 flex w-full flex-wrap items-center gap-3 p-4 opacity-100">
+      <span className="w-full">Erase {name} and its menu? This cannot be undone.</span>
       <button
-        className="btn-primary px-2 py-1 text-xs"
+        type="button"
+        className="btn-danger btn-compact"
         disabled={busy}
         onClick={() => {
           setArmed(false);
@@ -237,7 +261,7 @@ function PurgeButton({
       >
         Erase
       </button>
-      <button className="text-xs underline" disabled={busy} onClick={() => setArmed(false)}>
+      <button type="button" className="link" disabled={busy} onClick={() => setArmed(false)}>
         keep it
       </button>
     </span>

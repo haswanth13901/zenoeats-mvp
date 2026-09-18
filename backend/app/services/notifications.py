@@ -25,7 +25,10 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.db.base import utcnow
 from app.db.session import system_session, tenant_session
-from app.models import Order, OrderItem, Restaurant, RestaurantUser, StaffStatus, User
+from app.core import guest_auth
+from app.models import (
+    Order, OrderItem, Restaurant, RestaurantUser, StaffStatus, User, UserKind,
+)
 from app.services import clerk_customers, email
 
 log = logging.getLogger(__name__)
@@ -35,7 +38,29 @@ ROLE_WORDS = {
     "MANAGER": "a manager",
     "KITCHEN": "kitchen staff",
     "CASHIER": "a cashier",
+    "DRIVER": "a driver",
 }
+
+# The design tokens for transactional email (design-tokens.json, "emails").
+# Inline styles and a table layout, because mail clients ignore stylesheets
+# and many ignore max-width on a div. No webfonts, images or SVG: nothing
+# that needs a request to render, and nothing a client may strip.
+_PAPER = "#F7F4EF"
+_CARD = "#FFFFFF"
+_LINE = "#DDDCD3"
+_INK = "#252620"
+_MUTED = "#67695F"
+_CTA = "#A83E2A"
+_BODY_FONT = "system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif"
+
+
+def _button(href: str, label_html: str) -> str:
+    """The one call to action: an ordinary link, which the plain-text part repeats."""
+    return (
+        f"<p style=\"margin:24px 0 0\"><a href=\"{html.escape(href)}\" "
+        f"style=\"display:inline-block;background:{_CTA};color:#FFFFFF;text-decoration:none;"
+        f"font-weight:600;padding:12px 20px;border-radius:10px\">{label_html}</a></p>"
+    )
 
 
 def storefront_url(slug: str, path: str = "/") -> str:
@@ -53,22 +78,43 @@ def money(amount_minor: int, currency: str) -> str:
 
 def _layout(title: str, body_html: str) -> str:
     return (
-        "<!doctype html><html><body style=\"margin:0;padding:24px;background:#F5F3EE;"
-        "font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#1A1A17\">"
-        "<div style=\"max-width:520px;margin:0 auto;background:#fff;border:1px solid #E2DED4;"
-        "border-radius:8px;padding:28px\">"
-        f"<h1 style=\"font-family:Georgia,serif;font-weight:400;font-size:24px;margin:0 0 16px\">"
-        f"{html.escape(title)}</h1>{body_html}</div></body></html>"
+        "<!doctype html><html><head><meta name=\"viewport\" "
+        "content=\"width=device-width,initial-scale=1\"></head>"
+        f"<body style=\"margin:0;padding:0;background:{_PAPER}\">"
+        "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" "
+        f"style=\"background:{_PAPER}\"><tr><td align=\"center\" style=\"padding:24px 16px\">"
+        "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" "
+        f"style=\"max-width:600px;background:{_CARD};border:1px solid {_LINE};border-radius:14px\">"
+        f"<tr><td style=\"padding:30px 28px;font-family:{_BODY_FONT};font-size:15px;"
+        f"line-height:1.55;color:{_INK};text-align:left\">"
+        "<h1 style=\"font-family:Georgia,'Times New Roman',serif;font-weight:400;"
+        f"font-size:30px;line-height:1.2;margin:0 0 20px;color:{_INK}\">"
+        f"{html.escape(title)}</h1>{body_html}"
+        "</td></tr></table></td></tr></table></body></html>"
     )
 
 
 # ------------------------------------------------------ order confirmation ---
 
 def compose_order_confirmation(
-    *, restaurant_name: str, slug: str, order: Order, customer_name: str | None
+    *,
+    restaurant_name: str,
+    slug: str,
+    order: Order,
+    customer_name: str | None,
+    for_guest: bool = False,
 ) -> tuple[str, str, str]:
-    """(subject, html, text) for a paid order."""
-    order_url = storefront_url(slug, f"/orders/{order.id}")
+    """(subject, html, text) for a paid order.
+
+    A guest's copy carries a view token on the order link. Their session is a
+    cookie in one browser, so without it this email -- opened on a laptop, or
+    after clearing the browser -- would lead to "we can't find that order",
+    and the pickup PIN it promises would be unreachable.
+    """
+    path = f"/orders/{order.id}"
+    if for_guest:
+        path += f"?t={guest_auth.issue_order_token(order.id)}"
+    order_url = storefront_url(slug, path)
     subject = f"Order #{order.order_number} confirmed at {restaurant_name}"
     greeting = f"Hi {customer_name}," if customer_name else "Hi,"
 
@@ -77,10 +123,11 @@ def compose_order_confirmation(
         extras = [m.option_name_snapshot for m in item.modifiers]
         detail = f" ({', '.join(extras)})" if extras else ""
         rows_html.append(
-            "<tr><td style=\"padding:6px 0;vertical-align:top\">"
+            "<tr><td style=\"padding:8px 0;vertical-align:top\">"
             f"{item.quantity}&times; {html.escape(item.name_snapshot)}"
-            f"<span style=\"color:#6E6A61\">{html.escape(detail)}</span></td>"
-            "<td style=\"padding:6px 0;text-align:right;vertical-align:top\">"
+            f"<span style=\"color:{_MUTED}\">{html.escape(detail)}</span></td>"
+            "<td style=\"padding:8px 0 8px 16px;text-align:right;vertical-align:top;"
+            "white-space:nowrap\">"
             f"{money(item.line_total_minor, order.currency)}</td></tr>"
         )
         rows_text.append(
@@ -88,35 +135,50 @@ def compose_order_confirmation(
             f"{money(item.line_total_minor, order.currency)}"
         )
 
+    delivering = order.fulfillment_type == "DELIVERY"
     totals = [("Subtotal", order.subtotal_minor)]
     if order.discount_minor:
         totals.append(("Discount", -order.discount_minor))
+    # Without its fee a delivery's figures would not add up to its total.
+    if order.delivery_fee_minor:
+        totals.append(("Delivery fee", order.delivery_fee_minor))
     totals += [("Tax", order.tax_minor), ("Total", order.total_minor)]
-    totals_html = "".join(
-        f"<tr><td style=\"padding:4px 0;color:#6E6A61\">{label}</td>"
-        f"<td style=\"padding:4px 0;text-align:right\">{money(amount, order.currency)}</td></tr>"
-        for label, amount in totals
+    def total_row(label: str, amount: int) -> str:
+        # The total is the one figure that is ink and bold; the rest are its parts.
+        weight = "font-weight:600" if label == "Total" else f"color:{_MUTED}"
+        return (
+            f"<tr><td style=\"padding:4px 0;{weight}\">{label}</td>"
+            f"<td style=\"padding:4px 0;text-align:right;{weight}\">"
+            f"{money(amount, order.currency)}</td></tr>"
+        )
+
+    totals_html = "".join(total_row(label, amount) for label, amount in totals)
+
+    # A delivery has no PIN: nobody collects it at a counter. Promising one
+    # sends the customer looking for something that does not exist.
+    next_step = (
+        "Your order page shows its progress, and where your driver is once it is on the way."
+        if delivering
+        else "Your pickup PIN is on your order page. Show it at the counter to collect."
     )
 
     body = (
         f"<p>{html.escape(greeting)}</p>"
         f"<p>{html.escape(restaurant_name)} has your order and is making it now.</p>"
-        "<table style=\"width:100%;border-collapse:collapse;margin:16px 0;"
-        "border-top:1px solid #E2DED4;border-bottom:1px solid #E2DED4\">"
+        "<table role=\"presentation\" style=\"width:100%;border-collapse:collapse;margin:20px 0;"
+        f"border-top:1px solid {_LINE};border-bottom:1px solid {_LINE};font-size:14px\">"
         f"{''.join(rows_html)}</table>"
-        f"<table style=\"width:100%;border-collapse:collapse\">{totals_html}</table>"
-        "<p style=\"margin-top:20px\">Your pickup PIN is on your order page. Show it at the "
-        "counter to collect.</p>"
-        f"<p><a href=\"{html.escape(order_url)}\" style=\"display:inline-block;background:#B3341F;"
-        "color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px\">View your order"
-        "</a></p>"
+        "<table role=\"presentation\" style=\"width:100%;border-collapse:collapse;font-size:14px\">"
+        f"{totals_html}</table>"
+        f"<p style=\"margin-top:20px\">{html.escape(next_step)}</p>"
+        + _button(order_url, "View your order")
     )
     text = "\n".join(
         [greeting, "", f"{restaurant_name} has your order #{order.order_number} and is making it now.", ""]
         + rows_text
         + [""]
         + [f"  {label}: {money(amount, order.currency)}" for label, amount in totals]
-        + ["", "Your pickup PIN is on your order page. Show it at the counter to collect:", order_url]
+        + ["", f"{next_step[:-1]}:", order_url]
     )
     return subject, _layout(f"Order #{order.order_number} confirmed", body), text
 
@@ -142,14 +204,16 @@ def send_order_confirmation(restaurant_id: UUID, order_id: UUID) -> bool:
         customer = session.get(User, customer_id)
         if customer is None:
             return False
-        to = clerk_customers.receipt_address(customer)
-        customer_name = (customer.full_name or "").split(" ")[0] or None
+        to = order.contact_email or clerk_customers.receipt_address(customer)
+        customer_name = (order.contact_name or customer.full_name or "").split(" ")[0] or None
+        for_guest = customer.kind == UserKind.GUEST.value
 
     if not to:
         return False
 
     subject, body_html, body_text = compose_order_confirmation(
-        restaurant_name=restaurant_name, slug=slug, order=order, customer_name=customer_name
+        restaurant_name=restaurant_name, slug=slug, order=order,
+        customer_name=customer_name, for_guest=for_guest,
     )
     sent = email.send(email.Email(
         to=to, subject=subject, html=body_html, text=body_text,
@@ -185,10 +249,9 @@ def compose_staff_invitation(
         f"<p>{html.escape(restaurant_name)} has invited you to join their team as "
         f"{html.escape(role)}.</p>"
         f"<p>{html.escape(password_line)}</p>"
-        f"<p><a href=\"{html.escape(sign_in_url)}\" style=\"display:inline-block;background:#B3341F;"
-        "color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px\">Sign in to "
-        f"{html.escape(restaurant_name)}</a></p>"
-        "<p style=\"color:#6E6A61;font-size:13px\">If you weren't expecting this, you can "
+        + _button(sign_in_url, f"Sign in to {html.escape(restaurant_name)}")
+        + f"<p style=\"color:{_MUTED};font-size:13px;margin-top:24px\">If you weren't expecting "
+        "this, you can "
         "ignore it. The invitation gives no access until it's accepted.</p>"
     )
     text = "\n".join([

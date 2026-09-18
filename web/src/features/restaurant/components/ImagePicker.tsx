@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { PhotoIcon } from "@/components/common/icons";
+import { Icon, PhotoIcon } from "@/components/common/icons";
 import { errorMessage } from "@/services/apiClient";
 import { shrinkForUpload } from "@/utils/image";
 import { uploadImage, type ImageKind, type UploadedImage } from "../restaurantApi";
@@ -95,15 +95,17 @@ export function ImagePicker({
       onClick={() => input.current?.click()}
       aria-label={image.url ? `Change the photo of ${label}` : `Add a photo of ${label}`}
       title={image.url ? "Change photo" : "Add photo"}
-      className={`${box} relative flex shrink-0 items-center justify-center overflow-hidden rounded border border-hairline bg-paper text-muted hover:border-ink disabled:hover:border-hairline`}
+      className={`${box} relative flex shrink-0 items-center justify-center overflow-hidden border border-hairline bg-paper text-muted transition-colors duration-color hover:border-ink disabled:hover:border-hairline`}
     >
       {image.url ? (
         <img src={image.url} alt="" className="h-full w-full object-cover" />
       ) : (
         <PhotoIcon />
       )}
+      {/* Over the thumbnail only while uploading, and never catching the
+          pointer: the form's other controls stay usable around it. */}
       {busy && (
-        <span className="absolute inset-0 flex items-center justify-center bg-surface/80 text-[10px] text-ink">
+        <span className="pointer-events-none absolute inset-0 grid place-items-center bg-white/[.86] text-[11px] text-ink">
           …
         </span>
       )}
@@ -113,7 +115,7 @@ export function ImagePicker({
   if (size === "sm") {
     return (
       <span className="relative inline-flex shrink-0">
-        {thumbnail("h-9 w-9")}
+        {thumbnail("h-[38px] w-[38px] rounded-status")}
         {image.url && !busy && (
           <button
             type="button"
@@ -121,9 +123,9 @@ export function ImagePicker({
             onClick={() => onChange(NO_IMAGE)}
             aria-label={`Remove the photo of ${label}`}
             title="Remove photo"
-            className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-ink text-[10px] leading-none text-white"
+            className="absolute -right-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-danger text-white"
           >
-            ×
+            <Icon name="close" className="h-3 w-3" />
           </button>
         )}
         {fileInput}
@@ -132,12 +134,12 @@ export function ImagePicker({
   }
 
   return (
-    <div className="flex items-center gap-3">
-      {thumbnail("h-20 w-20")}
-      <div className="flex flex-col items-start gap-1 text-xs">
+    <div className="flex items-center gap-[13px]">
+      {thumbnail("h-20 w-20 rounded-field")}
+      <div className="flex flex-col items-start">
         <button
           type="button"
-          className="text-muted underline"
+          className="link min-h-[32px]"
           disabled={off}
           onClick={() => input.current?.click()}
         >
@@ -146,14 +148,14 @@ export function ImagePicker({
         {image.url && !busy && (
           <button
             type="button"
-            className="text-brick underline"
+            className="link-danger min-h-[32px]"
             disabled={disabled}
             onClick={() => onChange(NO_IMAGE)}
           >
             remove photo
           </button>
         )}
-        <span className="text-muted">JPEG, PNG or WebP.</span>
+        <span className="text-caption text-muted">JPEG, PNG or WebP.</span>
       </div>
       {fileInput}
     </div>

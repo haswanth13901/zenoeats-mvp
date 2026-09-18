@@ -17,14 +17,14 @@ from sqlalchemy.orm import Session
 
 from app.core import errors
 from app.core.auth import AuthError, ClerkPrincipal, verify_clerk_token
-from app.core import platform_auth, staff_auth
+from app.core import guest_auth, platform_auth, staff_auth
 from app.core.tenant import admin_host, extract_slug, host_of
 from app.db.session import AppSessionLocal, system_session
 from app.models import (
     Restaurant, RestaurantStatus, RestaurantUser, StaffRole, StaffStatus, User,
     UserKind,
 )
-from app.services import clerk_customers
+from app.services import clerk_customers, guest_customers
 from sqlalchemy import text
 
 
@@ -44,16 +44,55 @@ def get_principal(authorization: str | None = Header(default=None)) -> ClerkPrin
         raise errors.ApiError(401, "UNAUTHENTICATED", str(exc)) from exc
 
 
-def get_current_user(principal: ClerkPrincipal = Depends(get_principal)) -> User:
-    """The customer behind a verified Clerk session.
+def get_current_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> User:
+    """Whoever is checking out: a signed-in customer, or a guest.
 
-    Created on first sight, with the email and name read from Clerk's Backend
-    API, so a customer who signed up seconds ago reaches checkout with a real
-    receipt address instead of waiting for the webhook.
+    A Clerk bearer token is tried first and wins outright. Someone who signed
+    in after starting as a guest is the account they signed in as, whatever
+    stale guest cookie the browser still holds -- the alternative, letting a
+    cookie nobody authenticated shadow a real session, is the wrong way round.
+
+    Either way the answer is a users row, so every caller -- ownership checks,
+    idempotency, the rate limiter, receipts -- is written once and does not
+    know which kind it got. What a guest cannot do is anything but ordering:
+    the row is reachable only through the cookie that created it.
     """
-    return clerk_customers.customer_for_clerk_user(
-        principal.clerk_user_id, token_email=principal.email
-    )
+    if authorization and authorization.lower().startswith("bearer "):
+        principal = get_principal(authorization)
+        return clerk_customers.customer_for_clerk_user(
+            principal.clerk_user_id, token_email=principal.email
+        )
+
+    cookie = request.cookies.get(guest_auth.SESSION_COOKIE)
+    if cookie:
+        guest = guest_auth.verify_session(cookie)
+        if guest is not None:
+            return guest_customers.guest_for_session(guest.user_id)
+
+    # No token and no usable cookie. The wording covers both ways forward,
+    # because the sign-in page this sends people to offers both.
+    raise errors.ApiError(401, "UNAUTHENTICATED", "Sign in or continue as a guest to order.")
+
+
+def optional_current_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> User | None:
+    """get_current_user, but None instead of a 401.
+
+    For the one endpoint that has a second way in -- the order-view token in a
+    guest's confirmation email -- and therefore must not refuse a caller
+    before it has looked at that.
+    """
+    try:
+        return get_current_user(request, authorization)
+    except errors.ApiError as exc:
+        if exc.status_code == 401:
+            return None
+        raise
 
 
 def resolve_tenant(request: Request) -> TenantContext:

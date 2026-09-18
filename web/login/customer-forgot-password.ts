@@ -1,6 +1,6 @@
 import {
-  activateAndContinue, clerkErrorMessage, el, loadClerk, minPasswordLength, readCode,
-  showMessage, wirePasswordPair, withNext, type ClerkInstance,
+  activateAndContinue, clerkErrorMessage, el, loadClerk, minPasswordLength, paintWordmarks,
+  readCode, showMessage, wirePasswordPair, withNext, type ClerkInstance,
 } from "./customer-shared";
 
 /**
@@ -22,6 +22,8 @@ const resendButton = el<HTMLButtonElement>("resend");
 const errorBox = el<HTMLParagraphElement>("error");
 
 el<HTMLAnchorElement>("sign-in").href = withNext("/account/sign-in");
+
+void paintWordmarks();
 
 void loadClerk(errorBox).then((clerk) => {
   if (clerk) start(clerk);

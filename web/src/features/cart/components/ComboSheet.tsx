@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { MenuImage } from "@/components/common/MenuImage";
+import { QuantityStepper, Sheet } from "@/components/common/Sheet";
 import { money, signedMoney } from "@/utils/format";
 import type { Combo, Item, Option } from "@/types";
 import {
@@ -102,141 +103,45 @@ export function ComboSheet({
 
   const ready = emptySlots.length === 0 && unanswered.length === 0;
 
+  const helper =
+    emptySlots.length > 0
+      ? `Still to choose: ${emptySlots.join(", ")}.`
+      : unanswered.length > 0
+        ? `Choose an option for ${unanswered.join(", ")}.`
+        : null;
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Build ${combo.name}`}
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-xl bg-surface sm:rounded-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="sticky top-0 z-10 border-b border-hairline bg-surface px-5 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="font-display text-2xl leading-tight">{combo.name}</h2>
-              {combo.description && (
-                <p className="mt-1 max-w-prose text-sm text-muted">{combo.description}</p>
-              )}
-              <p className="mt-1 text-sm text-brick">{savingLabel(combo, currency)}</p>
-            </div>
-            <button onClick={onClose} className="btn-quiet px-2 py-1" aria-label="Close">
-              ✕
-            </button>
-          </div>
-        </header>
-
-        <div className="space-y-8 px-5 py-5">
-          {combo.slots.map((slot) => {
-            const choice = choices[slot.id];
-            return (
-              <section key={slot.id}>
-                {/* The type name as a heading, with no article in front:
-                    it is the restaurant's own word and may be plural, so
-                    "Choose a Tiffins" is a sentence this cannot write. */}
-                <div className="flex items-baseline justify-between pb-2">
-                  <h3 className="text-sm font-medium">{slot.label}</h3>
-                  <span className="text-xs text-muted">Choose one</span>
-                </div>
-
-                <div className="divide-y divide-hairline border-y border-hairline">
-                  {slot.items.map((item) => (
-                    <label
-                      key={item.id}
-                      className={`flex cursor-pointer items-center gap-3 py-2.5 ${
-                        item.is_available ? "" : "opacity-40"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name={`slot:${slot.id}`}
-                        checked={choice?.item.id === item.id}
-                        disabled={!item.is_available}
-                        onChange={() => chooseItem(slot.id, item)}
-                        className="h-4 w-4 accent-brick"
-                      />
-                      <MenuImage
-                        src={item.image_url}
-                        className="h-10 w-10 shrink-0 rounded bg-paper object-cover"
-                      />
-                      <span className="flex-1 text-sm">
-                        {item.name}
-                        {!item.is_available && (
-                          <span className="ml-2 text-xs text-brick">sold out</span>
-                        )}
-                      </span>
-                      <span className="tnum text-sm text-muted">
-                        {money(item.base_price_minor, currency)}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-
-                {/* The chosen item's own modifiers, in place. A combo does not
-                    relax them: a required choice is still required inside one. */}
-                {choice && choice.item.modifier_groups.length > 0 && (
-                  <div className="mt-4 space-y-5 border-l-2 border-hairline pl-4">
-                    <ModifierGroups
-                      item={choice.item}
-                      currency={currency}
-                      selected={choice.selected}
-                      scope={slot.id}
-                      onToggle={(group, option) => toggle(slot.id, group, option)}
-                    />
-                  </div>
-                )}
-              </section>
-            );
-          })}
-
-          <label className="block">
-            <span className="text-sm font-medium">Note for the kitchen</span>
-            <input
-              className="field mt-2"
-              value={note}
-              maxLength={280}
-              placeholder="Allergies, how you'd like it cooked"
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <footer className="sticky bottom-0 border-t border-hairline bg-surface px-5 py-4">
+    <Sheet
+      title={combo.name}
+      description={combo.description}
+      eyebrow={
+        <p className="mt-3 text-[13px] font-[650] text-brick">{savingLabel(combo, currency)}</p>
+      }
+      onClose={onClose}
+      footer={
+        <>
           {discount > 0 && (
-            <div className="mb-3 flex items-baseline justify-between text-sm">
-              <span className="text-muted">
-                {money(itemsSubtotal, currency)} separately
-              </span>
-              <span className="tnum text-brick">
-                {signedMoney(-discount, currency)}
-              </span>
+            <div className="mb-[13px] flex items-baseline justify-between text-caption">
+              <span className="text-muted">{money(itemsSubtotal, currency)} separately</span>
+              {/* Replaced, never counted up: a preview must not flash an
+                  amount it is not. */}
+              <span className="tnum font-[650] text-brick">{signedMoney(-discount, currency)}</span>
             </div>
           )}
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center rounded-md border border-hairline">
-              <button
-                className="px-3 py-2 text-lg leading-none"
-                onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                aria-label="Decrease quantity"
-              >
-                −
-              </button>
-              <span className="tnum w-8 text-center text-sm">{quantity}</span>
-              <button
-                className="px-3 py-2 text-lg leading-none"
-                onClick={() => setQuantity((q) => Math.min(20, q + 1))}
-                aria-label="Increase quantity"
-              >
-                +
-              </button>
-            </div>
+          {/* Named, not merely counted. A combo has several ways to be
+              unfinished and the customer should not have to hunt for which. */}
+          {helper && (
+            <p id="combo-helper" className="mb-2.5 text-caption text-danger">
+              {helper}
+            </p>
+          )}
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <QuantityStepper value={quantity} min={1} max={20} label="items" onChange={setQuantity} />
             <button
-              className="btn-primary flex-1"
+              type="button"
+              className="btn-primary flex-1 rounded-full px-[11px] sm:px-[19px]"
               disabled={!ready}
+              aria-describedby={helper ? "combo-helper" : undefined}
               onClick={() => {
                 onAdd(
                   filled.map(({ slot, choice }) => ({
@@ -251,26 +156,85 @@ export function ComboSheet({
                 onClose();
               }}
             >
-              Add {quantity > 1 ? `${quantity} ` : ""}·{" "}
-              <span className="tnum ml-1">{money(unit * quantity, currency)}</span>
+              Add {quantity} · <span className="tnum">{money(unit * quantity, currency)}</span>
             </button>
           </div>
+        </>
+      }
+    >
+      {combo.slots.map((slot) => {
+        const choice = choices[slot.id];
+        return (
+          <section key={slot.id}>
+            <fieldset>
+              {/* The type name as a heading, with no article in front: it is
+                  the restaurant's own word and may be plural, so "Choose a
+                  Tiffins" is a sentence this cannot write. */}
+              <legend className="mb-1 text-sm font-semibold">
+                {slot.label}
+                <span className="text-caption font-normal text-muted"> · Choose one</span>
+              </legend>
+              {slot.items.map((item) => {
+                const checked = choice?.item.id === item.id;
+                return (
+                  <label
+                    key={item.id}
+                    className={`mt-2 flex min-h-[52px] items-center gap-3 rounded-button border px-3 py-[11px] transition-colors duration-color ease-standard ${
+                      checked ? "border-brick bg-brickSoft/60" : "border-hairline"
+                    } ${item.is_available ? "cursor-pointer" : "cursor-not-allowed opacity-[.45]"}`}
+                  >
+                    <input
+                      type="radio"
+                      name={`slot:${slot.id}`}
+                      checked={checked}
+                      disabled={!item.is_available}
+                      onChange={() => chooseItem(slot.id, item)}
+                      className="h-5 w-5 shrink-0"
+                    />
+                    <MenuImage
+                      src={item.image_url}
+                      className="h-10 w-10 shrink-0 rounded-status bg-paper object-cover"
+                    />
+                    <span className="min-w-0 flex-1 text-sm">
+                      {item.name}
+                      {!item.is_available && <span className="text-danger"> · Sold out</span>}
+                    </span>
+                    <span className="tnum ml-auto whitespace-nowrap text-caption">
+                      {money(item.base_price_minor, currency)}
+                    </span>
+                  </label>
+                );
+              })}
+            </fieldset>
 
-          {/* Named, not merely counted. A combo has several ways to be
-              unfinished and the customer should not have to hunt for which. */}
-          {emptySlots.length > 0 && (
-            <p className="mt-2 text-xs text-brick">
-              Still to choose: {emptySlots.join(", ")}.
-            </p>
-          )}
-          {emptySlots.length === 0 && unanswered.length > 0 && (
-            <p className="mt-2 text-xs text-brick">
-              Choose an option for {unanswered.join(", ")}.
-            </p>
-          )}
-        </footer>
-      </div>
-    </div>
+            {/* The chosen item's own modifiers, in place. A combo does not
+                relax them: a required choice is still required inside one. */}
+            {choice && choice.item.modifier_groups.length > 0 && (
+              <div className="ml-5 mt-4 flex animate-disclose flex-col gap-4 border-l-2 border-brickSoft pl-4">
+                <ModifierGroups
+                  item={choice.item}
+                  currency={currency}
+                  selected={choice.selected}
+                  scope={slot.id}
+                  onToggle={(group, option) => toggle(slot.id, group, option)}
+                />
+              </div>
+            )}
+          </section>
+        );
+      })}
+
+      <label className="block">
+        <span className="label">Note for the kitchen</span>
+        <textarea
+          className="field mt-[7px]"
+          value={note}
+          maxLength={280}
+          placeholder="Allergies, how you'd like it cooked"
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </label>
+    </Sheet>
   );
 }
 

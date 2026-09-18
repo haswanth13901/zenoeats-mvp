@@ -40,6 +40,9 @@ class PricedLine:
     line_total_minor: int
     note: str | None = None
     modifiers: list[PricedModifier] = field(default_factory=list)
+    # From the item, read at pricing time like its price. Not stored on the
+    # order: the tax the order was charged is what it keeps.
+    taxable: bool = True
     # Set on the lines a combo produced. A combo is not a line of its own: it
     # becomes one line per slot at the item's own price, and the saving is
     # taken off the cart. combo_group numbers the combos within one cart, so
@@ -176,6 +179,7 @@ def price_cart(
                 line_total_minor=line_total,
                 note=note,
                 modifiers=selected,
+                taxable=not item.tax_exempt,
             )
         )
 
@@ -202,7 +206,12 @@ def price_cart(
     tax_result = TaxService.calculate(
         session,
         restaurant,
-        [TaxLine(amount_minor=line.line_total_minor, quantity=line.quantity) for line in priced_lines],
+        [
+            TaxLine(
+                amount_minor=line.line_total_minor, quantity=line.quantity, taxable=line.taxable
+            )
+            for line in priced_lines
+        ],
         discount,
         shipping_minor=fee,
     )
@@ -450,6 +459,7 @@ def _price_combo(
                 # rather than being repeated against every part of the meal.
                 note=note if not lines else None,
                 modifiers=selected,
+                taxable=not item.tax_exempt,
                 combo_id=combo.id,
                 combo_name=combo.name,
                 combo_group=group_number,

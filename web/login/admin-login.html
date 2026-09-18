@@ -13,30 +13,42 @@
     <link rel="stylesheet" href="/src/styles/globals.css" />
   </head>
   <body>
-    <main class="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-5">
-      <h1 class="font-display text-3xl">Zenoeats platform</h1>
-      <p class="mt-2 text-sm text-muted">Super administrator sign-in.</p>
+    <main class="auth">
+      <aside class="auth-art" aria-hidden="true">
+        <div class="auth-brand"><span class="brand-mark">z</span>Zenoeats</div>
+        <div>
+          <div class="cloche ml-10 mt-10 scale-150"><span class="cloche-plate"></span><span class="cloche-dome"></span><span class="cloche-knob"></span></div>
+          <p class="auth-art-caption">A little order.<br />A better service.</p>
+        </div>
+        <p class="text-caption text-muted">The care behind every order.</p>
+      </aside>
 
-      <form id="login-form" class="mt-8 space-y-4" novalidate>
-        <label class="block">
-          <span class="text-sm font-medium">Email</span>
-          <input id="email" class="field mt-2" type="email" autocomplete="username" required autofocus />
-        </label>
+      <section class="auth-form">
+        <div class="auth-brand"><span class="brand-mark" aria-hidden="true">z</span>Zenoeats</div>
+        <h1>Zenoeats platform</h1>
+        <p class="auth-intro">Super administrator sign-in.</p>
 
-        <label class="block">
-          <span class="text-sm font-medium">Password</span>
-          <input id="password" class="field mt-2" type="password" autocomplete="current-password" required />
-        </label>
+        <form id="login-form" class="auth-stack" novalidate>
+          <label class="block">
+            <span class="label">Email</span>
+            <input id="email" class="field mt-[7px]" type="email" autocomplete="username" required autofocus />
+          </label>
 
-        <p id="error" class="border-l-2 border-brick bg-brick/5 px-3 py-2 text-sm text-brick" hidden></p>
+          <label class="block">
+            <span class="label">Password</span>
+            <input id="password" class="field mt-[7px]" type="password" autocomplete="current-password" required />
+          </label>
 
-        <button id="submit" class="btn-primary w-full" type="submit">Sign in</button>
-      </form>
+          <p id="error" class="note-error" role="alert" hidden></p>
 
-      <p class="mt-6 text-xs text-muted">
-        Administrators are configured in the deployment environment. Contact
-        whoever holds it if you need access.
-      </p>
+          <button id="submit" class="btn-primary w-full" type="submit">Sign in</button>
+        </form>
+
+        <p class="auth-foot">
+          Administrators are configured in the deployment environment. Contact
+          whoever holds it if you need access.
+        </p>
+      </section>
     </main>
 
     <script type="module" src="/login/admin-login.ts"></script>

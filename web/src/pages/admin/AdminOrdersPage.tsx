@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
-import { Empty, ErrorNote } from "@/components/common/Feedback";
+import { Link, useParams } from "react-router-dom";
+import { Empty, ErrorNote, Loading } from "@/components/common/Feedback";
+import { Icon } from "@/components/common/icons";
+import { PageTitle } from "@/components/layout/Shell";
 import { AdminShell } from "@/features/admin/components/AdminShell";
 import { useRestaurantOrdersQuery } from "@/features/admin/adminApi";
 import { errorMessage } from "@/services/apiClient";
@@ -47,61 +49,73 @@ export function AdminOrdersPage() {
 
   return (
     <AdminShell>
+      <Link
+        to="/admin"
+        className="mb-4 inline-flex min-h-[40px] items-center gap-2 text-caption text-muted hover:text-ink"
+      >
+        <Icon name="back" className="h-4 w-4" />
+        Restaurants
+      </Link>
+      <PageTitle
+        title={page.data?.slug ?? "…"}
+        subtitle="Restaurant orders"
+        right={
+          <label className="block w-full sm:w-56">
+            <span className="label">Status</span>
+            <select
+              className="field mt-[7px]"
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setOffset(0); // a new filter means a new result set, not page 3 of it
+              }}
+            >
+              {STATUSES.map((s) => (
+                <option key={s || "all"} value={s}>
+                  {s || "All"}
+                </option>
+              ))}
+            </select>
+          </label>
+        }
+      />
+
       <ErrorNote message={page.error ? errorMessage(page.error) : null} />
 
-      <div className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="font-display text-2xl">{page.data?.slug ?? "…"}</h2>
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted">Status</span>
-          <select
-            className="field w-auto py-1.5"
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setOffset(0); // a new filter means a new result set, not page 3 of it
-            }}
-          >
-            {STATUSES.map((s) => (
-              <option key={s || "all"} value={s}>
-                {s || "All"}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
       {page.isLoading ? (
-        <Empty>Loading…</Empty>
+        <Loading />
       ) : !orders.length ? (
         <Empty>No orders{status ? ` with status ${status}` : ""} yet.</Empty>
       ) : (
         <>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
+          <div className={`card overflow-x-auto py-2 ${page.isFetching ? "opacity-[.48]" : ""}`}>
+            <table className="data-table min-w-[750px]">
               <thead>
-                <tr className="border-y border-hairline text-left text-xs text-muted">
-                  <th className="py-2 font-medium">Order</th>
-                  <th className="font-medium">Status</th>
-                  <th className="font-medium">Payment</th>
-                  <th className="text-right font-medium">Tax</th>
-                  <th className="text-right font-medium">Total</th>
-                  <th className="font-medium">Placed</th>
+                <tr>
+                  <th>Order</th>
+                  <th>Status</th>
+                  <th>Payment</th>
+                  <th className="text-right">Tax</th>
+                  <th className="text-right">Total</th>
+                  <th>Placed</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-hairline">
+              <tbody>
                 {orders.map((o) => (
                   <tr key={o.order_id}>
-                    <td className="tnum py-3">#{o.order_number}</td>
-                    <td className="text-xs">{o.status}</td>
-                    <td className="text-xs">
+                    <td className="tnum font-semibold">#{o.order_number}</td>
+                    <td>
+                      <span className="pill">{o.status}</span>
+                    </td>
+                    <td className="text-caption">
                       {o.payment_status ?? <span className="text-muted">none</span>}
                       {o.stripe_payment_intent_id && (
-                        <div className="text-muted">{o.stripe_payment_intent_id}</div>
+                        <div className="font-mono text-[11px] text-muted">{o.stripe_payment_intent_id}</div>
                       )}
                     </td>
                     <td className="tnum text-right">{money(o.tax_minor, o.currency)}</td>
                     <td className="tnum text-right">{money(o.total_minor, o.currency)}</td>
-                    <td className="text-xs text-muted">
+                    <td className="whitespace-nowrap text-caption text-muted">
                       {new Date(o.created_at).toLocaleString()}
                     </td>
                   </tr>
@@ -110,31 +124,38 @@ export function AdminOrdersPage() {
             </table>
           </div>
 
-          <div className="mt-4 flex items-center justify-between text-sm">
-            <span className="text-muted">
+          <nav
+            aria-label="Pages"
+            className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm"
+          >
+            <span className="tnum text-muted">
               {offset + 1}–{offset + orders.length} of {total}
             </span>
             <div className="flex gap-2">
               <button
-                className="btn-quiet px-3 py-1.5"
+                type="button"
+                className="btn-quiet"
                 disabled={offset === 0}
                 onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               >
+                <Icon name="back" className="h-4 w-4" />
                 Previous
               </button>
               <button
-                className="btn-quiet px-3 py-1.5"
+                type="button"
+                className="btn-quiet"
                 disabled={offset + orders.length >= total}
                 onClick={() => setOffset(offset + PAGE_SIZE)}
               >
                 Next
+                <Icon name="arrow" className="h-4 w-4" />
               </button>
             </div>
-          </div>
+          </nav>
         </>
       )}
 
-      <p className="mt-8 text-xs text-muted">
+      <p className="mt-[30px] text-[11px] leading-relaxed text-muted">
         Customer notes and pickup PINs are not shown here. The platform database role
         has no permission to read them.
       </p>

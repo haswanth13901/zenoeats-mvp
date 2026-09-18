@@ -1,6 +1,7 @@
 """TaxService: how much tax an order carries, per the restaurant's tax mode.
 
-  FLAT        tax_rate_bps applied to the post-discount total. Simple and
+  FLAT        tax_rate_bps applied to the post-discount total of the taxable
+              lines. Simple and
               wrong for most real menus: prepared food is taxed at state plus
               county, city and district rates that vary street by street.
 
@@ -9,6 +10,10 @@
               See services/stripe_tax.py.
 
 The pricing engine calls calculate() and never needs to know which it got.
+
+Either way, a line for a tax-exempt item carries no tax. A cart discount is
+still shared across every line, exempt ones included, so an exempt item takes
+its own share of a combo saving rather than handing it to the taxed food.
 """
 
 from dataclasses import dataclass
@@ -27,6 +32,8 @@ class TaxLine:
     quantity, which some jurisdictions' per-item thresholds depend on."""
     amount_minor: int
     quantity: int
+    # False for an item the restaurant marked tax-exempt.
+    taxable: bool = True
 
 
 @dataclass(frozen=True)
@@ -87,7 +94,7 @@ class TaxService:
         amounts = allocate_discount([line.amount_minor for line in lines], discount_minor)
 
         if restaurant.tax_mode != TaxMode.STRIPE_TAX.value:
-            taxable = sum(amounts)
+            taxable = sum(a for a, line in zip(amounts, lines) if line.taxable)
             # Asked only when there is a fee: a collection has no delivery to
             # have an opinion about.
             if shipping_minor and restaurant.delivery_fee_taxable:
@@ -106,6 +113,9 @@ class TaxService:
         return stripe_tax.calculate(
             restaurant,
             account.stripe_account_id,
-            [TaxLine(amount_minor=a, quantity=line.quantity) for a, line in zip(amounts, lines)],
+            [
+                TaxLine(amount_minor=a, quantity=line.quantity, taxable=line.taxable)
+                for a, line in zip(amounts, lines)
+            ],
             shipping_minor=shipping_minor,
         )

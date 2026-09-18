@@ -99,3 +99,106 @@ def test_zero_retention_keeps_every_webhook_delivery(monkeypatch):
     finally:
         with retention._platform_transaction() as session:
             session.execute(text("DELETE FROM stripe_events WHERE id = :id"), {"id": ancient})
+
+
+# ------------------------------------------------------- abandoned guests ---
+
+def _guest(created_at) -> uuid.UUID:
+    """A guest row, as "continue as guest" creates one."""
+    from app.db.session import system_session
+    from app.models import User, UserKind
+
+    with system_session() as session:
+        user = User(
+            kind=UserKind.GUEST.value,
+            email=f"guest-{uuid.uuid4().hex[:8]}@zenoeats.invalid",
+        )
+        session.add(user)
+        session.flush()
+        uid = user.id
+        session.execute(
+            text("UPDATE users SET created_at = :t WHERE id = :id"),
+            {"t": created_at, "id": uid},
+        )
+    return uid
+
+
+def test_a_guest_who_never_ordered_is_swept():
+    old = _guest(utcnow() - timedelta(days=settings.GUEST_RETENTION_DAYS + 1))
+    assert _exists("users", old)
+    retention._sweep_abandoned_guests(settings.GUEST_RETENTION_DAYS)
+    assert not _exists("users", old)
+
+
+def test_a_recent_guest_is_left_alone():
+    """Their cookie is still live and their cart may still be open."""
+    fresh = _guest(utcnow())
+    retention._sweep_abandoned_guests(settings.GUEST_RETENTION_DAYS)
+    assert _exists("users", fresh)
+
+
+def test_a_guest_who_ordered_is_never_swept(active_restaurant_with_order):
+    """The property that matters.
+
+    orders is under RLS and the sweep holds no tenant, so asking "did this
+    guest order?" as the app role answers no for everyone -- which would have
+    proposed deleting the customer of every paid guest sale. The system role
+    is what can see across tenants; this test fails if that ever regresses,
+    rather than waiting for a foreign key to refuse in production.
+    """
+    guest_id, order_id, rid = active_restaurant_with_order
+
+    # Swept with the most aggressive cutoff there is: age is not what
+    # protects this row, owning an order is.
+    retention._sweep_abandoned_guests(0)
+
+    assert _exists("users", guest_id), "a guest who paid for an order was deleted"
+    from app.db.session import tenant_session
+
+    with tenant_session(rid) as session:
+        assert session.execute(
+            text("SELECT 1 FROM orders WHERE id = :id"), {"id": order_id}
+        ).first() is not None, "their order went with them"
+
+
+@pytest.fixture
+def active_restaurant_with_order():
+    """A guest who placed a real order, and the restaurant it belongs to."""
+    from app.db.session import system_session, tenant_session
+    from app.models import (
+        Order, OrderStatus, PaymentStatus, Restaurant, RestaurantStatus, User, UserKind,
+    )
+
+    slug = f"retention-{uuid.uuid4().hex[:8]}"
+    with system_session() as session:
+        restaurant = Restaurant(slug=slug, name="Retention Test", timezone="UTC",
+                                currency="USD", status=RestaurantStatus.ACTIVE.value)
+        guest = User(kind=UserKind.GUEST.value,
+                     email=f"payer-{uuid.uuid4().hex[:8]}@zenoeats.invalid")
+        session.add_all([restaurant, guest])
+        session.flush()
+        rid, guest_id = restaurant.id, guest.id
+        session.execute(
+            text("UPDATE users SET created_at = :t WHERE id = :id"),
+            {"t": utcnow() - timedelta(days=3650), "id": guest_id},
+        )
+
+    with tenant_session(rid) as session:
+        order = Order(
+            restaurant_id=rid, order_number=1, customer_user_id=guest_id,
+            status=OrderStatus.COMPLETED.value, payment_method="CARD", currency="USD",
+            subtotal_minor=500, discount_minor=0, tax_minor=0, total_minor=500,
+        )
+        session.add(order)
+        session.flush()
+        order_id = order.id
+
+    yield guest_id, order_id, rid
+
+    with tenant_session(rid) as session:
+        session.execute(text("DELETE FROM orders WHERE restaurant_id = :r"), {"r": rid})
+        session.execute(text("DELETE FROM restaurants WHERE id = :r"), {"r": rid})
+    # The app role, not the system one: only zenoeats_app may delete a user,
+    # which is why the sweep itself splits the work across both.
+    with retention._platform_transaction() as session:
+        session.execute(text("DELETE FROM users WHERE id = :id"), {"id": guest_id})

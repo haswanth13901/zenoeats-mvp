@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Spinner } from "@/components/common/Feedback";
 import type { Restaurant, RestaurantAddress, RestaurantPatch, TaxMode } from "../adminApi";
 
 /**
@@ -92,16 +93,16 @@ export function RestaurantEditForm({
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2">
+    <form onSubmit={submit} className="flex flex-col gap-6">
+      <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2">
         <label className="block">
-          <span className="text-xs text-muted">Name</span>
-          <input className="field mt-1" value={name} onChange={(e) => setName(e.target.value)} />
+          <span className="label">Name</span>
+          <input className="field mt-[7px]" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="block">
-          <span className="text-xs text-muted">Tagline</span>
+          <span className="label">Tagline</span>
           <input
-            className="field mt-1"
+            className="field mt-[7px]"
             value={tagline}
             maxLength={200}
             placeholder="none"
@@ -110,13 +111,13 @@ export function RestaurantEditForm({
         </label>
       </div>
 
-      <fieldset className="space-y-3 border-t border-hairline pt-3">
-        <legend className="text-xs font-medium text-muted">Sales tax</legend>
-        <div className="grid gap-3 sm:grid-cols-3">
+      <fieldset className="border-t border-hairline pt-5">
+        <legend className="float-left mb-4 w-full text-sm font-semibold">Sales tax</legend>
+        <div className="clear-both grid grid-cols-1 gap-[18px] sm:grid-cols-3">
           <label className="block">
-            <span className="text-xs text-muted">How tax is calculated</span>
+            <span className="label">How tax is calculated</span>
             <select
-              className="field mt-1"
+              className="field mt-[7px]"
               value={taxMode}
               onChange={(e) => setTaxMode(e.target.value as TaxMode)}
             >
@@ -126,9 +127,9 @@ export function RestaurantEditForm({
           </label>
           {taxMode === "FLAT" ? (
             <label className="block">
-              <span className="text-xs text-muted">Tax rate %</span>
+              <span className="label">Tax rate %</span>
               <input
-                className="field tnum mt-1"
+                className="field tnum mt-[7px]"
                 value={taxPct}
                 inputMode="decimal"
                 onChange={(e) => setTaxPct(e.target.value)}
@@ -136,9 +137,9 @@ export function RestaurantEditForm({
             </label>
           ) : (
             <label className="block">
-              <span className="text-xs text-muted">Stripe product tax code</span>
+              <span className="label">Stripe product tax code</span>
               <input
-                className="field mt-1 font-mono text-xs"
+                className="field mt-[7px] font-mono"
                 value={taxCode}
                 pattern="txcd_[0-9]{8}"
                 onChange={(e) => setTaxCode(e.target.value)}
@@ -147,7 +148,7 @@ export function RestaurantEditForm({
           )}
         </div>
         {taxMode === "STRIPE_TAX" && (
-          <p className="text-xs text-muted">
+          <p className="field-hint max-w-prose">
             Tax is calculated on this restaurant&apos;s Stripe account for the pickup address
             below. The restaurant must finish Stripe&apos;s tax settings and add a registration for
             its state, or orders are charged no tax. <code>{DEFAULT_TAX_CODE}</code> is food for
@@ -156,16 +157,16 @@ export function RestaurantEditForm({
         )}
       </fieldset>
 
-      <fieldset className="space-y-3 border-t border-hairline pt-3">
-        <legend className="text-xs font-medium text-muted">
+      <fieldset className="border-t border-hairline pt-5">
+        <legend className="float-left mb-4 w-full text-sm font-semibold">
           Pickup address{taxMode === "STRIPE_TAX" ? " (required for Stripe Tax)" : ""}
         </legend>
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="clear-both grid grid-cols-1 gap-[18px] sm:grid-cols-4">
           {ADDRESS_FIELDS.map(({ key, label, wide }) => (
-            <label key={key} className={`block ${wide ? "sm:col-span-2" : ""}`}>
-              <span className="text-xs text-muted">{label}</span>
+            <label key={key} className={`block ${wide ? "sm:col-span-2" : "sm:col-span-2 lg:col-span-1"}`}>
+              <span className="label">{label}</span>
               <input
-                className="field mt-1"
+                className="field mt-[7px]"
                 value={address[key]}
                 maxLength={key === "address_country" ? 2 : 200}
                 onChange={(e) => setAddress((prev) => ({ ...prev, [key]: e.target.value }))}
@@ -175,27 +176,28 @@ export function RestaurantEditForm({
         </div>
       </fieldset>
 
-      <div className="flex flex-wrap items-center gap-4 border-t border-hairline pt-3">
-        <label className="flex items-center gap-2 text-sm">
+      <div className="flex flex-wrap items-center gap-4 border-t border-hairline pt-5">
+        <label className="flex min-h-[40px] items-center gap-2.5 text-sm">
           <input
             type="checkbox"
-            className="h-4 w-4 accent-brick"
+            className="h-5 w-5 shrink-0"
             checked={accepting}
             onChange={(e) => setAccepting(e.target.checked)}
           />
           Accepting orders
         </label>
-        <span className="text-xs text-muted">
+        <span className="text-caption text-muted">
           Subdomain <code>{restaurant.slug}</code> and status{" "}
           <code>{restaurant.status}</code> are not editable here.
         </span>
       </div>
 
-      <div className="flex gap-2">
-        <button className="btn-primary px-3 py-1.5 text-sm" disabled={busy}>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" className="btn-primary" disabled={busy}>
+          {busy && <Spinner />}
           {busy ? "Saving…" : "Save changes"}
         </button>
-        <button type="button" className="btn-quiet px-3 py-1.5 text-sm" onClick={onCancel}>
+        <button type="button" className="link" onClick={onCancel}>
           Cancel
         </button>
       </div>

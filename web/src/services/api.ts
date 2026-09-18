@@ -1,14 +1,18 @@
 import { createApi, type BaseQueryFn } from "@reduxjs/toolkit/query/react";
 import { ApiError, request, type RequestOptions } from "./apiClient";
-import { getCustomerToken } from "./clerk";
+import { getCustomerToken, getCustomerTokenIfSignedIn } from "./clerk";
 
 export type QueryArgs = {
   url: string;
   method?: string;
   body?: unknown;
   /** Send the signed-in customer's Clerk session token. Fetched per request,
-   *  because Clerk's tokens last about a minute and Clerk refreshes them. */
-  customerAuth?: boolean;
+   *  because Clerk's tokens last about a minute and Clerk refreshes them.
+   *
+   *  "if-signed-in" is the same, except it will not load Clerk to find out:
+   *  for endpoints a guest may reach with nothing but their cookie, on pages
+   *  where most visitors are neither. */
+  customerAuth?: boolean | "if-signed-in";
   idempotencyKey?: string;
 };
 
@@ -26,7 +30,12 @@ const baseQuery: BaseQueryFn<QueryArgs | string, unknown, ApiError> = async (
 ) => {
   const opts: QueryArgs = typeof args === "string" ? { url: args } : args;
   try {
-    const token = opts.customerAuth ? await getCustomerToken() : undefined;
+    const token =
+      opts.customerAuth === "if-signed-in"
+        ? await getCustomerTokenIfSignedIn()
+        : opts.customerAuth
+          ? await getCustomerToken()
+          : undefined;
     const data = await request<unknown>(opts.url, {
       method: opts.method,
       body: opts.body,
@@ -70,6 +79,9 @@ export const api = createApi({
     "RestaurantReport",
     "Order",
     "Session",
+    "CustomerSession",
+    "CustomerOrders",
+    "Favourites",
   ],
   endpoints: () => ({}),
 });

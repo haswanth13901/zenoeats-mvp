@@ -1,3 +1,4 @@
+import { clearCheckoutDrafts } from "@/features/storefront/checkoutDraft";
 import { useEffect, useState, type ReactNode } from "react";
 import { useAppDispatch } from "@/app/hooks";
 import { sessionEstablished, sessionEnded } from "@/features/session/sessionSlice";
@@ -9,8 +10,12 @@ import {
   type StaffMe,
 } from "@/features/restaurant/restaurantApi";
 import { ApiError, errorMessage } from "@/services/apiClient";
-import { clerkConfigured, getClerk } from "@/services/clerk";
+import { useCustomerSessionQuery } from "@/features/storefront/storefrontApi";
+import { takeOrderToken } from "@/features/storefront/orderToken";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
+import { ErrorNote, StatePage } from "@/components/common/Feedback";
+import { Icon } from "@/components/common/icons";
+import { AuthLayout } from "./AuthLayout";
 
 /**
  * Route guards for the two credentialed portals and the customer checkout.
@@ -28,6 +33,7 @@ import { ManageShell } from "@/features/restaurant/components/ManageShell";
 /** Full navigation, carrying where we were headed so signing in returns there
  *  rather than dumping everyone on the portal root. */
 function toLogin(loginPath: string): null {
+  if (loginPath === "/account/sign-in") clearCheckoutDrafts();
   const next = window.location.pathname + window.location.search;
   window.location.replace(`${loginPath}?next=${encodeURIComponent(next)}`);
   return null;
@@ -101,53 +107,66 @@ export function RequireStaff({
 /**
  * Checkout, payment and order tracking.
  *
- * Browsing the menu never needs an account; paying does. Whether the customer
- * is signed in is Clerk's answer, read from the Clerk session in this browser.
- * The redirect goes to our own sign-in page -- a separate entry outside React,
- * like the portal logins -- and carries the path back so the cart is waiting.
+ * Browsing the menu never needs an identity; paying does -- but an identity is
+ * not the same as an account. The server answers this now, because a guest is
+ * an httpOnly cookie no script can read, and a signed-in customer is a Clerk
+ * token: one question to one endpoint covers both, where asking Clerk could
+ * only ever see one of them.
  *
- * The API still verifies every token itself; this only decides what to show.
+ * The redirect goes to our own sign-in page -- a separate entry outside React,
+ * like the portal logins -- and carries the path back, so the cart is waiting
+ * whichever way they choose to come back.
+ *
+ * The API still authorises every request itself; this only decides what to
+ * show instead of an empty shell.
  */
-export function RequireCustomer({ children }: { children: ReactNode }) {
+export function RequireCustomer({
+  children,
+  allowOrderToken = false,
+}: {
+  children: ReactNode;
+  /** Let a ?t= order-view token through unasked.
+   *
+   *  Order tracking sets it, because the link in a guest's confirmation email
+   *  is meant to be opened on whatever device the email is read on -- a phone
+   *  that holds no cookie and will never hold a Clerk session. Bouncing it to
+   *  sign-in would make that link useless to exactly the people it is for.
+   *
+   *  It grants nothing: the token names one order, is signed by the API and
+   *  is checked there. A wrong one gets the same 404 as a wrong order id. */
+  allowOrderToken?: boolean;
+}) {
   const dispatch = useAppDispatch();
-  const [state, setState] = useState<"loading" | "signed-in" | "signed-out" | "failed">(
-    "loading",
-  );
+  // Read once, on the first render that can see it: takeOrderToken moves the
+  // token out of the address bar, so a later reader would find no ?t= and
+  // must get the same answer from where this put it.
+  const [hasOrderToken] = useState(() => (allowOrderToken ? takeOrderToken() !== null : false));
+  const { data, error, isLoading } = useCustomerSessionQuery(undefined, {
+    skip: hasOrderToken,
+  });
 
   useEffect(() => {
-    if (!clerkConfigured()) return;
-    let alive = true;
-    getClerk()
-      .then((clerk) => {
-        if (!alive) return;
-        const user = clerk.user;
-        if (user) {
-          dispatch(
-            sessionEstablished({
-              portal: "customer",
-              email: user.primaryEmailAddress?.emailAddress ?? "",
-              fullName: user.fullName,
-            }),
-          );
-          setState("signed-in");
-        } else {
-          dispatch(sessionEnded());
-          setState("signed-out");
-        }
-      })
-      .catch(() => {
-        if (alive) setState("failed");
-      });
-    return () => {
-      alive = false;
-    };
-  }, [dispatch]);
+    if (data) {
+      dispatch(
+        sessionEstablished({
+          portal: "customer",
+          email: data.email,
+          fullName: data.full_name,
+        }),
+      );
+    } else if (error) dispatch(sessionEnded());
+  }, [data, error, dispatch]);
 
-  if (!clerkConfigured()) return <SignInUnavailable />;
-  if (state === "loading") return <Booting />;
-  if (state === "signed-out") return toLogin("/account/sign-in");
-  if (state === "failed") return <SignInUnreachable />;
-  return <>{children}</>;
+  if (hasOrderToken) return <>{children}</>;
+  // "Not asked yet" is not "nobody", exactly as in the portals above.
+  if (isLoading) return <Booting />;
+  if (data) return <>{children}</>;
+  // Nobody yet. The sign-in page offers both an account and continuing as a
+  // guest, so this is the right destination even where Clerk is unconfigured
+  // and an account is not on offer at all.
+  if (error instanceof ApiError && error.status === 401) return toLogin("/account/sign-in");
+  if (error) return <SignInUnreachable />;
+  return <Booting />;
 }
 
 /**
@@ -160,53 +179,60 @@ function AcceptInvitation({ me }: { me: StaffMe }) {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-5">
-      <h1 className="font-display text-3xl">Join {me.restaurant_name}</h1>
-      <p className="mt-3 text-sm text-muted">
-        You&apos;ve been invited to the team as{" "}
-        <span className="font-medium text-ink">{me.role_code.toLowerCase()}</span>. Accept to
-        start using the portal, signed in as {me.email}.
-      </p>
-      {error && (
-        <p className="mt-4 border-l-2 border-brick bg-brick/5 px-3 py-2 text-sm text-brick">
-          {error}
-        </p>
-      )}
-      <button
-        className="btn-primary mt-8 w-full"
-        disabled={isLoading}
-        onClick={async () => {
-          setError(null);
-          try {
-            await accept().unwrap();
-          } catch (e) {
-            setError(errorMessage(e));
-          }
-        }}
-      >
-        {isLoading ? "Accepting…" : "Accept invitation"}
-      </button>
-      <button
-        className="btn-quiet mt-3 w-full"
-        onClick={async () => {
-          await logout().unwrap().catch(() => undefined);
-          window.location.assign("/manage/login");
-        }}
-      >
-        Not now — sign out
-      </button>
-    </main>
+    <AuthLayout
+      operator
+      title={`Join ${me.restaurant_name}`}
+      intro={
+        <>
+          You&apos;ve been invited to the team as{" "}
+          <strong className="font-semibold text-ink">{me.role_code.toLowerCase()}</strong>. Accept
+          to start using the portal, signed in as {me.email}.
+        </>
+      }
+    >
+      <ErrorNote message={error} className="mb-5" />
+      <div className="auth-stack">
+        <button
+          type="button"
+          className="btn-primary w-full"
+          disabled={isLoading}
+          onClick={async () => {
+            setError(null);
+            try {
+              await accept().unwrap();
+            } catch (e) {
+              setError(errorMessage(e));
+            }
+          }}
+        >
+          {isLoading ? "Accepting…" : "Accept invitation"}
+        </button>
+        <button
+          type="button"
+          className="btn-quiet w-full"
+          onClick={async () => {
+            await logout().unwrap().catch(() => undefined);
+            window.location.assign("/manage/login");
+          }}
+        >
+          Not now — sign out
+        </button>
+      </div>
+    </AuthLayout>
   );
 }
 
 function NotForYourRole({ me }: { me: StaffMe }) {
   return (
     <ManageShell>
-      <div className="mx-auto max-w-md py-16 text-center">
-        <h1 className="font-display text-2xl">Not part of your role</h1>
-        <p className="mt-3 text-sm text-muted">
+      <div className="mx-auto max-w-md py-12 text-center sm:py-16">
+        <Icon name="lock" className="mx-auto mb-4 h-7 w-7 text-muted" />
+        <h1 className="font-display text-[34px] leading-[1.12] tracking-[-1px] sm:text-4xl">
+          Not part of your role
+        </h1>
+        <p className="mt-4 text-muted">
           You&apos;re signed in to {me.restaurant_name} as{" "}
-          <span className="font-medium text-ink">{me.role_code.toLowerCase()}</span>, which
+          <strong className="font-semibold text-ink">{me.role_code.toLowerCase()}</strong>, which
           doesn&apos;t include this page. An admin at the restaurant can change your role.
         </p>
       </div>
@@ -216,41 +242,37 @@ function NotForYourRole({ me }: { me: StaffMe }) {
 
 /** Scoped to the routes that need an identity: browsing and both portals
  *  work without a Clerk key. */
-function SignInUnavailable() {
-  return (
-    <main className="mx-auto max-w-lg px-5 py-24 text-center">
-      <h1 className="font-display text-3xl">Sign-in is not configured</h1>
-      <p className="mt-3 text-sm text-muted">
-        Set CLERK_PUBLISHABLE_KEY on the web container, or VITE_CLERK_PUBLISHABLE_KEY in
-        development. Ordering needs a customer identity; browsing the menu does not.
-      </p>
-    </main>
-  );
-}
-
 function SignInUnreachable() {
   return (
-    <main className="mx-auto max-w-lg px-5 py-24 text-center">
-      <h1 className="font-display text-3xl">Can&apos;t reach sign-in</h1>
-      <p className="mt-3 text-sm text-muted">
-        Check your connection and reload. You can still browse the menu.
-      </p>
-    </main>
+    <StatePage
+      title="Can't reach sign-in"
+      action={
+        <a href="/" className="btn-quiet">
+          Back to the menu
+        </a>
+      }
+    >
+      Check your connection and reload. You can still browse the menu.
+    </StatePage>
   );
 }
 
 function Booting() {
-  return <main className="px-5 py-24 text-center text-muted">Loading…</main>;
+  return <StatePage busy>Loading…</StatePage>;
 }
 
 function Unreachable() {
   return (
-    <main className="mx-auto max-w-lg px-5 py-24 text-center">
-      <h1 className="font-display text-3xl">Can&apos;t reach the server</h1>
-      <p className="mt-3 text-sm text-muted">
-        The application is running but the API did not answer. Check that it is
-        up, then reload.
-      </p>
-    </main>
+    <StatePage
+      title="Can't reach the server"
+      action={
+        <button type="button" className="btn-quiet" onClick={() => window.location.reload()}>
+          <Icon name="refresh" />
+          Reload
+        </button>
+      }
+    >
+      The application is running but the API did not answer. Check that it is up, then reload.
+    </StatePage>
   );
 }

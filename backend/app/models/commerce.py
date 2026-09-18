@@ -17,11 +17,10 @@ class OrderStatus(str, enum.Enum):
     """Frozen OrderStatus values (Appendix A.5), pickup plus the two a
     restaurant's own driver needs.
 
-    A customer still cannot order a delivery: checkout creates PICKUP orders
-    and nothing else. A manager can hand a paid order to one of the
-    restaurant's drivers, which is where READY_FOR_DELIVERY and
-    OUT_FOR_DELIVERY come in -- the food is ready but not at a counter, and
-    then it is with the driver.
+    A customer chooses delivery at checkout, or a manager hands a paid
+    collection to one of the restaurant's drivers. Either way that is where
+    READY_FOR_DELIVERY and OUT_FOR_DELIVERY come in -- the food is ready but
+    not at a counter, and then it is with the driver.
 
     DRIVER_ASSIGNED, DRIVER_ACCEPTED and DELIVERY_FAILED from the baseline
     stay absent. The first two are not progress of the food but of the
@@ -42,8 +41,8 @@ class OrderStatus(str, enum.Enum):
 
 
 class FulfillmentType(str, enum.Enum):
-    """How the customer gets the food. Checkout always writes PICKUP; a
-    manager assigning a driver is what makes an order a DELIVERY."""
+    """How the customer gets the food. Chosen at checkout; a manager
+    assigning a driver to a collection also makes it a DELIVERY."""
 
     PICKUP = "PICKUP"
     DELIVERY = "DELIVERY"
@@ -165,10 +164,18 @@ class Order(Base, TimestampMixin):
     )
 
     customer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Who to call and whose name to call out, as given at checkout. Snapshots,
+    # not a join to users: a customer changing their number next month must
+    # not change what this order said. Null only on orders from before
+    # checkout asked.
+    contact_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(String(320))
+    contact_address: Mapped[str | None] = mapped_column(String(300))
+    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
-    # Delivery. Null on every pickup order, which is all checkout creates: a
-    # manager assigning one of the restaurant's own drivers sets both, and the
-    # address is what they were told on the phone.
+    # Delivery. Null on a pickup order. Set at checkout when the customer
+    # chooses delivery, or by a manager assigning one of the restaurant's own
+    # drivers to an order agreed on the phone.
     driver_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )

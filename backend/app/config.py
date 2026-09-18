@@ -74,14 +74,25 @@ class Settings(BaseSettings):
     # Named rather than shared so platform_audit_logs.actor_user_id stays
     # meaningful. Empty means nobody can sign in to the super admin portal.
     ADMIN_USERS: str = ""
-    # Signs platform-admin and restaurant staff session cookies. Rotating it
-    # signs every operator out. Customer sessions are Clerk's.
+    # Signs platform-admin, restaurant staff and guest-customer session
+    # cookies. Rotating it signs every operator out, and drops every guest
+    # back to an anonymous browser. Signed-in customer sessions are Clerk's.
     SESSION_SECRET: str = ""
     ADMIN_SESSION_TTL_MINUTES: int = 480
     # Restaurant staff sessions. Longer than an admin session because it has
     # to outlast a shift on a kitchen tablet, shorter than a day so a device
     # left on the counter overnight is not still signed in.
     STAFF_SESSION_TTL_MINUTES: int = 720
+    # Guest customers -- ordering without an account. Long, because this
+    # cookie is the only thing that can find a guest's order again: losing it
+    # loses the pickup PIN and the tracking page with it. Nothing is
+    # authenticated here, so it grants no more than the orders it created.
+    GUEST_SESSION_TTL_MINUTES: int = 43200  # 30 days
+    # How long an abandoned guest row is kept -- one that was created by
+    # "continue as guest" and never reached an order. Comfortably longer than
+    # the session above, so a guest who comes back to a live cookie still
+    # finds their identity. Guests that did order are never swept. 0 disables.
+    GUEST_RETENTION_DAYS: int = 45
 
     # --- Stripe -----------------------------------------------------------
     STRIPE_SECRET_KEY: str = ""
@@ -155,6 +166,24 @@ class Settings(BaseSettings):
     # A lookup sits on the checkout path, so it fails fast rather than
     # holding a customer at a spinner.
     GEOCODE_TIMEOUT_SECONDS: float = 4.0
+
+    # --- Live delivery tracking ---------------------------------------------
+    # The map on a customer's order page. Unlike GOOGLE_MAPS_API_KEY, which
+    # stays on the server, this key ships to every browser: restrict it in the
+    # Google Cloud console to the Maps JavaScript API and to your storefront
+    # domains. Empty means the page shows the timeline without a map.
+    GOOGLE_MAPS_BROWSER_KEY: str = ""
+    # A Map ID from the Google Cloud console, which the markers need.
+    # DEMO_MAP_ID works for development only.
+    GOOGLE_MAPS_MAP_ID: str = "DEMO_MAP_ID"
+    # A driver's position older than this is not shown: a phone that stopped
+    # reporting must not look like a driver parked on the road.
+    DRIVER_LOCATION_STALE_SECONDS: int = 120
+    # Driving time to the customer, from Google's Routes API with the server
+    # key. Asked at most this often per order, however many tabs are polling,
+    # because each ask is billed.
+    DELIVERY_ETA_REFRESH_SECONDS: int = 30
+    ROUTES_TIMEOUT_SECONDS: float = 4.0
 
     # --- Error tracking ---------------------------------------------------
     # Sentry. Empty DSN means off. See core/observability for what is and is

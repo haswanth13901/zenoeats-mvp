@@ -20,7 +20,7 @@ type AdminOut = { email: string };
  *  is how a convincing phishing page gets to live on your own domain. */
 function nextPath(): string {
   const raw = new URLSearchParams(window.location.search).get("next");
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/admin";
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/admin";
   return raw;
 }
 

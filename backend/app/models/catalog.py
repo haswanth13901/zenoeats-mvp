@@ -63,7 +63,7 @@ from datetime import datetime, time
 
 from sqlalchemy import (
     Boolean, CheckConstraint, DateTime, ForeignKey, Integer,
-    String, Text, Time, UniqueConstraint,
+    String, Text, Time, UniqueConstraint, false, func,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -270,6 +270,12 @@ class Item(Base, TimestampMixin):
     base_price_minor: Mapped[int] = mapped_column(nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Charged no sales tax: its share of an order is left out of the flat-rate
+    # base, and sent to Stripe Tax as non-taxable. Which items qualify is the
+    # restaurant's call, the same as its rate.
+    tax_exempt: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     # A storage key like restaurants/<id>/items/<random>.webp, never a URL, so
     # the images can move to object storage without rewriting a row. The API
     # turns it into a URL on the way out. See services/images.
@@ -566,3 +572,32 @@ class ComboSlotItem(Base, TimestampMixin):
 
     slot: Mapped["ComboSlot"] = relationship(back_populates="choices")
     item: Mapped["Item"] = relationship()
+
+
+class CustomerFavourite(Base):
+    """An item a customer saved to order again, at this restaurant.
+
+    A pointer, not a snapshot: a favourite should show today's name, price
+    and sold-out state. Items are soft deleted, so the link stays valid after
+    one leaves the menu and the list simply stops showing it. Customers with
+    an account only; see migration 0029.
+    """
+
+    __tablename__ = "customer_favourites"
+    __table_args__ = (
+        UniqueConstraint("restaurant_id", "user_id", "item_id", name="uq_customer_favourite"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("menu_items.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

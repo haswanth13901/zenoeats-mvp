@@ -131,6 +131,7 @@ class FakeItem:
         self.base_price_minor = price
         self.currency = "USD"
         self.is_available = True
+        self.tax_exempt = False
         self.deleted_at = None
         self.modifier_links = [FakeGroupLink(g) for g in groups]
         # What the item comes with. Empty unless a test says otherwise.

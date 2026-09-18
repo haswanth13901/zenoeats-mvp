@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Empty, Panel } from "@/components/common/Feedback";
+import { Empty, Panel, Spinner } from "@/components/common/Feedback";
 import { PencilIcon } from "@/components/common/icons";
 import { deltaToMinor, minorToDeltaInput, money } from "@/utils/format";
 import type { DiscountKind, Meal } from "@/types";
@@ -54,7 +54,9 @@ export function ComboBuilder({
         title="Combos"
         action={
           <button
-            className="text-xs text-muted underline"
+            type="button"
+            className="link"
+            aria-expanded={adding}
             onClick={() => {
               onError(null);
               setAdding((open) => !open);
@@ -64,112 +66,114 @@ export function ComboBuilder({
           </button>
         }
       >
-        {adding ? (
-          <ComboForm
-            meals={meals}
-            items={items}
-            types={types}
-            submitLabel="Create combo"
-            onCancel={() => setAdding(false)}
-            onSubmit={async (draft) => {
-              await createCombo(draft).unwrap();
-              setAdding(false);
-            }}
-            onError={onError}
-          />
-        ) : !meals.length ? (
-          <p className="text-xs text-muted">
-            A combo is sold during one meal period and offers items that period
-            serves. Add a meal period first, and put some items on it.
-          </p>
+        {!meals.length ? (
+          <Empty>
+            A combo is sold during one meal period and offers items that period serves. Add a meal
+            period first, and put some items on it.
+          </Empty>
         ) : (
-          <p className="text-xs text-muted">
-            One item from each type you include, every one required. The saving
-            comes off what those items cost separately.
+          <p className="-mt-2 mb-6 max-w-prose text-caption text-muted">
+            One item from each type you include, every one required. The saving comes off what
+            those items cost separately.
           </p>
         )}
-      </Panel>
 
-      {!combos.length && !adding && meals.length > 0 && (
-        <Empty>No combos yet. Add one above.</Empty>
-      )}
+        {adding && (
+          <div className="editor mb-6 animate-disclose">
+            <ComboForm
+              meals={meals}
+              items={items}
+              types={types}
+              submitLabel="Create combo"
+              onCancel={() => setAdding(false)}
+              onSubmit={async (draft) => {
+                await createCombo(draft).unwrap();
+                setAdding(false);
+              }}
+              onError={onError}
+            />
+          </div>
+        )}
 
-      {combos.map((combo) =>
-        editing === combo.id ? (
-          <ComboEditor
-            key={combo.id}
-            combo={combo}
-            meals={meals}
-            items={items}
-            types={types}
-            onDone={() => setEditing(null)}
-            onError={onError}
-          />
-        ) : (
-          <section key={combo.id} className="mb-6 border border-hairline bg-surface">
-            <header className="flex flex-wrap items-baseline justify-between gap-3 border-b border-hairline px-4 py-3">
-              <span className="flex items-baseline gap-1.5">
-                <h3 className="font-display text-lg">{combo.name}</h3>
-                <button
-                  type="button"
-                  aria-label={`Edit ${combo.name}`}
-                  className="text-muted hover:text-ink"
-                  onClick={() => {
-                    onError(null);
-                    setEditing(combo.id);
-                  }}
-                >
-                  <PencilIcon />
-                </button>
-              </span>
-              <span className="text-xs text-muted">
-                {mealName.get(combo.meal_id) ?? "no meal period"} ·{" "}
-                <span className="text-brick">{savingWords(combo)}</span>
-                {!combo.is_available && <span className="text-brick"> · hidden</span>}
-              </span>
-            </header>
+        {!combos.length && !adding && meals.length > 0 && <Empty>No combos yet. Add one above.</Empty>}
 
-            {!combo.slots.length ? (
-              <p className="px-4 py-4 text-xs text-muted">
-                Nothing in this combo yet. Open it and tick the items it includes.
-              </p>
+        <div className="flex flex-col gap-5">
+          {combos.map((combo) =>
+            editing === combo.id ? (
+              <ComboEditor
+                key={combo.id}
+                combo={combo}
+                meals={meals}
+                items={items}
+                types={types}
+                onDone={() => setEditing(null)}
+                onError={onError}
+              />
             ) : (
-              <ul className="divide-y divide-hairline">
-                {combo.slots.map((slot) => (
-                  <li key={slot.id} className="flex items-baseline gap-3 px-4 py-2.5">
-                    <span className="w-20 shrink-0 text-xs text-muted">
-                      {typeName.get(slot.item_type_id) ?? "unknown type"}
-                    </span>
-                    <span className="text-sm">
-                      {slot.item_ids.map((id, index) => {
-                        const item = items.find((i) => i.id === id);
-                        // Still ticked, but taken off this combo's period since:
-                        // the storefront and checkout skip it until it is served
-                        // there again, so the list says why it is missing.
-                        const offPeriod = item && !item.meal_ids.includes(combo.meal_id);
-                        return (
-                          <span key={id}>
-                            {index > 0 && " · "}
-                            <span className={offPeriod ? "text-muted line-through" : undefined}>
-                              {item?.name ?? "?"}
-                            </span>
-                            {offPeriod && (
-                              <span className="text-xs text-brick">
-                                {" "}
-                                (not on {mealName.get(combo.meal_id) ?? "this period"})
+              <article key={combo.id} className="card">
+                <header className="flex items-center justify-between gap-4">
+                  <h3 className="font-display text-[26px] leading-tight tracking-[-.5px]">{combo.name}</h3>
+                  <button
+                    type="button"
+                    aria-label={`Edit ${combo.name}`}
+                    className="link min-h-[32px] px-1 text-base no-underline"
+                    onClick={() => {
+                      onError(null);
+                      setEditing(combo.id);
+                    }}
+                  >
+                    <PencilIcon />
+                  </button>
+                </header>
+                <p className="mt-3 text-caption">
+                  {mealName.get(combo.meal_id) ?? "no meal period"} ·{" "}
+                  <span className="font-[650] text-brick">{savingWords(combo)}</span>
+                  {!combo.is_available && <span className="text-danger"> · hidden</span>}
+                </p>
+
+                {!combo.slots.length ? (
+                  <p className="field-hint mt-6">
+                    Nothing in this combo yet. Open it and tick the items it includes.
+                  </p>
+                ) : (
+                  <ul className="mt-5 flex flex-col gap-2">
+                    {combo.slots.map((slot) => (
+                      <li key={slot.id} className="text-sm">
+                        <strong className="font-semibold">
+                          {typeName.get(slot.item_type_id) ?? "unknown type"}
+                        </strong>{" "}
+                        <span className="text-muted">
+                          {slot.item_ids.map((id, index) => {
+                            const item = items.find((i) => i.id === id);
+                            // Still ticked, but taken off this combo's period since:
+                            // the storefront and checkout skip it until it is served
+                            // there again, so the list says why it is missing.
+                            const offPeriod = item && !item.meal_ids.includes(combo.meal_id);
+                            return (
+                              <span key={id}>
+                                {index > 0 && " · "}
+                                <span className={offPeriod ? "line-through" : undefined}>
+                                  {item?.name ?? "?"}
+                                </span>
+                                {offPeriod && (
+                                  <span className="text-caption text-danger">
+                                    {" "}
+                                    (not on {mealName.get(combo.meal_id) ?? "this period"})
+                                  </span>
+                                )}
                               </span>
-                            )}
-                          </span>
-                        );
-                      })}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ),
-      )}
+                            );
+                          })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </article>
+            ),
+          )}
+        </div>
+      </Panel>
     </>
   );
 }
@@ -190,32 +194,39 @@ function ComboEditor({
   onError: (message: string | null) => void;
 }) {
   const [removing, setRemoving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [updateCombo] = useUpdateComboMutation();
   const [deleteCombo] = useDeleteComboMutation();
 
   if (removing) {
     return (
-      <section className="mb-6 border border-ink bg-paper px-4 py-4">
-        <p className="text-sm text-brick">
-          {combo.name} comes off the menu. The items it offered are untouched
-          and stay on sale on their own.
+      <section className="inline-confirm">
+        <p>
+          <strong className="font-semibold text-danger">{combo.name} comes off the menu.</strong> The
+          items it offered are untouched and stay on sale on their own.
         </p>
-        <div className="mt-3 flex items-center gap-4">
+        <div className="mt-3.5 flex flex-wrap items-center gap-4">
           <button
-            className="btn-primary px-3 py-1.5 text-sm"
+            type="button"
+            className="btn-danger"
+            disabled={deleting}
             onClick={async () => {
+              setDeleting(true);
               try {
                 await deleteCombo(combo.id).unwrap();
                 onError(null);
                 onDone();
               } catch (e) {
                 onError(errorMessage(e));
+              } finally {
+                setDeleting(false);
               }
             }}
           >
+            {deleting && <Spinner />}
             Delete it
           </button>
-          <button className="text-xs underline" onClick={() => setRemoving(false)}>
+          <button type="button" className="link" disabled={deleting} onClick={() => setRemoving(false)}>
             keep it
           </button>
         </div>
@@ -224,7 +235,7 @@ function ComboEditor({
   }
 
   return (
-    <section className="mb-6 border border-ink bg-surface">
+    <section className="editor animate-disclose">
       <ComboForm
         initial={combo}
         meals={meals}
@@ -425,152 +436,163 @@ function ComboForm({
   }
 
   return (
-    <div className="grid gap-3 bg-paper px-4 py-4 sm:grid-cols-4">
-      <label className="sm:col-span-2">
-        <span className="text-xs text-muted">Combo name</span>
-        <input
-          className="field mt-1"
-          placeholder="Burger Meal"
-          value={draft.name}
-          autoFocus
-          disabled={saving}
-          onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-        />
-      </label>
-
-      <label className="sm:col-span-2">
-        <span className="text-xs text-muted">Sold during</span>
-        <select
-          className="field mt-1"
-          value={draft.mealId}
-          // Fixed after creation: every ticked item belongs to this period.
-          disabled={saving || !!initial}
-          onChange={(e) =>
-            // The old ticks belong to the old period's menu, so they go.
-            setDraft((d) => ({ ...d, mealId: e.target.value, picked: {} }))
-          }
-        >
-          {!meals.length && <option value="">No meal periods yet</option>}
-          {meals.map((meal) => (
-            <option key={meal.id} value={meal.id}>
-              {meal.name}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="sm:col-span-4">
-        <span className="text-xs text-muted">Description</span>
-        <input
-          className="field mt-1"
-          value={draft.description}
-          disabled={saving}
-          onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-        />
-      </label>
-
-      <label className="sm:col-span-2">
-        <span className="text-xs text-muted">Discount</span>
-        <select
-          className="field mt-1"
-          value={draft.discountKind}
-          disabled={saving}
-          onChange={(e) =>
-            setDraft((d) => ({ ...d, discountKind: e.target.value as DiscountKind }))
-          }
-        >
-          <option value="PERCENT">Percentage off</option>
-          <option value="AMOUNT">Amount off</option>
-          <option value="NONE">No discount</option>
-        </select>
-      </label>
-
-      {draft.discountKind !== "NONE" && (
-        <label className="sm:col-span-2">
-          <span className="text-xs text-muted">
-            {draft.discountKind === "PERCENT" ? "Percent off the total" : "Amount off the total"}
-          </span>
+    <form
+      className="flex flex-col gap-[17px]"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!saving) void save();
+      }}
+    >
+      <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2">
+        <label className="block">
+          <span className="label">Combo name</span>
           <input
-            className="field tnum mt-1"
-            inputMode="decimal"
-            placeholder={draft.discountKind === "PERCENT" ? "10" : "1.50"}
-            value={draft.discountInput}
+            className="field mt-[7px]"
+            placeholder="Burger Meal"
+            value={draft.name}
+            autoFocus
             disabled={saving}
-            onChange={(e) => setDraft((d) => ({ ...d, discountInput: e.target.value }))}
+            onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
           />
         </label>
-      )}
 
-      <div className="sm:col-span-4">
-        <p className="text-xs text-muted">
-          What this combo includes. Tick the items a customer may choose from.
-          Every type you tick becomes one required choice.
+        <label className="block">
+          <span className="label">Sold during</span>
+          <select
+            className="field mt-[7px]"
+            value={draft.mealId}
+            // Fixed after creation: every ticked item belongs to this period.
+            disabled={saving || !!initial}
+            aria-describedby={initial ? "combo-period-lock" : undefined}
+            onChange={(e) =>
+              // The old ticks belong to the old period's menu, so they go.
+              setDraft((d) => ({ ...d, mealId: e.target.value, picked: {} }))
+            }
+          >
+            {!meals.length && <option value="">No meal periods yet</option>}
+            {meals.map((meal) => (
+              <option key={meal.id} value={meal.id}>
+                {meal.name}
+              </option>
+            ))}
+          </select>
+          {initial && (
+            <span id="combo-period-lock" className="field-hint block">
+              The meal period is locked once the combo exists.
+            </span>
+          )}
+        </label>
+
+        <label className="block sm:col-span-2">
+          <span className="label">Description</span>
+          <input
+            className="field mt-[7px]"
+            value={draft.description}
+            disabled={saving}
+            onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+          />
+        </label>
+
+        <label className="block">
+          <span className="label">Discount</span>
+          <select
+            className="field mt-[7px]"
+            value={draft.discountKind}
+            disabled={saving}
+            onChange={(e) => setDraft((d) => ({ ...d, discountKind: e.target.value as DiscountKind }))}
+          >
+            <option value="PERCENT">Percentage off</option>
+            <option value="AMOUNT">Amount off</option>
+            <option value="NONE">No discount</option>
+          </select>
+        </label>
+
+        {draft.discountKind !== "NONE" && (
+          <label className="block">
+            <span className="label">
+              {draft.discountKind === "PERCENT" ? "Percent off the total" : "Amount off the total"}
+            </span>
+            <input
+              className="field tnum mt-[7px]"
+              inputMode="decimal"
+              placeholder={draft.discountKind === "PERCENT" ? "10" : "1.50"}
+              value={draft.discountInput}
+              disabled={saving}
+              onChange={(e) => setDraft((d) => ({ ...d, discountInput: e.target.value }))}
+            />
+          </label>
+        )}
+      </div>
+
+      <fieldset>
+        <legend className="mb-1 text-sm font-semibold">What this combo includes</legend>
+        <p className="max-w-prose text-caption text-muted">
+          Tick the items a customer may choose from. Every type you tick becomes one required
+          choice.
         </p>
 
         {!draft.mealId ? (
-          <p className="mt-2 text-xs text-muted">Choose a meal period first.</p>
+          <p className="field-hint">Choose a meal period first.</p>
         ) : !servedHere.length ? (
-          <p className="mt-2 text-xs text-muted">
-            That meal period serves nothing yet. Put items on it first, on the
-            Meal periods tab.
-          </p>
+          <div className="mt-3">
+            <Empty>
+              That meal period serves nothing yet. Put items on it first, on the Meal periods tab.
+            </Empty>
+          </div>
         ) : (
-          <div className="mt-3 space-y-3">
+          <div className="mt-3 flex flex-col gap-4">
             {headings.map((type) => {
               const available = byType(type.id);
               if (!available.length) return null;
               const picked = draft.picked[type.id] ?? [];
               return (
-                <div key={type.id} className="flex flex-wrap items-baseline gap-2">
-                  <span className="w-20 shrink-0 text-xs text-muted">
+                <div key={type.id}>
+                  <h4 className="flex items-center gap-2 text-sm font-semibold">
                     {type.name}
-                    {picked.length > 0 && <span className="text-brick"> ·</span>}
-                  </span>
-                  {available.map((item) => {
-                    const on = picked.includes(item.id);
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        aria-pressed={on}
-                        disabled={saving}
-                        onClick={() => togglePick(type.id, item.id)}
-                        className={`rounded border px-2.5 py-1 text-xs ${
-                          on ? "border-ink bg-ink text-white" : "border-hairline bg-surface"
-                        }`}
-                      >
-                        {item.name}
-                        <span className="ml-1.5 opacity-60">
-                          {money(item.base_price_minor, item.currency)}
-                        </span>
-                      </button>
-                    );
-                  })}
+                    {picked.length > 0 && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-brick" aria-label="included" />
+                    )}
+                  </h4>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {available.map((item) => {
+                      const on = picked.includes(item.id);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          aria-pressed={on}
+                          disabled={saving}
+                          onClick={() => togglePick(type.id, item.id)}
+                          className="chip"
+                        >
+                          {item.name}
+                          <span className="tnum opacity-70">· {money(item.base_price_minor, item.currency)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
           </div>
         )}
-      </div>
+      </fieldset>
 
-      <div className="flex items-center gap-4 sm:col-span-4">
-        <button className="btn-primary" disabled={saving} onClick={() => void save()}>
+      <div className="flex flex-wrap items-center gap-4">
+        <button type="submit" className="btn-primary" disabled={saving}>
+          {saving && <Spinner />}
           {saving ? "Saving…" : submitLabel}
         </button>
-        <button className="text-xs text-muted underline" disabled={saving} onClick={onCancel}>
+        <button type="button" className="link" disabled={saving} onClick={onCancel}>
           cancel
         </button>
         {onDelete && (
-          <button
-            className="ml-auto text-xs text-brick underline"
-            disabled={saving}
-            onClick={onDelete}
-          >
+          <button type="button" className="link-danger sm:ml-auto" disabled={saving} onClick={onDelete}>
             delete combo
           </button>
         )}
       </div>
-    </div>
+    </form>
   );
 }
 

@@ -1,0 +1,182 @@
+import type { ReactNode } from "react";
+import type { Contact } from "@/types";
+import { contactInputId, type ContactErrors, type ContactField } from "../contact";
+
+/**
+ * Name, phone, email and address: everything checkout requires to know who is
+ * ordering and where to reach them.
+ *
+ * Registered email comes from the verified account. Checkout may supply an
+ * onEmailChange handler for a guest's order-specific receipt destination.
+ *
+ * Errors are passed in already decided, so the page chooses when to show
+ * them: after a first attempt to continue, not while someone is still
+ * typing their name.
+ */
+export function ContactFields({
+  contact,
+  onChange,
+  errors,
+  email,
+  emailHint,
+  onEmailChange,
+  emailError,
+  addressLabel = "Address",
+  addressHint,
+  disabled = false,
+  columns = false,
+}: {
+  contact: Contact;
+  onChange: (contact: Contact) => void;
+  errors: ContactErrors;
+  email: string;
+  emailHint?: ReactNode;
+  onEmailChange?: (email: string) => void;
+  emailError?: string;
+  addressLabel?: string;
+  /** Replaced by the address's error when there is one. */
+  addressHint?: ReactNode;
+  disabled?: boolean;
+  /** Name and phone side by side from 640px, the address across the full
+   *  width. For a page with room, such as the profile. */
+  columns?: boolean;
+}) {
+  const set = (field: ContactField) => (value: string) => onChange({ ...contact, [field]: value });
+
+  return (
+    <div className={columns ? "grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2" : "flex flex-col gap-4"}>
+      <Field
+        field="full_name"
+        label="Name"
+        value={contact.full_name}
+        error={errors.full_name}
+        onChange={set("full_name")}
+        disabled={disabled}
+        autoComplete="name"
+        maxLength={160}
+      />
+      <Field
+        field="phone"
+        label="Phone number"
+        value={contact.phone}
+        error={errors.phone}
+        onChange={set("phone")}
+        disabled={disabled}
+        autoComplete="tel"
+        type="tel"
+        inputMode="tel"
+        maxLength={32}
+        hint="The restaurant or your driver will call this if something comes up."
+      />
+      <label className={`block ${columns ? "sm:col-start-1" : ""}`}>
+        <span className="label">Email</span>
+        <input
+          className="field mt-[7px]"
+          type="email"
+          id="contact-email"
+          value={email}
+          onChange={onEmailChange ? e => onEmailChange(e.target.value) : undefined}
+          readOnly={!onEmailChange}
+          disabled={disabled || !onEmailChange}
+          autoComplete="email"
+          required
+          maxLength={320}
+          aria-invalid={emailError ? true : undefined}
+          aria-describedby="contact-email-hint"
+        />
+        {(emailError || emailHint) && (
+          <span id="contact-email-hint" className={emailError ? "mt-2 block text-caption text-danger" : "field-hint block"} role={emailError ? "alert" : undefined}>
+            {emailError || emailHint}
+          </span>
+        )}
+      </label>
+      <Field
+        field="address"
+        label={addressLabel}
+        value={contact.address}
+        error={errors.address}
+        onChange={set("address")}
+        disabled={disabled}
+        autoComplete="street-address"
+        maxLength={300}
+        hint={addressHint}
+        multiline
+        className={columns ? "sm:col-span-2" : undefined}
+      />
+    </div>
+  );
+}
+
+function Field({
+  field,
+  label,
+  value,
+  error,
+  hint,
+  onChange,
+  multiline = false,
+  type,
+  inputMode,
+  className,
+  ...input
+}: {
+  field: ContactField;
+  label: string;
+  value: string;
+  error?: string;
+  hint?: ReactNode;
+  onChange: (value: string) => void;
+  multiline?: boolean;
+  disabled: boolean;
+  autoComplete: string;
+  maxLength: number;
+  type?: string;
+  inputMode?: "tel";
+  className?: string;
+}) {
+  const id = contactInputId(field);
+  const noteId = `${id}-note`;
+  const note = error ?? hint;
+  const shared = {
+    id,
+    className: "field mt-[7px]",
+    value,
+    required: true,
+    "aria-required": true,
+    "aria-invalid": error ? true : undefined,
+    "aria-describedby": note ? noteId : undefined,
+    ...input,
+  };
+
+  return (
+    <div className={className}>
+      <label htmlFor={id} className="label">
+        {label}
+      </label>
+      {multiline ? (
+        <textarea
+          {...shared}
+          rows={2}
+          className={`${shared.className} !min-h-[64px]`}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : (
+        <input
+          {...shared}
+          type={type}
+          inputMode={inputMode}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+      {note && (
+        <span
+          id={noteId}
+          className={`mt-2 block text-caption ${error ? "text-danger" : "text-muted"}`}
+          role={error ? "alert" : undefined}
+        >
+          {note}
+        </span>
+      )}
+    </div>
+  );
+}

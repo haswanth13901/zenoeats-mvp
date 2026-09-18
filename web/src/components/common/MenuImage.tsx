@@ -20,12 +20,16 @@ export function MenuImage({
   src,
   className,
   alt = "",
+  onFail,
 }: {
   src: string | null | undefined;
   className: string;
   /** Empty by default: every photo sits beside the item's name, which already
    *  says what it is, and a screen reader should not read the name twice. */
   alt?: string;
+  /** For a caller whose layout reserves room for the photo -- a card's image
+   *  column -- so it can give that room back rather than keep an empty box. */
+  onFail?: (src: string) => void;
 }) {
   const [failed, setFailed] = useState<string | null>(null);
   if (!src || failed === src) return null;
@@ -37,7 +41,10 @@ export function MenuImage({
       loading="lazy"
       decoding="async"
       draggable={false}
-      onError={() => setFailed(src)}
+      onError={() => {
+        setFailed(src);
+        onFail?.(src);
+      }}
       className={className}
     />
   );

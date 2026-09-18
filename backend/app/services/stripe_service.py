@@ -90,11 +90,33 @@ def create_payment_intent(
         raise errors.payment_provider_unavailable() from exc
 
 
-def retrieve_payment_intent(intent_id: str, stripe_account_id: str) -> stripe.PaymentIntent:
+# Stripe's answers that an intent is not there to be read. Anything else going
+# wrong is Stripe being unreachable or unwell, which says nothing about the
+# payment.
+_INTENT_GONE_CODES = {"resource_missing", "account_invalid"}
+
+
+def retrieve_payment_intent(intent_id: str, stripe_account_id: str) -> dict | None:
+    """Read a PaymentIntent straight from Stripe, as a plain dict.
+
+    The payment webhook is how an intent's outcome normally arrives; this is
+    the fallback for when it does not (tasks.reconcile_payment_intent). A
+    plain dict because that is the shape the webhook handlers read, and
+    stripe-python's objects raise on .get().
+
+    Returns None when Stripe answers that the intent does not exist on that
+    account, which is a definite answer. Raises when Stripe could not be
+    asked, which is not an answer at all: a caller must never read that as
+    "unpaid".
+    """
     try:
-        return stripe.PaymentIntent.retrieve(intent_id, stripe_account=stripe_account_id)
+        intent = stripe.PaymentIntent.retrieve(intent_id, stripe_account=stripe_account_id)
     except stripe.StripeError as exc:
+        if getattr(exc, "code", None) in _INTENT_GONE_CODES:
+            log.warning("stripe has no intent %s on %s: %s", intent_id, stripe_account_id, exc.code)
+            return None
         raise errors.payment_provider_unavailable() from exc
+    return intent.to_dict() if hasattr(intent, "to_dict") else dict(intent)
 
 
 def create_account_link(stripe_account_id: str, refresh_url: str, return_url: str) -> str:

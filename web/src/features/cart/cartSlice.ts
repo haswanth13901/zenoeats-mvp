@@ -56,6 +56,10 @@ function load(slug: string): StoredCart {
 }
 
 function persist(state: CartState): void {
+  // No slug means no key to write to, so there is nothing this can do. It
+  // also means the caller never opened the cart (useOpenCart), and a write
+  // that silently does nothing is how a paid cart survived checkout: the
+  // page cleared the copy in memory and left storage untouched.
   if (!state.slug) return;
   try {
     const stored: StoredCart = { lines: state.lines, combos: state.combos };

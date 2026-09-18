@@ -31,6 +31,10 @@ from app.models import Order, Restaurant, RestaurantPaymentAccount, TaxMode
 
 log = logging.getLogger(__name__)
 
+# Stripe's product tax code for "Nontaxable". Exempt lines are still sent,
+# rather than left off, so the sale appears whole in the restaurant's reports.
+NONTAXABLE_TAX_CODE = "txcd_00000000"
+
 CALCULATION_CACHE_SECONDS = 30 * 60
 UNCACHED_CALCULATIONS_PER_HOUR = 600
 
@@ -92,7 +96,7 @@ def calculate(
                 "amount": line.amount_minor,
                 "quantity": line.quantity,
                 "reference": f"L{index}",
-                "tax_code": restaurant.tax_code,
+                "tax_code": restaurant.tax_code if line.taxable else NONTAXABLE_TAX_CODE,
                 "tax_behavior": "exclusive",
             }
             for index, line in enumerate(billable, start=1)

@@ -135,6 +135,7 @@ class MealOut(BaseModel):
 
 
 class PortalOut(BaseModel):
+    pickup_address: str | None = None
     restaurant_id: UUID
     slug: str
     name: str
@@ -144,6 +145,13 @@ class PortalOut(BaseModel):
     accepting_orders: bool
     stripe_publishable_key: str
     stripe_account_id: str | None
+    # Whether checkout offers delivery at all. Not whether an address can be
+    # delivered to -- that needs the address, and is the quote's answer.
+    delivery_offered: bool = False
+    # The live delivery map. The key is a browser key -- public by design and
+    # restricted to this site in Google's console. Null when there is no map.
+    maps_browser_key: str | None = None
+    maps_map_id: str | None = None
 
 
 class MenuOut(BaseModel):
@@ -186,6 +194,9 @@ class CartComboIn(BaseModel):
     selections: list[ComboSelectionIn] = Field(default_factory=list)
 
 
+FulfillmentChoice = Literal["PICKUP", "DELIVERY"]
+
+
 class QuoteIn(BaseModel):
     """Preview pricing. No order is created and no money moves."""
 
@@ -194,21 +205,137 @@ class QuoteIn(BaseModel):
     # job, once, rather than a rule each field states differently.
     items: list[CartLineIn] = Field(default_factory=list)
     combos: list[CartComboIn] = Field(default_factory=list)
+    # A delivery is priced from the address, never from a fee the browser
+    # names. Ignored for a collection.
+    fulfillment_type: FulfillmentChoice = "PICKUP"
+    delivery_address: str | None = Field(default=None, max_length=300)
+
+
+def _collapse(value: str) -> str:
+    return " ".join(value.split())
+
+
+class ContactIn(BaseModel):
+    """Who is ordering, as checkout requires it.
+
+    All three are mandatory. The email is not here: it is the account's, or
+    the one a guest gave when their session began, and a receipt goes to the
+    address that identity holds rather than to whatever a form last said.
+    """
+
+    full_name: str = Field(max_length=160)
+    phone: str = Field(max_length=32)
+    address: str = Field(max_length=300)
+
+    @field_validator("full_name")
+    @classmethod
+    def _named(cls, value: str) -> str:
+        cleaned = _collapse(value)
+        if not cleaned:
+            raise ValueError("Enter your name.")
+        return cleaned
+
+    @field_validator("phone")
+    @classmethod
+    def _callable(cls, value: str) -> str:
+        # Not a full numbering-plan check: a restaurant only needs a number a
+        # driver can ring, and people write those with spaces, dashes and
+        # brackets. What this refuses is the number nobody could dial.
+        cleaned = _collapse(value)
+        if any(c not in "0123456789+-(). " for c in cleaned) or "+" in cleaned[1:]:
+            raise ValueError("Enter a phone number using digits only.")
+        digits = sum(c.isdigit() for c in cleaned)
+        if not 7 <= digits <= 15:
+            raise ValueError("Enter a phone number a driver could call.")
+        return cleaned
+
+    @field_validator("address")
+    @classmethod
+    def _addressed(cls, value: str) -> str:
+        cleaned = _collapse(value)
+        if len(cleaned) < 5:
+            raise ValueError("Enter your address.")
+        return cleaned
 
 
 class CreateOrderIn(BaseModel):
     items: list[CartLineIn] = Field(default_factory=list)
     combos: list[CartComboIn] = Field(default_factory=list)
     customer_note: str | None = Field(default=None, max_length=500)
+    contact: ContactIn
+    # A guest may correct their receipt destination for this order. This never
+    # identifies an account, changes its owner, or changes earlier receipts.
+    guest_email: str | None = Field(default=None, max_length=320)
+
+    @field_validator("guest_email")
+    @classmethod
+    def _guest_receipt(cls, value: str | None) -> str | None:
+        return GuestSessionIn._plausible_address(value) if value is not None else None
+
+    # A delivery goes to contact.address: one address, typed once. Priced
+    # again here from that address, whatever the quote said.
+    fulfillment_type: FulfillmentChoice = "PICKUP"
     # Client-computed total, echoed back for a consistency check only. The
     # server total always wins; a mismatch returns PRICE_CHANGED so the
     # customer re-confirms rather than being silently charged a new amount.
     expected_total_minor: int | None = None
 
 
+class GuestSessionIn(BaseModel):
+    """Ordering without an account. The least we can ask for and still get a
+    receipt to a real person and a name the counter can call out."""
+
+    email: str = Field(min_length=3, max_length=320)
+    full_name: str | None = Field(default=None, max_length=160)
+
+    @field_validator("email")
+    @classmethod
+    def _plausible_address(cls, value: str) -> str:
+        # Not a full RFC check -- nothing short of sending a message proves an
+        # address, and a guest's is never verified anyway. This only catches
+        # the typo that would otherwise become a silently undeliverable
+        # receipt, and is the same shape Stripe will accept as receipt_email.
+        cleaned = value.strip().lower()
+        local, _, domain = cleaned.partition("@")
+        if (not local or "." not in domain or domain.startswith(".") or domain.endswith(".")
+                or cleaned.count("@") != 1 or any(c.isspace() for c in cleaned)):
+            raise ValueError("Enter an email address we can send your receipt to.")
+        return cleaned
+
+
+class GuestSessionOut(BaseModel):
+    """Deliberately thin. The session itself is the httpOnly cookie set
+    alongside this; nothing here is worth a client holding on to."""
+
+    email: str
+    full_name: str | None = None
+
+
+class CustomerSessionOut(BaseModel):
+    """Who is ordering, for the storefront header and the checkout guard.
+
+    is_guest is the part the UI acts on: a guest is offered an account, and
+    is warned that this browser is the only thing holding their order.
+
+    phone and address are what checkout saved last time, so a returning
+    customer is not asked twice. email_pending is a signed-in customer whose
+    address Clerk has not told us yet: checkout cannot proceed without one.
+    """
+
+    email: str
+    full_name: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    email_pending: bool = False
+    is_guest: bool
+
+
 class AmountsOut(BaseModel):
     subtotal_minor: int
     discount_minor: int
+    # Zero on a collection. Defaulted so an idempotent replay stored before
+    # delivery existed still reads back.
+    delivery_fee_minor: int = 0
     tax_minor: int
     total_minor: int
 
@@ -216,6 +343,8 @@ class AmountsOut(BaseModel):
 class QuoteOut(BaseModel):
     currency: str
     amounts: AmountsOut
+    # How far, for a delivery. Null on a collection.
+    delivery_miles: float | None = None
 
 
 class OrderModifierOut(BaseModel):
@@ -240,6 +369,41 @@ class OrderItemOut(BaseModel):
     modifiers: list[OrderModifierOut]
 
 
+class MapPointOut(BaseModel):
+    latitude: float
+    longitude: float
+
+
+class DriverLocationOut(MapPointOut):
+    heading: float | None = None
+    recorded_at: datetime
+
+
+class TrackingStepOut(BaseModel):
+    # PAID, DRIVER_ASSIGNED, READY, PICKED_UP, DELIVERED -- in that order,
+    # each present once it has happened.
+    step: str
+    at: datetime
+
+
+class TrackingOut(BaseModel):
+    """A delivery, as its customer follows it.
+
+    The driver's position is only ever here while the order is on the road,
+    and only the driver's first name is. Coordinates are borrowed, not kept:
+    the restaurant's are its own, the customer's come from the geocoding
+    cache, the driver's from a few minutes of Redis.
+    """
+
+    steps: list[TrackingStepOut]
+    driver_name: str | None = None
+    restaurant: MapPointOut | None = None
+    destination: MapPointOut | None = None
+    driver_location: DriverLocationOut | None = None
+    eta_seconds: int | None = None
+    eta_computed_at: datetime | None = None
+
+
 class OrderOut(BaseModel):
     order_id: UUID
     order_number: int
@@ -252,6 +416,9 @@ class OrderOut(BaseModel):
     # Only ever returned to the owning customer or authorized staff, and only
     # once the order is paid.
     pickup_pin: str | None = None
+    delivery_address: str | None = None
+    # Delivery orders once paid; null for a collection.
+    tracking: TrackingOut | None = None
     expires_at: datetime | None = None
     created_at: datetime
 

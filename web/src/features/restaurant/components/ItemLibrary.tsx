@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Empty, Panel } from "@/components/common/Feedback";
+import { Empty, Panel, Spinner } from "@/components/common/Feedback";
 import { PencilIcon } from "@/components/common/icons";
 import { minorToInput, money, priceToMinor, signedMoney } from "@/utils/format";
 import type { Meal } from "@/types";
@@ -74,14 +74,14 @@ export function ItemLibrary({
 
       <Panel
         title={
-          <span className="flex items-center gap-1.5">
+          <>
             Items
             {items.length > 0 && !adding && (
               <button
                 type="button"
                 aria-label={editing ? "Stop editing items" : "Edit every item"}
                 title={editing ? "Stop editing" : "Edit every item at once"}
-                className="text-muted hover:text-ink"
+                className="link min-h-[32px] px-1 text-base no-underline"
                 onClick={() => {
                   onError(null);
                   setEditing((open) => !open);
@@ -90,12 +90,13 @@ export function ItemLibrary({
                 <PencilIcon />
               </button>
             )}
-          </span>
+          </>
         }
         action={
           !editing && (
             <button
-              className="text-xs text-muted underline"
+              type="button"
+              className="link"
               onClick={() => {
                 onError(null);
                 setAdding((open) => !open);
@@ -120,93 +121,113 @@ export function ItemLibrary({
             onError={onError}
           />
         ) : (
-          <p className="text-xs text-muted">
-            An item written here can be served in any number of meal periods.
-            One price, one sold-out toggle, wherever it appears.
-          </p>
+          !editing && (
+            <p className="-mt-2 mb-5 max-w-prose text-caption text-muted">
+              An item written here can be served in any number of meal periods.
+              One price, one sold-out toggle, wherever it appears.
+            </p>
+          )
+        )}
+
+        {!items.length && !adding && (
+          <Empty>No items yet. Add one above, then put it on a meal period.</Empty>
+        )}
+
+        {/* Told apart from an empty library, because the answer is different:
+            one needs an item written, the other needs the filter cleared. */}
+        {items.length > 0 && !shown.length && (
+          <Empty>
+            <p>Nothing typed as {filterName ?? "that"} yet.</p>
+            <button type="button" className="btn-quiet mt-3" onClick={() => setFilter(null)}>
+              Show every item
+            </button>
+          </Empty>
+        )}
+
+        {editing && shown.length > 0 ? (
+          <ItemsEditor
+            items={shown}
+            meals={meals}
+            types={types}
+            groups={groups}
+            onDone={() => setEditing(false)}
+            onError={onError}
+          />
+        ) : (
+          shown.length > 0 && (
+            <div role="table" aria-label="Items">
+              <div
+                role="row"
+                className="hidden grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_auto_7rem] gap-4 border-b border-hairline py-[13px] text-[11px] font-[550] uppercase tracking-[.06em] text-muted sm:grid"
+              >
+                <span role="columnheader">Item</span>
+                <span role="columnheader">Type / meal periods</span>
+                <span role="columnheader" className="text-right">
+                  Price
+                </span>
+                <span role="columnheader">Availability</span>
+              </div>
+              {shown.map((item) => (
+                <div
+                  key={item.id}
+                  role="row"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1.5 border-b border-hairline py-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.4fr)_auto_7rem] sm:items-center"
+                >
+                  <span role="cell" className="flex min-w-0 items-center gap-3">
+                    {item.image_url && (
+                      <img
+                        src={item.image_url}
+                        alt=""
+                        loading="lazy"
+                        className="h-8 w-8 shrink-0 rounded-[5px] object-cover"
+                      />
+                    )}
+                    <strong className="truncate font-semibold">{item.name}</strong>
+                  </span>
+                  <span role="cell" className="tnum text-right sm:order-3">
+                    {money(item.base_price_minor, item.currency)}
+                  </span>
+                  <span role="cell" className="col-span-2 min-w-0 sm:order-2 sm:col-span-1">
+                    {/* Named with its heading when it has one: "Burgers" alone
+                        is ambiguous in a list covering the whole menu. */}
+                    <span className="pill">{typeLabel(types, item.item_type_id)}</span>
+                    {item.tax_exempt && <span className="pill ml-1.5">Tax-exempt</span>}
+                    <span className="ml-2 text-caption text-muted sm:ml-0 sm:mt-1.5 sm:block">
+                      {item.meal_ids.length
+                        ? item.meal_ids.map((id) => mealName.get(id) ?? "?").join(" · ")
+                        : "not on any meal period"}
+                    </span>
+                  </span>
+                  <span role="cell" className="col-span-2 sm:order-4 sm:col-span-1">
+                    {/* The kitchen's toggle, not the builder's. It is used all
+                        shift by staff who never edit a price and it undoes itself
+                        in one click, so it stays out of the edit mode. */}
+                    <button
+                      type="button"
+                      className={item.is_available ? "link" : "link-danger"}
+                      aria-pressed={!item.is_available}
+                      aria-label={`${item.name}: ${item.is_available ? "in stock" : "sold out"}`}
+                      onClick={async () => {
+                        try {
+                          await setAvailability({
+                            itemId: item.id,
+                            is_available: !item.is_available,
+                          }).unwrap();
+                          onError(null);
+                        } catch (e) {
+                          onError(errorMessage(e));
+                        }
+                      }}
+                    >
+                      {item.is_available ? "in stock" : "sold out"}
+                    </button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </Panel>
-
-      {!items.length && !adding && (
-        <Empty>No items yet. Add one above, then put it on a meal period.</Empty>
-      )}
-
-      {/* Told apart from an empty library, because the answer is different:
-          one needs an item written, the other needs the filter cleared. */}
-      {items.length > 0 && !shown.length && (
-        <Empty>
-          Nothing typed as {filterName ?? "that"} yet.{" "}
-          <button className="underline" onClick={() => setFilter(null)}>
-            Show every item
-          </button>
-        </Empty>
-      )}
-
-      {editing && shown.length > 0 ? (
-        <ItemsEditor
-          items={shown}
-          meals={meals}
-          types={types}
-          groups={groups}
-          onDone={() => setEditing(false)}
-          onError={onError}
-        />
-      ) : (
-        shown.length > 0 && (
-          <div className="border border-hairline bg-surface">
-            {shown.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-hairline px-4 py-3 last:border-0"
-              >
-                {item.image_url && (
-                  <img
-                    src={item.image_url}
-                    alt=""
-                    loading="lazy"
-                    className="h-8 w-8 shrink-0 self-center rounded object-cover"
-                  />
-                )}
-                <span className="text-sm">{item.name}</span>
-                {/* Named with its heading when it has one: "Burgers" alone
-                    is ambiguous in a list covering the whole menu. */}
-                <span className="rounded bg-paper px-1.5 py-0.5 text-[11px] text-muted">
-                  {typeLabel(types, item.item_type_id)}
-                </span>
-                <span className="flex-1 text-xs text-muted">
-                  {item.meal_ids.length
-                    ? item.meal_ids.map((id) => mealName.get(id) ?? "?").join(" · ")
-                    : "not on any meal period"}
-                </span>
-                <span className="tnum text-sm">
-                  {money(item.base_price_minor, item.currency)}
-                </span>
-                {/* The kitchen's toggle, not the builder's. It is used all
-                    shift by staff who never edit a price and it undoes itself
-                    in one click, so it stays out of the edit mode. */}
-                <button
-                  className={`text-xs underline ${
-                    item.is_available ? "text-muted" : "text-brick"
-                  }`}
-                  onClick={async () => {
-                    try {
-                      await setAvailability({
-                        itemId: item.id,
-                        is_available: !item.is_available,
-                      }).unwrap();
-                      onError(null);
-                    } catch (e) {
-                      onError(errorMessage(e));
-                    }
-                  }}
-                >
-                  {item.is_available ? "in stock" : "sold out"}
-                </button>
-              </div>
-            ))}
-          </div>
-        )
-      )}
     </>
   );
 }
@@ -217,6 +238,7 @@ type RowDraft = {
   typeId: string;
   price: string;
   description: string;
+  taxExempt: boolean;
   mealIds: string[];
   groupIds: string[];
   includedIds: string[];
@@ -229,6 +251,7 @@ function rowOf(item: LibraryItem): RowDraft {
     typeId: item.item_type_id,
     price: minorToInput(item.base_price_minor),
     description: item.description ?? "",
+    taxExempt: item.tax_exempt,
     mealIds: [...item.meal_ids],
     groupIds: item.modifier_groups.map((g) => g.id),
     includedIds: [...item.included_option_ids],
@@ -382,6 +405,8 @@ function ItemsEditor({
       const description = row.description.trim() || null;
       if (description !== (item.description ?? null)) changes.description = description;
 
+      if (row.taxExempt !== item.tax_exempt) changes.tax_exempt = row.taxExempt;
+
       // Compared as sorted text: ticking a period off and back on rebuilds
       // the array with the same contents and must not read as an edit.
       if ([...row.mealIds].sort().join() !== [...item.meal_ids].sort().join()) {
@@ -428,7 +453,7 @@ function ItemsEditor({
   }
 
   return (
-    <div className="border border-ink bg-surface">
+    <div className="editor animate-disclose">
       {items.map((item) => {
         const row = draft[item.id];
         const going = !!removed[item.id];
@@ -448,95 +473,135 @@ function ItemsEditor({
 
         return (
           <div key={item.id} className="border-b border-hairline last:border-0">
-            <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+            <div
+              className={`grid grid-cols-[38px_minmax(0,1fr)] items-end gap-3 py-[17px] transition-colors duration-stage md:grid-cols-[40px_minmax(0,1fr)_minmax(0,1fr)_85px] xl:grid-cols-[40px_minmax(0,1.6fr)_minmax(0,1fr)_100px_auto] ${
+                going ? "-mx-2 rounded-chip bg-[#FCF2F2] px-2" : ""
+              }`}
+            >
               {going ? (
-                <span className="flex-1 text-sm text-muted line-through">{item.name}</span>
+                <span className="col-span-2 min-h-[46px] py-3 text-muted line-through md:col-span-3 xl:col-span-4">
+                  {item.name}
+                </span>
               ) : (
                 <>
-                  <ImagePicker
-                    kind="items"
-                    size="sm"
-                    image={row.image}
-                    label={item.name}
-                    disabled={saving}
-                    onChange={(image) => setRow(item.id, { image })}
-                    onError={onError}
-                    onBusyChange={trackUpload}
-                  />
-                  <input
-                    className="field min-w-[10rem] flex-1 text-sm"
-                    value={row.name}
-                    disabled={saving}
-                    aria-label={`${item.name} name`}
-                    onChange={(e) => setRow(item.id, { name: e.target.value })}
-                  />
-                  <select
-                    className="field w-32 text-sm"
-                    value={row.typeId}
-                    disabled={saving}
-                    aria-label={`${item.name} type`}
-                    onChange={(e) => setRow(item.id, { typeId: e.target.value })}
-                  >
-                    {types.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {typeLabel(types, t.id)}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    className="field tnum w-24 text-sm"
-                    inputMode="decimal"
-                    value={row.price}
-                    disabled={saving}
-                    aria-label={`${item.name} price`}
-                    onChange={(e) => setRow(item.id, { price: e.target.value })}
-                  />
+                  <span className="pb-1.5">
+                    <ImagePicker
+                      kind="items"
+                      size="sm"
+                      image={row.image}
+                      label={item.name}
+                      disabled={saving}
+                      onChange={(image) => setRow(item.id, { image })}
+                      onError={onError}
+                      onBusyChange={trackUpload}
+                    />
+                  </span>
+                  <label className="block min-w-0">
+                    <span className="label">Name</span>
+                    <input
+                      className="field mt-[7px]"
+                      value={row.name}
+                      disabled={saving}
+                      aria-label={`${item.name} name`}
+                      onChange={(e) => setRow(item.id, { name: e.target.value })}
+                    />
+                  </label>
+                  <label className="col-start-2 block min-w-0 md:col-start-auto">
+                    <span className="label">Type</span>
+                    <select
+                      className="field mt-[7px]"
+                      value={row.typeId}
+                      disabled={saving}
+                      aria-label={`${item.name} type`}
+                      onChange={(e) => setRow(item.id, { typeId: e.target.value })}
+                    >
+                      {types.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {typeLabel(types, t.id)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="col-start-2 block min-w-0 md:col-start-auto">
+                    <span className="label">Price</span>
+                    <input
+                      className="field tnum mt-[7px]"
+                      inputMode="decimal"
+                      value={row.price}
+                      disabled={saving}
+                      aria-label={`${item.name} price`}
+                      onChange={(e) => setRow(item.id, { price: e.target.value })}
+                    />
+                  </label>
+                </>
+              )}
+              <span className="col-start-2 flex flex-wrap items-center gap-x-4 md:col-span-3 md:col-start-2 md:justify-end xl:col-span-1 xl:col-start-auto">
+                {!going && (
                   <button
-                    className="text-xs text-muted underline"
+                    type="button"
+                    className="link"
                     disabled={saving}
+                    aria-expanded={open}
                     onClick={() => setExpanded(open ? null : item.id)}
                   >
                     {open ? "less" : "periods & options"}
                   </button>
-                </>
-              )}
-              <button
-                className={`text-xs underline ${going ? "" : "text-brick"}`}
-                disabled={saving}
-                onClick={() =>
-                  setRemoved((r) => {
-                    const next = { ...r };
-                    if (next[item.id]) delete next[item.id];
-                    else next[item.id] = true;
-                    return next;
-                  })
-                }
-              >
-                {going ? "keep it" : "delete"}
-              </button>
+                )}
+                <button
+                  type="button"
+                  className={going ? "link" : "link-danger"}
+                  disabled={saving}
+                  onClick={() =>
+                    setRemoved((r) => {
+                      const next = { ...r };
+                      if (next[item.id]) delete next[item.id];
+                      else next[item.id] = true;
+                      return next;
+                    })
+                  }
+                >
+                  {going ? "keep it" : "delete"}
+                </button>
+              </span>
             </div>
 
             {/* Behind a disclosure rather than always on: a row of chips per
                 item would bury the names and prices, which are what a menu
-                edit is usually about. */}
+                edit is usually about. One row open at a time. */}
             {open && !going && (
-              <div className="grid gap-3 bg-paper px-4 py-3">
-                <label>
-                  <span className="text-xs text-muted">Description</span>
+              <div className="mb-5 flex animate-disclose flex-col gap-[17px] rounded-button bg-paper p-4">
+                <label className="block">
+                  <span className="label">Description</span>
                   <input
-                    className="field mt-1 text-sm"
+                    className="field mt-[7px]"
                     value={row.description}
                     disabled={saving}
                     onChange={(e) => setRow(item.id, { description: e.target.value })}
                   />
                 </label>
 
-                <div>
-                  <p className="text-xs text-muted">Served during</p>
+                <label className="flex items-start gap-2.5 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-5 w-5 shrink-0"
+                    checked={row.taxExempt}
+                    disabled={saving}
+                    onChange={(e) => setRow(item.id, { taxExempt: e.target.checked })}
+                  />
+                  <span>
+                    <span className="font-semibold">Tax-exempt</span>
+                    <span className="field-hint block">
+                      No sales tax is charged on this item. The rest of the order is taxed as usual.
+                    </span>
+                  </span>
+                </label>
+
+                <fieldset>
+                  <legend className="mb-3 text-sm font-semibold">Served during</legend>
                   {!meals.length ? (
-                    <p className="mt-1 text-xs text-muted">No meal periods yet.</p>
+                    <p className="text-caption text-muted">No meal periods yet.</p>
                   ) : (
-                    <div className="mt-2 flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2">
                       {meals.map((meal) => (
                         <Chip
                           key={meal.id}
@@ -549,10 +614,10 @@ function ItemsEditor({
                       ))}
                     </div>
                   )}
-                </div>
+                </fieldset>
 
-                <div>
-                  <p className="text-xs text-muted">Modifier groups</p>
+                <fieldset>
+                  <legend className="mb-3 text-sm font-semibold">Modifier groups</legend>
                   <GroupsAndInclusions
                     groups={relevant}
                     groupIds={row.groupIds}
@@ -567,23 +632,26 @@ function ItemsEditor({
                       toggleIn(item.id, "includedIds", optionId)
                     }
                   />
-                </div>
+                </fieldset>
               </div>
             )}
           </div>
         );
       })}
 
-      <div className="flex flex-wrap items-center gap-4 border-t border-hairline px-4 py-3">
+      <footer className="mt-6 flex flex-wrap items-center gap-3.5 border-t border-hairline pt-[18px]">
         <button
+          type="button"
           className="btn-primary"
           disabled={saving || uploading > 0}
           onClick={() => void save()}
         >
+          {(saving || uploading > 0) && <Spinner />}
           {saving ? "Saving…" : uploading > 0 ? "Uploading photo…" : "Save changes"}
         </button>
         <button
-          className="text-xs text-muted underline"
+          type="button"
+          className="link"
           disabled={saving}
           onClick={() => {
             onError(null);
@@ -592,18 +660,12 @@ function ItemsEditor({
         >
           cancel
         </button>
-        <p className="text-xs text-muted">
-          {doomed.length ? (
-            <span className="text-brick">
-              Saving will delete {doomed.length}{" "}
-              {doomed.length === 1 ? "item" : "items"} from every meal period.
-              Cancel and nothing is removed.
-            </span>
-          ) : (
-            "A new price applies to new orders only."
-          )}
+        <p className={`w-full text-caption ${doomed.length ? "text-danger" : "text-muted"}`}>
+          {doomed.length
+            ? `Saving will delete ${doomed.length} ${doomed.length === 1 ? "item" : "items"} from every meal period. Cancel and nothing is removed.`
+            : "A new price applies to new orders only."}
         </p>
-      </div>
+      </footer>
     </div>
   );
 }
@@ -613,6 +675,7 @@ type Draft = {
   typeId: string;
   price: string;
   description: string;
+  taxExempt: boolean;
   mealIds: string[];
   groupIds: string[];
   includedIds: string[];
@@ -627,6 +690,7 @@ function seed(types: ItemTypeRow[]): Draft {
     typeId: types[0]?.id ?? "",
     price: "",
     description: "",
+    taxExempt: false,
     mealIds: [],
     groupIds: [],
     includedIds: [],
@@ -660,6 +724,7 @@ function ItemForm({
     item_type_id: string;
     description: string | null;
     base_price_minor: number;
+    tax_exempt: boolean;
     meal_ids: string[];
     modifier_group_ids: string[];
     included_option_ids: string[];
@@ -742,6 +807,7 @@ function ItemForm({
         item_type_id: draft.typeId,
         description: draft.description.trim() || null,
         base_price_minor: minor,
+        tax_exempt: draft.taxExempt,
         meal_ids: draft.mealIds,
         modifier_group_ids: draft.groupIds,
         included_option_ids: draft.includedIds,
@@ -758,80 +824,102 @@ function ItemForm({
   }
 
   return (
-    <div className="grid gap-3 bg-paper px-4 py-4 sm:grid-cols-4">
-      <label className="sm:col-span-2">
-        <span className="text-xs text-muted">Item name</span>
-        <input
-          className="field mt-1"
-          value={draft.name}
-          autoFocus
-          disabled={saving}
-          onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-        />
-      </label>
-      <label>
-        <span className="text-xs text-muted">Type</span>
-        <select
-          className="field mt-1"
-          value={draft.typeId}
-          disabled={saving}
-          onChange={(e) => setDraft((d) => ({ ...d, typeId: e.target.value }))}
-        >
-          {!types.length && <option value="">No types yet</option>}
-          {/* Flat, and in menu order, with a subcategory named under its
-              heading: "Burgers" alone says less than "Food / Burgers". */}
-          {types.map((t) => (
-            <option key={t.id} value={t.id}>
-              {typeLabel(types, t.id)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        <span className="text-xs text-muted">Price</span>
-        <input
-          className="field mt-1"
-          inputMode="decimal"
-          placeholder="10.95"
-          value={draft.price}
-          disabled={saving}
-          onChange={(e) => setDraft((d) => ({ ...d, price: e.target.value }))}
-        />
-      </label>
-      <label className="sm:col-span-4">
-        <span className="text-xs text-muted">Description</span>
-        <input
-          className="field mt-1"
-          value={draft.description}
-          disabled={saving}
-          onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-        />
-      </label>
-
-      <div className="sm:col-span-4">
-        <p className="text-xs text-muted">Photo</p>
-        <div className="mt-2">
-          <ImagePicker
-            kind="items"
-            image={draft.image}
-            label={draft.name.trim() || "this item"}
+    <form
+      className="mb-6 flex animate-disclose flex-col gap-[17px]"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!saving && uploading === 0) void save();
+      }}
+    >
+      <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2">
+        <label className="block">
+          <span className="label">Item name</span>
+          <input
+            className="field mt-[7px]"
+            value={draft.name}
+            autoFocus
             disabled={saving}
-            onChange={(image) => setDraft((d) => ({ ...d, image }))}
-            onError={onError}
-            onBusyChange={trackUpload}
+            onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
           />
-        </div>
+        </label>
+        <label className="block">
+          <span className="label">Type</span>
+          <select
+            className="field mt-[7px]"
+            value={draft.typeId}
+            disabled={saving}
+            onChange={(e) => setDraft((d) => ({ ...d, typeId: e.target.value }))}
+          >
+            {!types.length && <option value="">No types yet</option>}
+            {/* Flat, and in menu order, with a subcategory named under its
+                heading: "Burgers" alone says less than "Food / Burgers". */}
+            {types.map((t) => (
+              <option key={t.id} value={t.id}>
+                {typeLabel(types, t.id)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="label">Price</span>
+          <input
+            className="field tnum mt-[7px]"
+            inputMode="decimal"
+            placeholder="10.95"
+            value={draft.price}
+            disabled={saving}
+            onChange={(e) => setDraft((d) => ({ ...d, price: e.target.value }))}
+          />
+        </label>
+        <label className="block">
+          <span className="label">Description</span>
+          <input
+            className="field mt-[7px]"
+            value={draft.description}
+            disabled={saving}
+            onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+          />
+        </label>
       </div>
 
-      <div className="sm:col-span-4">
-        <p className="text-xs text-muted">Served during</p>
+      <label className="flex items-start gap-2.5 text-sm">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-5 w-5 shrink-0"
+          checked={draft.taxExempt}
+          disabled={saving}
+          onChange={(e) => setDraft((d) => ({ ...d, taxExempt: e.target.checked }))}
+        />
+        <span>
+          <span className="font-semibold">Tax-exempt</span>
+          <span className="field-hint block">
+            No sales tax is charged on this item. The rest of the order is taxed as usual.
+          </span>
+        </span>
+      </label>
+
+      <div>
+        <p className="label mb-3">Photo</p>
+        <ImagePicker
+          kind="items"
+          image={draft.image}
+          label={draft.name.trim() || "this item"}
+          disabled={saving}
+          onChange={(image) => setDraft((d) => ({ ...d, image }))}
+          onError={onError}
+          onBusyChange={trackUpload}
+        />
+      </div>
+
+      <fieldset>
+        <legend className="mb-3 text-sm font-semibold">Served during</legend>
         {!meals.length ? (
-          <p className="mt-1 text-xs text-muted">
+          <p className="max-w-prose text-caption text-muted">
             No meal periods yet. Add one on the next tab, then tick it here.
             The item is saved either way and waits until it has somewhere to go.
           </p>
         ) : (
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             {meals.map((meal) => (
               <Chip
                 key={meal.id}
@@ -844,12 +932,12 @@ function ItemForm({
             ))}
           </div>
         )}
-      </div>
+      </fieldset>
 
-      <div className="sm:col-span-4">
-        <p className="text-xs text-muted">
+      <fieldset>
+        <legend className="mb-3 text-sm font-semibold">
           Modifier groups for this item, and what it comes with
-        </p>
+        </legend>
         <GroupsAndInclusions
           groups={relevant}
           groupIds={draft.groupIds}
@@ -862,21 +950,18 @@ function ItemForm({
           }}
           onToggleIncluded={(optionId) => toggle("includedIds", optionId)}
         />
-      </div>
+      </fieldset>
 
-      <div className="flex items-center gap-4 sm:col-span-4">
-        <button
-          className="btn-primary"
-          disabled={saving || uploading > 0}
-          onClick={() => void save()}
-        >
+      <div className="flex flex-wrap items-center gap-4">
+        <button type="submit" className="btn-primary" disabled={saving || uploading > 0}>
+          {(saving || uploading > 0) && <Spinner />}
           {saving ? "Saving…" : uploading > 0 ? "Uploading photo…" : submitLabel}
         </button>
-        <button className="text-xs text-muted underline" disabled={saving} onClick={onCancel}>
+        <button type="button" className="link" disabled={saving} onClick={onCancel}>
           cancel
         </button>
       </div>
-    </div>
+    </form>
   );
 }
 
@@ -909,10 +994,10 @@ function GroupsAndInclusions({
   onToggleGroup: (groupId: string) => void;
   onToggleIncluded: (optionId: string) => void;
 }) {
-  if (!groups.length) return <p className="mt-1 text-xs text-muted">{emptyNote}</p>;
+  if (!groups.length) return <p className="text-caption text-muted">{emptyNote}</p>;
 
   return (
-    <div className="mt-2 space-y-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
         {groups.map((g) => (
           <Chip
@@ -922,7 +1007,7 @@ function GroupsAndInclusions({
             onClick={() => onToggleGroup(g.id)}
           >
             {g.name}
-            {g.is_required && <span className="ml-1 opacity-60">required</span>}
+            {g.is_required && <span className="opacity-70">· required</span>}
           </Chip>
         ))}
       </div>
@@ -930,11 +1015,9 @@ function GroupsAndInclusions({
       {groups
         .filter((g) => groupIds.includes(g.id))
         .map((g) => (
-          <div key={g.id} className="border-l-2 border-hairline pl-3">
-            <p className="text-[11px] text-muted">
-              Comes with, from {g.name}
-            </p>
-            <div className="mt-1.5 flex flex-wrap gap-2">
+          <div key={g.id} className="animate-disclose border-l-2 border-hairline pl-3">
+            <p className="text-caption text-muted">Comes with, from {g.name}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
               {g.options.map((o) => {
                 const on = includedIds.includes(o.id);
                 return (
@@ -945,8 +1028,8 @@ function GroupsAndInclusions({
                     onClick={() => onToggleIncluded(o.id)}
                   >
                     {o.name}
-                    <span className="ml-1.5 opacity-60">
-                      {on ? "free" : signedMoney(o.price_delta_minor) || "+0.00"}
+                    <span className="tnum opacity-70">
+                      · {on ? "free" : signedMoney(o.price_delta_minor) || "+0.00"}
                     </span>
                   </Chip>
                 );
@@ -971,15 +1054,7 @@ function Chip({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={on}
-      disabled={disabled}
-      onClick={onClick}
-      className={`rounded border px-2.5 py-1 text-xs ${
-        on ? "border-ink bg-ink text-white" : "border-hairline bg-surface"
-      }`}
-    >
+    <button type="button" aria-pressed={on} disabled={disabled} onClick={onClick} className="chip">
       {children}
     </button>
   );

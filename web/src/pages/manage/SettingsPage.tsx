@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Empty, ErrorNote, Panel } from "@/components/common/Feedback";
+import { ErrorNote, Loading, SettingsHeading, Spinner } from "@/components/common/Feedback";
+import { PageTitle } from "@/components/layout/Shell";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import { OwnAccount } from "@/features/restaurant/components/OwnAccount";
 import { DeliveryArea } from "@/features/restaurant/components/DeliveryArea";
@@ -11,6 +12,24 @@ import {
 } from "@/features/restaurant/restaurantApi";
 import { errorMessage } from "@/services/apiClient";
 
+const SECTIONS = [
+  ["own-account", "Your account"],
+  ["settings-restaurant", "The restaurant"],
+  ["settings-address", "Where you are"],
+  ["settings-delivery", "Delivery"],
+  ["settings-tax", "Tax"],
+  ["settings-platform", "Set by Zenoeats"],
+] as const;
+
+const ADDRESS_FIELDS = [
+  "address_line1",
+  "address_line2",
+  "address_city",
+  "address_state",
+  "address_postal_code",
+  "address_country",
+] as const;
+
 /**
  * The restaurant's own record, for its admin.
  *
@@ -18,6 +37,12 @@ import { errorMessage } from "@/services/apiClient";
  * trading name was a support ticket. The fields the platform still owns are
  * shown but not editable, because "you cannot change this here" is a more
  * useful answer than leaving them off the page and letting someone hunt.
+ *
+ * Six panels, three ways of saving, on purpose. Your account saves its name
+ * and its address separately; Delivery saves each control on the spot; the
+ * restaurant, its address and its tax share the one save bar at the bottom.
+ * Folding those into one Save would ask for a password to fix a typo, or
+ * discard half-typed delivery rings to save a tagline.
  *
  * Saving sends only what was actually edited. Two admins with the page open
  * can change different things without either one's save reverting the other's,
@@ -43,7 +68,11 @@ export function SettingsPage() {
     () => (profile.data && draft ? changedFields(profile.data, draft) : {}),
     [profile.data, draft],
   );
-  const dirty = Object.keys(patch).length > 0;
+  const changed = Object.keys(patch).length;
+  const dirty = changed > 0;
+  // Editing the address invalidates where delivery distances are measured
+  // from. Said before the save, while it can still be reconsidered.
+  const addressDirty = ADDRESS_FIELDS.some((key) => key in patch);
 
   function edit(changes: Partial<RestaurantProfile>) {
     setSaved(false);
@@ -60,17 +89,30 @@ export function SettingsPage() {
     }
   }
 
+  const heading = (
+    <PageTitle
+      title="Restaurant settings"
+      subtitle="The details behind every order."
+      right={<span className="pill">Admin only</span>}
+    />
+  );
+
   if (profile.isLoading) {
     return (
       <ManageShell>
-        <Empty>Loading…</Empty>
+        {heading}
+        <Loading />
       </ManageShell>
     );
   }
   if (!draft) {
     return (
       <ManageShell>
+        {heading}
         <ErrorNote message={errorMessage(profile.error) || "Could not load your settings."} />
+        <button type="button" className="btn-quiet" onClick={() => void profile.refetch()}>
+          Try again
+        </button>
       </ManageShell>
     );
   }
@@ -79,218 +121,281 @@ export function SettingsPage() {
 
   return (
     <ManageShell>
-      <ErrorNote message={error} />
-      {saved && !dirty && (
-        <p className="mb-4 border-l-2 border-ink bg-surface px-3 py-2 text-sm">Saved.</p>
-      )}
+      {heading}
 
-      <OwnAccount />
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-[160px_minmax(0,1fr)] xl:grid-cols-[190px_minmax(0,1fr)] xl:gap-9">
+        <nav aria-label="Settings sections" className="sticky top-[22px] hidden flex-col gap-[5px] self-start md:flex">
+          {SECTIONS.map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="flex items-center rounded-chip p-3 text-[13px] transition-colors duration-color hover:bg-brickSoft"
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
 
-      <Panel title="The restaurant">
-        <div className="space-y-4 bg-surface px-5 py-5">
-          <Field label="Restaurant name" hint="What customers see on your menu and receipts.">
-            <input
-              className="field"
-              value={draft.name}
-              maxLength={160}
-              onChange={(e) => edit({ name: e.target.value })}
-            />
-          </Field>
-          <Field label="Tagline" hint="Optional. A line under your name on the menu.">
-            <input
-              className="field"
-              value={draft.tagline ?? ""}
-              maxLength={200}
-              placeholder="Since 1998"
-              onChange={(e) => edit({ tagline: e.target.value })}
-            />
-          </Field>
-          <label className="flex items-start gap-3 text-sm">
-            <input
-              type="checkbox"
-              className="mt-1"
-              checked={draft.accepting_orders}
-              onChange={(e) => edit({ accepting_orders: e.target.checked })}
-            />
-            <span>
-              Taking orders
-              <span className="block text-muted">
-                Turn this off to stop new orders while keeping your menu readable. Orders already
-                paid for are unaffected.
-              </span>
-            </span>
-          </label>
-        </div>
-      </Panel>
-
-      <Panel title="Where you are">
-        <div className="space-y-4 bg-surface px-5 py-5">
-          <p className="text-sm text-muted">
-            Where customers collect their orders. It is also the address your sales tax is worked
-            out for, so it needs to be the real trading address rather than a head office.
-          </p>
-          <Field label="Street">
-            <input
-              className="field"
-              value={draft.address_line1 ?? ""}
-              maxLength={200}
-              onChange={(e) => edit({ address_line1: e.target.value })}
-            />
-          </Field>
-          <Field label="Street, line 2" hint="Optional. Unit or suite.">
-            <input
-              className="field"
-              value={draft.address_line2 ?? ""}
-              maxLength={200}
-              onChange={(e) => edit({ address_line2: e.target.value })}
-            />
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="City">
-              <input
-                className="field"
-                value={draft.address_city ?? ""}
-                maxLength={100}
-                onChange={(e) => edit({ address_city: e.target.value })}
-              />
-            </Field>
-            <Field label="State">
-              <input
-                className="field"
-                value={draft.address_state ?? ""}
-                maxLength={100}
-                onChange={(e) => edit({ address_state: e.target.value })}
-              />
-            </Field>
-            <Field label="Postal code">
-              <input
-                className="field"
-                value={draft.address_postal_code ?? ""}
-                maxLength={20}
-                onChange={(e) => edit({ address_postal_code: e.target.value })}
-              />
-            </Field>
-            <Field label="Country" hint="Two letters, like US.">
-              <input
-                className="field uppercase"
-                value={draft.address_country ?? ""}
-                maxLength={2}
-                onChange={(e) => edit({ address_country: e.target.value.toUpperCase() })}
-              />
-            </Field>
+        <div className="min-w-0">
+          <div className="mb-6">
+            <OwnAccount />
           </div>
-          <Field
-            label="Timezone"
-            hint="Which day an order counts on in your reports. A name like America/Chicago."
-          >
-            <input
-              className="field"
-              value={draft.timezone}
-              maxLength={64}
-              onChange={(e) => edit({ timezone: e.target.value })}
-            />
-          </Field>
-        </div>
-      </Panel>
 
-      <DeliveryArea />
-
-      <Panel title="Tax">
-        <div className="space-y-4 bg-surface px-5 py-5">
-          <label className="flex items-start gap-3 text-sm">
-            <input
-              type="radio"
-              className="mt-1"
-              checked={draft.tax_mode === "FLAT"}
-              onChange={() => edit({ tax_mode: "FLAT" })}
-            />
-            <span>
-              One flat rate
-              <span className="block text-muted">
-                The same percentage on every order. Simple, and only correct where your local rate
-                really is a single number.
-              </span>
-            </span>
-          </label>
-
-          {draft.tax_mode === "FLAT" && (
-            <div className="pl-7">
-              <Field label="Rate" hint="A percentage, up to 30. For example 8.75.">
+          <SettingsCard id="settings-restaurant" title="The restaurant" subtitle="What your customers see.">
+            <div className="flex flex-col gap-[17px]">
+              <Field label="Restaurant name" hint="What customers see on your menu and receipts.">
                 <input
-                  className="field max-w-[8rem]"
-                  inputMode="decimal"
-                  value={percentText(draft.tax_rate_bps)}
-                  onChange={(e) => edit({ tax_rate_bps: bpsFromPercent(e.target.value) })}
+                  className="field"
+                  value={draft.name}
+                  maxLength={160}
+                  onChange={(e) => edit({ name: e.target.value })}
                 />
               </Field>
+              <Field label="Tagline (optional)" hint="A line under your name on the menu.">
+                <input
+                  className="field"
+                  value={draft.tagline ?? ""}
+                  maxLength={200}
+                  placeholder="Since 1998"
+                  onChange={(e) => edit({ tagline: e.target.value })}
+                />
+              </Field>
+              <label className="flex items-start gap-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-5 w-5 shrink-0"
+                  checked={draft.accepting_orders}
+                  onChange={(e) => edit({ accepting_orders: e.target.checked })}
+                />
+                <span>
+                  <span className="font-semibold">Taking orders</span>
+                  <span className="field-hint block">
+                    Turn this off to stop new orders while keeping your menu readable. Orders already
+                    paid for are unaffected.
+                  </span>
+                </span>
+              </label>
             </div>
-          )}
+          </SettingsCard>
 
-          <label className="flex items-start gap-3 text-sm">
-            <input
-              type="radio"
-              className="mt-1"
-              disabled={!stripeTaxAvailable}
-              checked={draft.tax_mode === "STRIPE_TAX"}
-              onChange={() => edit({ tax_mode: "STRIPE_TAX" })}
-            />
-            <span className={stripeTaxAvailable ? "" : "text-muted"}>
-              Work it out per order, through Stripe
-              <span className="block text-muted">
-                State, county and city rates for the address above, calculated on your own Stripe
-                account, and reported there.{" "}
-                {!stripeTaxAvailable &&
-                  "Available once your Stripe account is connected and taking payments."}
-              </span>
-            </span>
-          </label>
-
-          {draft.tax_mode === "STRIPE_TAX" && (
-            <div className="pl-7">
+          <SettingsCard
+            id="settings-address"
+            title="Where you are"
+            subtitle="Your trading address, not a head office."
+          >
+            <p className="-mt-2 mb-5 max-w-prose text-caption text-muted">
+              Where customers collect their orders. It is also the address your sales tax is worked
+              out for, so it needs to be the real trading address rather than a head office.
+            </p>
+            <div className="flex flex-col gap-[17px]">
+              <Field label="Street">
+                <input
+                  className="field"
+                  value={draft.address_line1 ?? ""}
+                  maxLength={200}
+                  autoComplete="address-line1"
+                  onChange={(e) => edit({ address_line1: e.target.value })}
+                />
+              </Field>
+              <Field label="Street, line 2" hint="Optional. Unit or suite.">
+                <input
+                  className="field"
+                  value={draft.address_line2 ?? ""}
+                  maxLength={200}
+                  autoComplete="address-line2"
+                  onChange={(e) => edit({ address_line2: e.target.value })}
+                />
+              </Field>
+              <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2">
+                <Field label="City">
+                  <input
+                    className="field"
+                    value={draft.address_city ?? ""}
+                    maxLength={100}
+                    autoComplete="address-level2"
+                    onChange={(e) => edit({ address_city: e.target.value })}
+                  />
+                </Field>
+                <Field label="State">
+                  <input
+                    className="field"
+                    value={draft.address_state ?? ""}
+                    maxLength={100}
+                    autoComplete="address-level1"
+                    onChange={(e) => edit({ address_state: e.target.value })}
+                  />
+                </Field>
+                <Field label="Postal code">
+                  <input
+                    className="field"
+                    value={draft.address_postal_code ?? ""}
+                    maxLength={20}
+                    autoComplete="postal-code"
+                    onChange={(e) => edit({ address_postal_code: e.target.value })}
+                  />
+                </Field>
+                <Field label="Country" hint="Two letters, like US.">
+                  <input
+                    className="field uppercase"
+                    value={draft.address_country ?? ""}
+                    maxLength={2}
+                    onChange={(e) => edit({ address_country: e.target.value.toUpperCase() })}
+                  />
+                </Field>
+              </div>
               <Field
-                label="Product tax code"
-                hint="txcd_40060003 covers prepared food and drink. Change it only if Stripe told you to."
+                label="Timezone"
+                hint="Which day an order counts on in your reports. A name like America/Chicago."
               >
                 <input
-                  className="field max-w-[16rem]"
-                  value={draft.tax_code}
-                  onChange={(e) => edit({ tax_code: e.target.value })}
+                  className="field"
+                  value={draft.timezone}
+                  maxLength={64}
+                  onChange={(e) => edit({ timezone: e.target.value })}
                 />
               </Field>
+              <div aria-live="polite">
+                {addressDirty ? (
+                  <p className="note-warning">
+                    Saving this address pauses delivery and clears its old location. Place it again
+                    before distances can be quoted.
+                  </p>
+                ) : (
+                  <p className="note">
+                    Changing any address field pauses delivery until the new address is placed again.
+                  </p>
+                )}
+              </div>
             </div>
-          )}
-        </div>
-      </Panel>
+          </SettingsCard>
 
-      <Panel title="Set by Zenoeats">
-        <dl className="divide-y divide-hairline bg-surface px-5">
-          <ReadOnly
-            label="Your web address"
-            value={`${draft.slug}.zenoeats.com`}
-            why="It is printed on your tables and saved in customers' bookmarks, so moving it is a job we do with you rather than a text box."
-          />
-          <ReadOnly
-            label="Status"
-            value={draft.status.toLowerCase()}
-            why="Going live and pausing a restaurant have checks of their own."
-          />
-          <ReadOnly
-            label="Currency"
-            value={draft.currency}
-            why="What every order and payment you already have is counted in."
-          />
-        </dl>
-      </Panel>
+          <DeliveryArea addressDirty={addressDirty} />
 
-      <div className="sticky bottom-0 -mx-5 border-t border-hairline bg-paper px-5 py-4">
-        <div className="flex items-center gap-4">
-          <button className="btn-primary" disabled={!dirty || saving} onClick={submit}>
-            {saving ? "Saving…" : "Save changes"}
-          </button>
-          {dirty && (
+          <SettingsCard id="settings-tax" title="Tax" subtitle="How each order is priced.">
+            <fieldset className="flex flex-col gap-4">
+              <legend className="mb-3 text-sm font-semibold">Sales tax calculation</legend>
+              <label className="flex items-start gap-2.5 text-sm">
+                <input
+                  type="radio"
+                  name="tax-mode"
+                  className="mt-0.5 h-5 w-5 shrink-0"
+                  checked={draft.tax_mode === "FLAT"}
+                  onChange={() => edit({ tax_mode: "FLAT" })}
+                />
+                <span>
+                  <span className="font-semibold">One flat rate</span>
+                  <span className="field-hint block">
+                    The same percentage on every order. Simple, and only correct where your local
+                    rate really is a single number.
+                  </span>
+                </span>
+              </label>
+
+              {draft.tax_mode === "FLAT" && (
+                <div className="animate-disclose pl-[30px]">
+                  <Field label="Rate" hint="A percentage, up to 30. For example 8.75.">
+                    <input
+                      className="field tnum max-w-[8rem]"
+                      inputMode="decimal"
+                      value={percentText(draft.tax_rate_bps)}
+                      onChange={(e) => edit({ tax_rate_bps: bpsFromPercent(e.target.value) })}
+                    />
+                  </Field>
+                </div>
+              )}
+
+              <label className="flex items-start gap-2.5 text-sm">
+                <input
+                  type="radio"
+                  name="tax-mode"
+                  className="mt-0.5 h-5 w-5 shrink-0"
+                  disabled={!stripeTaxAvailable}
+                  checked={draft.tax_mode === "STRIPE_TAX"}
+                  aria-describedby={stripeTaxAvailable ? undefined : "stripe-tax-unavailable"}
+                  onChange={() => edit({ tax_mode: "STRIPE_TAX" })}
+                />
+                <span className={stripeTaxAvailable ? "" : "text-muted"}>
+                  <span className="font-semibold">Work it out per order, through Stripe</span>
+                  <span className="field-hint block">
+                    State, county and city rates for the address above, calculated on your own
+                    Stripe account, and reported there.
+                  </span>
+                  {!stripeTaxAvailable && (
+                    <span id="stripe-tax-unavailable" className="mt-1 block text-caption text-danger">
+                      Available once your Stripe account is connected and taking payments.
+                    </span>
+                  )}
+                </span>
+              </label>
+
+              {draft.tax_mode === "STRIPE_TAX" && (
+                <div className="animate-disclose pl-[30px]">
+                  <Field
+                    label="Product tax code"
+                    hint="txcd_40060003 covers prepared food and drink. Change it only if Stripe told you to."
+                  >
+                    <input
+                      className="field max-w-[16rem] font-mono"
+                      value={draft.tax_code}
+                      onChange={(e) => edit({ tax_code: e.target.value })}
+                    />
+                  </Field>
+                </div>
+              )}
+            </fieldset>
+          </SettingsCard>
+
+          <SettingsCard
+            id="settings-platform"
+            title="Set by Zenoeats"
+            subtitle="Managed by the platform team."
+          >
+            <dl>
+              <ReadOnly
+                label="Your web address"
+                value={`${draft.slug}.zenoeats.com`}
+                why="It is printed on your tables and saved in customers' bookmarks, so moving it is a job we do with you rather than a text box."
+              />
+              <ReadOnly
+                label="Status"
+                value={draft.status.toLowerCase()}
+                why="Going live and pausing a restaurant have checks of their own."
+              />
+              <ReadOnly
+                label="Currency"
+                value={draft.currency}
+                why="What every order and payment you already have is counted in."
+              />
+            </dl>
+          </SettingsCard>
+
+          {/* Only the restaurant, its address and its tax. Sticky, but above
+              the phone's bottom navigation rather than under it. */}
+          <footer className="sticky bottom-[85px] z-cart mt-6 flex flex-wrap items-center gap-3 rounded-ticket border border-hairline bg-surface/[.95] p-4 shadow-[0_-8px_24px_#2526200A] backdrop-blur-md sm:bottom-3 sm:flex-nowrap sm:gap-5 sm:px-[22px] sm:py-[18px]">
+            <div className="min-w-0 basis-full sm:basis-auto sm:flex-1" aria-live="polite">
+              <strong className="text-sm font-semibold">
+                {dirty
+                  ? `${changed} unsaved ${changed === 1 ? "change" : "changes"}`
+                  : saved
+                    ? "Saved."
+                    : "Nothing to save."}
+              </strong>
+              <p className="text-caption text-muted">Restaurant, address and tax only.</p>
+              <ErrorNote message={error} className="mt-3" />
+            </div>
             <button
-              className="text-sm text-muted underline"
-              disabled={saving}
+              type="button"
+              className="btn-primary flex-1 sm:flex-none"
+              disabled={!dirty || saving}
+              onClick={submit}
+            >
+              {saving && <Spinner />}
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+            <button
+              type="button"
+              className="link"
+              disabled={!dirty || saving}
               onClick={() => {
                 setError(null);
                 setDraft(profile.data ?? null);
@@ -298,11 +403,29 @@ export function SettingsPage() {
             >
               Discard
             </button>
-          )}
-          {!dirty && !saving && <span className="text-sm text-muted">Nothing to save.</span>}
+          </footer>
         </div>
       </div>
     </ManageShell>
+  );
+}
+
+function SettingsCard({
+  id,
+  title,
+  subtitle,
+  children,
+}: {
+  id: string;
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="card mb-6 scroll-mt-6" aria-labelledby={`${id}-heading`}>
+      <SettingsHeading id={`${id}-heading`} title={title} subtitle={subtitle} />
+      <div className="mt-6">{children}</div>
+    </section>
   );
 }
 
@@ -316,20 +439,22 @@ function Field({
   children: ReactNode;
 }) {
   return (
-    <label className="block text-sm">
-      <span className="mb-1 block font-medium">{label}</span>
+    <label className="block">
+      <span className="label mb-[7px]">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-muted">{hint}</span>}
+      {hint && <span className="field-hint block">{hint}</span>}
     </label>
   );
 }
 
 function ReadOnly({ label, value, why }: { label: string; value: string; why: string }) {
   return (
-    <div className="py-4 text-sm">
-      <dt className="font-medium">{label}</dt>
-      <dd className="text-ink">{value}</dd>
-      <dd className="mt-0.5 text-xs text-muted">{why}</dd>
+    <div className="grid grid-cols-1 gap-[5px] border-b border-hairline py-[15px] text-sm last:border-0 sm:grid-cols-[130px_minmax(0,1fr)] sm:gap-5">
+      <dt className="font-semibold">{label}</dt>
+      <dd className="[overflow-wrap:anywhere]">
+        {value}
+        <small className="mt-1.5 block text-caption text-muted">{why}</small>
+      </dd>
     </div>
   );
 }

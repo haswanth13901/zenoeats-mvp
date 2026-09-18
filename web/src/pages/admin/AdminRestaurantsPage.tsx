@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Empty, ErrorNote, Panel, Stat } from "@/components/common/Feedback";
+import { Empty, ErrorNote, Loading, Panel, Stat, StatGrid } from "@/components/common/Feedback";
+import { Icon } from "@/components/common/icons";
+import { PageTitle } from "@/components/layout/Shell";
 import { AdminShell } from "@/features/admin/components/AdminShell";
 import { RestaurantRow } from "@/features/admin/components/RestaurantRow";
 import {
@@ -109,28 +111,42 @@ export function AdminRestaurantsPage() {
 
   return (
     <AdminShell>
+      <PageTitle title="Restaurants" subtitle="A clear view of every restaurant." />
+
       <ErrorNote message={error ?? (restaurants.error ? errorMessage(restaurants.error) : null)} />
 
-      <div className="mb-10 grid grid-cols-3 gap-px border border-hairline bg-hairline">
+      {/* Currencies are never added together: gross volume lists each one. */}
+      <StatGrid className="mb-7 grid-cols-1 sm:mb-9 md:grid-cols-3">
         <Stat label="Live restaurants" value={String(totals.live)} />
         <Stat label="Paid orders" value={String(totals.orders)} />
-        <Stat label="Gross volume" value={grossVolume} />
-      </div>
+        <div className="min-w-0 bg-surface p-[18px] sm:p-[23px]">
+          <div className="text-caption text-muted">Gross volume</div>
+          <div className="tnum mt-2 text-[22px] leading-normal tracking-[-.4px]" style={{ overflowWrap: "anywhere" }}>
+            {grossVolume}
+          </div>
+        </div>
+      </StatGrid>
 
       <Panel
         title="Restaurants"
         action={
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1.5 text-xs text-muted">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex min-h-[40px] items-center gap-2.5 text-sm">
               <input
                 type="checkbox"
-                className="h-3.5 w-3.5 accent-brick"
+                className="h-5 w-5 shrink-0"
                 checked={showDeleted}
                 onChange={(e) => setShowDeleted(e.target.checked)}
               />
               Show deleted
             </label>
-            <button className="btn-quiet px-3 py-1.5" onClick={() => setShowCreate((v) => !v)}>
+            <button
+              type="button"
+              className="btn-quiet"
+              aria-expanded={showCreate}
+              onClick={() => setShowCreate((v) => !v)}
+            >
+              {!showCreate && <Icon name="plus" className="h-4 w-4" />}
               {showCreate ? "Cancel" : "Add restaurant"}
             </button>
           </div>
@@ -194,20 +210,11 @@ export function AdminRestaurantsPage() {
         )}
 
         {restaurants.isLoading ? (
-          <Empty>Loading…</Empty>
+          <Loading />
         ) : !rows.length ? (
           <Empty>No restaurants yet. Add one to get started.</Empty>
         ) : (
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-y border-hairline text-left text-xs text-muted">
-                <th className="py-2 font-medium">Restaurant</th>
-                <th className="font-medium">Status</th>
-                <th className="font-medium">Stripe</th>
-                <th className="text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-hairline">
+          <ul className="card py-0">
               {rows.map((r) => (
                 <RestaurantRow
                   key={r.id}
@@ -224,16 +231,9 @@ export function AdminRestaurantsPage() {
                       );
                       if (ok) setEditing(null);
                     },
-                    onDelete: async () => {
-                      // Reversible, but it still pulls a storefront offline.
-                      if (
-                        !confirm(
-                          `Delete ${r.name}? It can be restored, and its subdomain stays reserved.`,
-                        )
-                      )
-                        return;
-                      await run(r.id, () => deleteRestaurant(r.id).unwrap());
-                    },
+                    // Reversible, but it still pulls a storefront offline, so
+                    // the row asks first before calling this.
+                    onDelete: () => void run(r.id, () => deleteRestaurant(r.id).unwrap()),
                     onRestore: () => void run(r.id, () => restoreRestaurant(r.id).unwrap()),
                     onPurge: () => void run(r.id, () => purgeRestaurant(r.id).unwrap()),
                     onActivate: () =>
@@ -253,15 +253,15 @@ export function AdminRestaurantsPage() {
                   }}
                 />
               ))}
-            </tbody>
-          </table>
+          </ul>
         )}
       </Panel>
 
       <Panel
         title="Reports"
         action={
-          <a className="btn-quiet px-3 py-1.5 text-sm" href="/api/v1/admin/reports.csv">
+          <a className="btn-quiet" href="/api/v1/admin/reports.csv" download>
+            <Icon name="download" className="h-4 w-4" />
             Download CSV
           </a>
         }
@@ -269,23 +269,23 @@ export function AdminRestaurantsPage() {
         {!reports.data?.length ? (
           <Empty>No order data yet.</Empty>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
+          <div className="card overflow-x-auto py-2">
+            <table className="data-table min-w-[750px]">
               <thead>
-                <tr className="border-y border-hairline text-left text-xs text-muted">
-                  <th className="py-2 font-medium">Restaurant</th>
-                  <th className="text-right font-medium">Paid</th>
-                  <th className="text-right font-medium">Gross</th>
-                  <th className="text-right font-medium">Tax</th>
-                  <th className="text-right font-medium">AOV</th>
-                  <th className="text-right font-medium">Unpaid</th>
-                  <th className="text-right font-medium">Expired</th>
+                <tr>
+                  <th>Restaurant</th>
+                  <th className="text-right">Paid</th>
+                  <th className="text-right">Gross</th>
+                  <th className="text-right">Tax</th>
+                  <th className="text-right">AOV</th>
+                  <th className="text-right">Unpaid</th>
+                  <th className="text-right">Expired</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-hairline">
+              <tbody>
                 {reports.data.map((r) => (
                   <tr key={r.restaurant_id}>
-                    <td className="py-3">{r.name}</td>
+                    <td>{r.name}</td>
                     <td className="tnum text-right">{r.orders_paid}</td>
                     <td className="tnum text-right">
                       {money(r.gross_revenue_minor, r.currency)}
@@ -306,7 +306,7 @@ export function AdminRestaurantsPage() {
         )}
       </Panel>
 
-      <p className="mt-8 text-xs text-muted">
+      <p className="mt-[30px] text-[11px] leading-relaxed text-muted">
         Every read on this page is written to the platform audit log with your user,
         the scope requested, and a correlation id.
       </p>

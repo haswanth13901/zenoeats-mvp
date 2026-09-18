@@ -22,7 +22,28 @@ export const store = configureStore({
     cart: cartReducer,
     session: sessionReducer,
   },
-  middleware: (getDefault) => getDefault().concat(api.middleware),
+  middleware: (getDefault) =>
+    getDefault({
+      // Every failure this app raises is an ApiError, which is an Error
+      // subclass and therefore not serialisable. That is deliberate -- pages
+      // read `e instanceof ApiError` and branch on `e.code`, which a plain
+      // object would not support -- so the development-only check is told
+      // where those live rather than the errors being flattened to satisfy it.
+      //
+      // Left unconfigured it was merely latent, warning whenever a request
+      // happened to fail. It became constant once the storefront started
+      // asking who is ordering: "nobody" is a 401, and that is the ordinary
+      // answer on the busiest page in the product. A console full of warnings
+      // on every menu view is how a real error goes unnoticed.
+      serializableCheck: {
+        ignoredActions: [
+          "api/executeQuery/rejected",
+          "api/executeMutation/rejected",
+          "api/executeQuery/fulfilled",
+        ],
+        ignoredPaths: [/^api\.queries\..*\.error$/, /^api\.mutations\..*\.error$/],
+      },
+    }).concat(api.middleware),
 });
 
 // Enables refetchOnFocus / refetchOnReconnect. The kitchen board runs all

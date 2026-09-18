@@ -95,6 +95,17 @@ def geocode(address: str) -> Point | None:
     return point
 
 
+def cached_point(address: str) -> Point | None:
+    """An address's coordinates if they are already cached, without asking
+    the provider. For paths that must not make a network call, such as a
+    tracking page's poll; None means unknown, not "does not exist"."""
+    cleaned = " ".join(address.split()).strip()
+    if not cleaned:
+        return None
+    cached = _cache_get(cleaned)
+    return Point(**cached) if cached else None
+
+
 # ------------------------------------------------------------- provider ---
 #
 # Google takes the API key as a query parameter -- it has no header form -- so

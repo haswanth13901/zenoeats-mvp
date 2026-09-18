@@ -1,3 +1,4 @@
+import { Empty } from "@/components/common/Feedback";
 import { MenuImage } from "@/components/common/MenuImage";
 import { savingLabel } from "@/features/cart/components/ComboSheet";
 import type { Meal } from "@/types";
@@ -40,16 +41,15 @@ export function MenuPreview({
 
   if (preview.itemCount === 0 && preview.periods.length === 0) {
     return (
-      <p className="border border-dashed border-hairline px-4 py-12 text-center text-sm text-muted">
-        Nothing on the menu yet. Add items on the Items tab, then serve them in
-        a meal period.
-      </p>
+      <Empty>
+        Nothing on the menu yet. Add items on the Items tab, then serve them in a meal period.
+      </Empty>
     );
   }
 
   return (
     <div>
-      <p className="mb-6 text-xs text-muted">
+      <p className="mb-6 text-caption text-muted">
         {preview.itemCount} {preview.itemCount === 1 ? "item" : "items"} across{" "}
         {preview.sections.length}{" "}
         {preview.sections.length === 1 ? "category" : "categories"}
@@ -62,30 +62,32 @@ export function MenuPreview({
         . Each item appears once here, however many periods serve it.
       </p>
 
-      {preview.sections.map((section) => (
-        <section key={section.item_type_id} className="mb-8">
-          <h2 className="font-display text-2xl">{section.label}</h2>
+      <div className="grid grid-cols-1 gap-x-9 md:grid-cols-2">
+        {preview.sections.map((section) => (
+          <section key={section.item_type_id} className="mb-8">
+            <h2 className="font-display text-[30px] leading-[1.2] tracking-[-.7px]">{section.label}</h2>
 
-          {section.items.length > 0 && <Rows rows={section.items} currency={currency} />}
+            {section.items.length > 0 && <Rows rows={section.items} currency={currency} />}
 
-          {section.groups.map((group) => (
-            <div key={group.item_type_id} className="mt-5">
-              <h3 className="text-sm font-medium uppercase tracking-wide text-muted">
-                {group.label}
-              </h3>
-              <Rows rows={group.items} currency={currency} />
-            </div>
-          ))}
-        </section>
-      ))}
+            {section.groups.map((group) => (
+              <div key={group.item_type_id} className="mt-[18px] border-l-2 border-[#E4DED3] pl-4">
+                <h3 className="mb-1 mt-3 text-caption font-[650] uppercase tracking-[1.7px] text-muted">
+                  {group.label}
+                </h3>
+                <Rows rows={group.items} currency={currency} />
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
 
       {/* Only worth a block once there is more than one period to tell apart,
           or a combo, which has no home in the listing above: a combo belongs
           to one period and spans categories, so no heading can hold it. */}
       {preview.periods.some((p) => p.only.length > 0 || p.combos.length > 0) && (
-        <section className="mt-10 border-t border-hairline pt-6">
-          <h2 className="font-display text-2xl">By meal period</h2>
-          <p className="mt-1 text-xs text-muted">
+        <section className="mt-6">
+          <h2 className="font-display text-[30px] leading-[1.2] tracking-[-.7px]">By meal period</h2>
+          <p className="field-hint max-w-prose">
             Combos, and what each period serves that no other one does.
             Everything else on the menu is served all day.
           </p>
@@ -93,27 +95,27 @@ export function MenuPreview({
           {preview.periods.map((period) => {
             if (!period.only.length && !period.combos.length) return null;
             return (
-              <div key={period.id} className="mt-6">
-                <h3 className="text-sm font-medium uppercase tracking-wide text-muted">
+              <div key={period.id} className="card mt-6">
+                <h3 className="text-lg font-semibold">
                   {period.name}
                   {mealHours(period.starts_at, period.ends_at) && (
-                    <span className="ml-2 normal-case tracking-normal opacity-70">
+                    <span className="ml-2 text-caption font-normal text-muted">
                       {mealHours(period.starts_at, period.ends_at)}
                     </span>
                   )}
                 </h3>
 
                 {period.combos.length > 0 && (
-                  <ul className="mt-3 divide-y divide-hairline border-y border-hairline">
+                  <ul className="mt-2">
                     {period.combos.map((combo) => (
-                      <li key={combo.id} className="flex items-start gap-4 py-3">
-                        <div className="flex-1">
-                          <p className="text-[15px]">{combo.name}</p>
-                          <p className="mt-0.5 text-sm text-muted">
+                      <li key={combo.id} className="flex items-start gap-4 border-b border-hairline py-[18px]">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold">{combo.name}</p>
+                          <p className="mt-1 text-caption text-muted">
                             {combo.slots.map((s) => s.label).join(" · ")}
                           </p>
                         </div>
-                        <span className="text-sm text-brick">
+                        <span className="text-[13px] font-[650] text-brick">
                           {savingLabel(combo, currency)}
                         </span>
                       </li>
@@ -147,36 +149,34 @@ function Rows({
   hidePeriods?: boolean;
 }) {
   return (
-    <ul className="mt-3 divide-y divide-hairline border-y border-hairline">
+    <ul>
       {rows.map(({ item, periods, allDay }) => (
-        <li key={item.id} className="flex items-start gap-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[15px]">
-              {item.name}
-              {!item.is_available && (
-                <span className="ml-2 text-xs text-brick">sold out</span>
-              )}
-            </p>
-            {/* Where the storefront puts it and at the size it shows it, so
-                this preview answers "how will my photos look". */}
-            <MenuImage
-              src={item.image_url}
-              className="mt-2 aspect-[4/3] w-full max-w-xs rounded-md bg-paper object-cover"
-            />
-            {item.description && (
-              <p className="mt-0.5 max-w-prose text-sm text-muted">
-                {item.description}
+        <li key={item.id} className="border-b border-hairline py-[18px]">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="flex flex-wrap items-center gap-2 text-lg font-semibold leading-snug">
+                {item.name}
+                {!item.is_available && <span className="pill-red">sold out</span>}
               </p>
-            )}
-            {/* Said only where it is news. An all-day item would otherwise
-                list every period the restaurant has against every row. */}
-            {!allDay && !hidePeriods && (
-              <p className="mt-0.5 text-xs text-muted">{periods.join(", ")} only</p>
-            )}
+              {item.description && (
+                <p className="mt-3 max-w-prose text-caption text-muted">{item.description}</p>
+              )}
+              {/* Said only where it is news. An all-day item would otherwise
+                  list every period the restaurant has against every row. */}
+              {!allDay && !hidePeriods && (
+                <p className="mt-3 text-caption text-brick">{periods.join(", ")} only</p>
+              )}
+            </div>
+            <span className="tnum whitespace-nowrap">
+              {money(item.base_price_minor, item.currency || currency)}
+            </span>
           </div>
-          <span className="text-[15px]">
-            {money(item.base_price_minor, item.currency || currency)}
-          </span>
+          {/* Where the storefront puts it and at the size it shows it, so
+              this preview answers "how will my photos look". */}
+          <MenuImage
+            src={item.image_url}
+            className="mt-[15px] block aspect-[4/3] w-full max-w-[320px] rounded-button bg-paper object-cover"
+          />
         </li>
       ))}
     </ul>

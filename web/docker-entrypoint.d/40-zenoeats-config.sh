@@ -78,15 +78,19 @@ done
 #   Stripe  js.stripe.com and *.js.stripe.com (Stripe.js and its frames);
 #           hooks.stripe.com (3-D Secure); api.stripe.com; *.stripe.com images;
 #           link.com and *.link.com (Link, offered by the Payment Element).
+#   Google  The live delivery map on the order page (Maps JavaScript API):
+#           script, tiles, fonts and API calls from *.googleapis.com,
+#           *.gstatic.com and *.google.com, per Google's CSP guide.
 # No 'unsafe-inline' for scripts: the built pages carry none.
+google_maps="https://*.googleapis.com https://*.gstatic.com https://*.google.com"
 policy="default-src 'self'"
-policy="$policy; script-src 'self' $clerk_origin https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://*.js.stripe.com"
-policy="$policy; connect-src 'self' $clerk_origin https://*.protect.clerk.com:* https://api.stripe.com https://link.com https://*.link.com"
-policy="$policy; frame-src https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://link.com https://*.link.com"
-policy="$policy; img-src 'self' data: https://img.clerk.com https://*.stripe.com https://*.link.com$extra_img"
-policy="$policy; style-src 'self' 'unsafe-inline'"
+policy="$policy; script-src 'self' $clerk_origin https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://*.js.stripe.com $google_maps"
+policy="$policy; connect-src 'self' $clerk_origin https://*.protect.clerk.com:* https://api.stripe.com https://link.com https://*.link.com $google_maps data: blob:"
+policy="$policy; frame-src https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://link.com https://*.link.com https://*.google.com"
+policy="$policy; img-src 'self' data: https://img.clerk.com https://*.stripe.com https://*.link.com $google_maps https://*.ggpht.com https://*.googleusercontent.com$extra_img"
+policy="$policy; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com"
 policy="$policy; worker-src 'self' blob:"
-policy="$policy; font-src 'self'"
+policy="$policy; font-src 'self' https://fonts.gstatic.com"
 policy="$policy; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 # Collapse the double spaces an empty Clerk origin leaves behind.
 policy="$(printf '%s' "$policy" | tr -s ' ')"

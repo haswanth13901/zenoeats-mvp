@@ -106,6 +106,47 @@ export async function getCustomerToken(): Promise<string | null> {
   return (await clerk.session?.getToken()) ?? null;
 }
 
+/**
+ * Whether Clerk probably has a session in this browser, without loading Clerk.
+ *
+ * Clerk writes __client_uat on the origin for precisely this question -- it is
+ * what its server-side helpers read to decide whether a page is signed in. A
+ * positive value is a signed-in session, 0 or absent is signed out. Some
+ * instances suffix the name (__client_uat_a1b2c3), so both are matched.
+ *
+ * A hint, never an authorisation: it carries no identity and the API verifies
+ * the real token regardless. What it buys is the storefront, which is the page
+ * a QR code opens, not pulling down the Clerk SDK for a customer who is only
+ * reading a menu.
+ */
+export function maybeSignedIn(): boolean {
+  if (!clerkConfigured()) return false;
+  if (window.Clerk?.session) return true;
+  const match = document.cookie.match(/(?:^|;\s*)__client_uat(?:_[^=]*)?=([^;]*)/);
+  if (!match?.[1]) return false;
+  const seenAt = Number(decodeURIComponent(match[1]));
+  return Number.isFinite(seenAt) && seenAt > 0;
+}
+
+/**
+ * A session token, but only if this browser looks signed in already.
+ *
+ * For callers that ask "who is ordering?" on a page where the answer is
+ * usually "nobody, they are browsing": a guest is identified by a cookie the
+ * browser sends itself, so loading Clerk to be told there is no token would
+ * be the whole cost of Clerk for no answer.
+ */
+export async function getCustomerTokenIfSignedIn(): Promise<string | null> {
+  if (!maybeSignedIn()) return null;
+  try {
+    return await getCustomerToken();
+  } catch {
+    // Clerk unreachable. The request still carries any guest cookie, and the
+    // API answers 401 if that is nothing -- which is the right answer here.
+    return null;
+  }
+}
+
 /** Clerk's own wording for a failed call, which names the field at fault. */
 export function clerkErrorMessage(e: unknown): string {
   const errors = (e as { errors?: { longMessage?: string; message?: string }[] })?.errors;

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { Empty, ErrorNote } from "@/components/common/Feedback";
+import { Empty, ErrorNote, Loading, Spinner } from "@/components/common/Feedback";
+import { PageTitle } from "@/components/layout/Shell";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import {
   useSetItemAvailabilityMutation,
@@ -28,12 +29,15 @@ export function StockPage() {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The row moves section once the server agrees; this says where it went.
+  const [announcement, setAnnouncement] = useState("");
 
   async function toggle(item: StockItem) {
     setBusy(item.id);
     setError(null);
     try {
       await setAvailability({ itemId: item.id, is_available: !item.is_available }).unwrap();
+      setAnnouncement(`${item.name} is ${item.is_available ? "sold out" : "back in stock"}.`);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -53,27 +57,35 @@ export function StockPage() {
 
   return (
     <ManageShell>
-      <ErrorNote message={error ?? (stock.error ? errorMessage(stock.error) : null)} />
+      <PageTitle title="Stock" subtitle="Keep today’s menu up to date." />
 
-      <input
-        className="field mb-6"
-        type="search"
-        placeholder="Find an item"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
+      <ErrorNote message={error ?? (stock.error ? errorMessage(stock.error) : null)} />
+      <p className="sr-only" aria-live="polite">
+        {announcement}
+      </p>
+
+      <label className="mb-7 block sm:max-w-[510px]">
+        <span className="label">Find an item</span>
+        <input
+          className="field mt-[7px]"
+          type="search"
+          placeholder="Search by item name or type"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </label>
 
       {stock.isLoading ? (
-        <Empty>Loading…</Empty>
+        <Loading />
       ) : !items.length ? (
         <Empty>No items on the menu yet.</Empty>
       ) : !shown.length ? (
         <Empty>Nothing matches “{search.trim()}”.</Empty>
       ) : (
         <>
-          <Section title={`Sold out (${soldOut.length})`}>
+          <Section title="Sold out" count={soldOut.length}>
             {!soldOut.length ? (
-              <p className="px-4 py-3 text-sm text-muted">Everything is in stock.</p>
+              <Empty>Everything is in stock.</Empty>
             ) : (
               soldOut.map((item) => (
                 <Row key={item.id} item={item} busy={busy === item.id} onToggle={toggle} />
@@ -81,7 +93,7 @@ export function StockPage() {
             )}
           </Section>
           {inStock.length > 0 && (
-            <Section title={`In stock (${inStock.length})`}>
+            <Section title="In stock" count={inStock.length}>
               {inStock.map((item) => (
                 <Row key={item.id} item={item} busy={busy === item.id} onToggle={toggle} />
               ))}
@@ -93,11 +105,13 @@ export function StockPage() {
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
-    <section className="mb-8">
-      <h2 className="mb-3 text-sm font-medium">{title}</h2>
-      <div className="divide-y divide-hairline border border-hairline bg-surface">{children}</div>
+    <section className="mb-[30px]">
+      <h2 className="text-lg font-semibold">
+        {title} <span className="tnum font-normal text-muted">({count})</span>
+      </h2>
+      <div>{children}</div>
     </section>
   );
 }
@@ -112,18 +126,20 @@ function Row({
   onToggle: (item: StockItem) => void;
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3">
+    <div className="flex animate-fade items-center justify-between gap-3 border-b border-hairline py-[18px] sm:gap-6">
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm">{item.name}</div>
-        <div className="text-xs text-muted">{item.type}</div>
+        <h3 className="truncate text-[15px] font-semibold sm:text-[17px]">{item.name}</h3>
+        <p className="mt-[3px] text-caption text-muted">{item.type}</p>
       </div>
       {/* A large target: this gets tapped on a greasy tablet mid-rush. */}
       <button
-        className={`shrink-0 px-4 py-2 text-sm ${item.is_available ? "btn-quiet" : "btn-primary"}`}
+        type="button"
+        className={`${item.is_available ? "btn-quiet" : "btn-primary"} btn-touch min-w-[134px] shrink-0 px-3 text-caption sm:min-w-[155px] sm:px-[19px] sm:text-sm`}
         disabled={busy}
         aria-pressed={!item.is_available}
         onClick={() => onToggle(item)}
       >
+        {busy && <Spinner />}
         {busy ? "Saving…" : item.is_available ? "Mark sold out" : "Back in stock"}
       </button>
     </div>

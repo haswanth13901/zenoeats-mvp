@@ -31,11 +31,15 @@ export function ModifierGroups({
     <>
       {item.modifier_groups.map((group) => {
         const chosen = selected.get(group.name) ?? [];
+        const atMax =
+          group.selection_type === "MULTI" && group.max_select > 0 && chosen.length >= group.max_select;
+        const helpId = `${scope}:${group.id}:help`;
         return (
-          <fieldset key={group.id}>
-            <legend className="flex w-full items-baseline justify-between pb-2">
-              <span className="text-sm font-medium">{group.name}</span>
-              <span className="text-xs text-muted">
+          <fieldset key={group.id} aria-describedby={atMax ? helpId : undefined}>
+            <legend className="mb-1 text-sm font-semibold">
+              {group.name}
+              <span className="text-caption font-normal text-muted">
+                {" · "}
                 {group.is_required
                   ? "Required"
                   : group.selection_type === "MULTI"
@@ -44,41 +48,48 @@ export function ModifierGroups({
               </span>
             </legend>
 
-            <div className="divide-y divide-hairline border-y border-hairline">
-              {group.options.map((option) => {
-                const isChosen = chosen.some((o) => o.id === option.id);
-                return (
-                  <label
-                    key={option.id}
-                    className={`flex cursor-pointer items-center gap-3 py-2.5 ${
-                      option.is_available ? "" : "opacity-40"
-                    }`}
-                  >
-                    <input
-                      type={group.selection_type === "SINGLE" ? "radio" : "checkbox"}
-                      name={`${scope}:${group.id}`}
-                      checked={isChosen}
-                      disabled={!option.is_available}
-                      onChange={() => onToggle(group, option)}
-                      className="h-4 w-4 accent-brick"
-                    />
-                    <MenuImage
-                      src={option.image_url}
-                      className="h-10 w-10 shrink-0 rounded bg-paper object-cover"
-                    />
-                    <span className="flex-1 text-sm">{option.name}</span>
-                    {/* "Included" rather than a price, because on this item
-                        there is no price. The same option on an item that
-                        does not come with it still shows what it costs. */}
-                    <span className="tnum text-sm text-muted">
-                      {isIncluded(item, option.id)
-                        ? "Included"
-                        : signedMoney(option.price_delta_minor, currency)}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
+            {group.options.map((option) => {
+              const isChosen = chosen.some((o) => o.id === option.id);
+              const included = isIncluded(item, option.id);
+              return (
+                <label
+                  key={option.id}
+                  className={`mt-2 flex min-h-[52px] items-center gap-3 rounded-button border px-3 py-[11px] transition-colors duration-color ease-standard ${
+                    isChosen ? "border-brick bg-brickSoft/60" : "border-hairline"
+                  } ${option.is_available ? "cursor-pointer" : "cursor-not-allowed opacity-[.45]"}`}
+                >
+                  <input
+                    type={group.selection_type === "SINGLE" ? "radio" : "checkbox"}
+                    name={`${scope}:${group.id}`}
+                    checked={isChosen}
+                    disabled={!option.is_available}
+                    onChange={() => onToggle(group, option)}
+                    className="h-5 w-5 shrink-0"
+                  />
+                  <MenuImage
+                    src={option.image_url}
+                    className="h-10 w-10 shrink-0 rounded-status bg-paper object-cover"
+                  />
+                  <span className="min-w-0 flex-1 text-sm">
+                    {option.name}
+                    {!option.is_available && <span className="text-danger"> · Sold out</span>}
+                  </span>
+                  {/* "Included" rather than a price, because on this item
+                      there is no price. The same option on an item that
+                      does not come with it still shows what it costs. */}
+                  <span className={`tnum ml-auto whitespace-nowrap text-caption ${included ? "text-brick" : ""}`}>
+                    {included ? "Included" : signedMoney(option.price_delta_minor, currency)}
+                  </span>
+                </label>
+              );
+            })}
+            {/* A full group ignores another tick rather than dropping an
+                earlier choice, so say why the tick did nothing. */}
+            {atMax && (
+              <p id={helpId} className="field-hint" aria-live="polite">
+                Maximum selected. Untick an option to choose another.
+              </p>
+            )}
           </fieldset>
         );
       })}

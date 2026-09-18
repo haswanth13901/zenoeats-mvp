@@ -24,7 +24,7 @@ from app.models import (
     ClerkEvent, Order, OrderStatus, Payment, PaymentStatus,
     RestaurantPaymentAccount, StripeEvent, StripeEventStatus, User, UserKind,
 )
-from app.services import stripe_tax
+from app.services import stripe_service, stripe_tax
 from app.services.orders import transition
 from app.workers.celery_app import celery_app
 
@@ -123,7 +123,11 @@ def _handle_intent_succeeded(payload: dict, event_account_id: str | None):
     restaurant_id, payment_id = resolved
 
     with tenant_session(restaurant_id) as session:
-        payment = session.get(Payment, payment_id)
+        # Locked, because a webhook and a reconciliation can arrive for the
+        # same payment at the same moment. The second waits here and then
+        # finds succeeded_at already set, rather than both reading it empty
+        # and both trying to move the order.
+        payment = session.get(Payment, payment_id, with_for_update=True)
         if payment is None:
             return
         order_id = payment.order_id
@@ -134,7 +138,8 @@ def _handle_intent_succeeded(payload: dict, event_account_id: str | None):
 
             order = session.get(Order, order_id)
             if order and order.status == OrderStatus.PENDING_PAYMENT.value:
-                # Only a verified webhook can do this. The client never can.
+                # Only Stripe's word can do this -- a verified webhook, or the
+                # intent read back from Stripe. The client never can.
                 transition(order, OrderStatus.AUTO_ACCEPTED.value)
                 transition(order, OrderStatus.PREPARING.value)
                 log.info("order %s paid and now PREPARING", order.order_number)
@@ -160,11 +165,11 @@ def _handle_intent_failed(payload: dict, event_account_id: str | None):
     restaurant_id, payment_id = resolved
 
     with tenant_session(restaurant_id) as session:
-        payment = session.get(Payment, payment_id)
+        payment = session.get(Payment, payment_id, with_for_update=True)
         if payment is None or payment.succeeded_at is not None:
             return
         payment.status = PaymentStatus.FAILED.value
-        error = (intent.get("last_payment_error") or {}).get("message")
+        error =(intent.get("last_payment_error") or {}).get("message")
         payment.failure_message = error
         # The order stays PENDING_PAYMENT so the customer can retry until the
         # TTL sweep expires it.
@@ -178,13 +183,51 @@ def _handle_intent_canceled(payload: dict, event_account_id: str | None):
     restaurant_id, payment_id = resolved
 
     with tenant_session(restaurant_id) as session:
-        payment = session.get(Payment, payment_id)
+        payment = session.get(Payment, payment_id, with_for_update=True)
         if payment is None or payment.succeeded_at is not None:
             return
         payment.status = PaymentStatus.FAILED.value
         order = session.get(Order, payment.order_id)
         if order and order.status == OrderStatus.PENDING_PAYMENT.value:
             transition(order, OrderStatus.CANCELLED.value, reason="PAYMENT_CANCELLED")
+
+
+def reconcile_payment_intent(intent_id: str, stripe_account_id: str) -> str | None:
+    """Ask Stripe what became of an intent, and apply it as the webhook would.
+
+    The webhook is the normal path and stays so. This is for when it does not
+    arrive -- a listener that is not running, a delivery Stripe gave up on, a
+    worker that is down or starved -- so that a customer Stripe has already
+    charged is not left watching "Confirming your payment" until the order
+    expires under them.
+
+    Nothing here trusts the client. The intent is read from Stripe with the
+    platform key, on the account recorded when it was created, and handed to
+    the same handlers a verified event reaches, so the account guard, the row
+    lock and every exactly-once check apply unchanged. Running it any number
+    of times, before or after the webhook, is safe.
+
+    Returns the intent's status as Stripe reports it, or None when Stripe has
+    no such intent. Raises when Stripe cannot be reached, which callers must
+    not mistake for "not paid". Calls Stripe, so never call it inside a
+    transaction (rule 6).
+    """
+    intent = stripe_service.retrieve_payment_intent(intent_id, stripe_account_id)
+    if intent is None:
+        return None
+
+    status = intent.get("status")
+    payload = {"data": {"object": intent}}
+    if status == "succeeded":
+        _handle_intent_succeeded(payload, stripe_account_id)
+    elif status == "canceled":
+        _handle_intent_canceled(payload, stripe_account_id)
+    elif status == "requires_payment_method" and intent.get("last_payment_error"):
+        # A declined card puts the intent back to awaiting a payment method,
+        # with the decline attached. Without the error it is simply a
+        # customer who has not paid yet, which changes nothing.
+        _handle_intent_failed(payload, stripe_account_id)
+    return status
 
 
 def _handle_charge_refunded(payload: dict, event_account_id: str | None):
@@ -351,8 +394,10 @@ def expire_pending_orders():
         rows = session.execute(
             text(
                 """
-                SELECT o.id, o.restaurant_id
+                SELECT o.id, o.restaurant_id,
+                       p.stripe_payment_intent_id, p.stripe_account_id, p.succeeded_at
                 FROM orders o
+                LEFT JOIN payments p ON p.order_id = o.id
                 WHERE o.status = 'PENDING_PAYMENT'
                   AND o.expires_at IS NOT NULL
                   AND o.expires_at <= now()
@@ -361,20 +406,42 @@ def expire_pending_orders():
             )
         ).all()
 
-    expired = 0
-    for row in rows:
-        with tenant_session(row.restaurant_id) as session:
-            order = session.get(Order, row.id)
-            if order is None or order.status != OrderStatus.PENDING_PAYMENT.value:
-                continue
-            payment = session.execute(
-                select(Payment).where(Payment.order_id == order.id)
-            ).scalar_one_or_none()
-            if payment and payment.succeeded_at is not None:
-                continue  # a webhook is in flight; leave it alone
-            transition(order, OrderStatus.EXPIRED.value)
-            expired += 1
-
+    expired = sum(
+        _expire_order(row.restaurant_id, row.id, row.stripe_payment_intent_id,
+                      row.stripe_account_id, row.succeeded_at)
+        for row in rows
+    )
     if expired:
         log.info("expired %d stale pending orders", expired)
     return expired
+
+
+def _expire_order(restaurant_id, order_id, intent_id, account_id, succeeded_at) -> bool:
+    """Expire one abandoned order, unless Stripe says it was paid.
+
+    Our own succeeded_at is not enough to go on: it is written by the webhook,
+    and the webhook is exactly what may have gone missing. Expiring on it
+    alone once swept up orders Stripe had charged. So an order with an intent
+    is checked with Stripe first, outside any transaction (rule 6), and one
+    Stripe cannot answer for is left for the next sweep rather than guessed
+    at.
+    """
+    if intent_id and account_id and succeeded_at is None:
+        try:
+            reconcile_payment_intent(intent_id, account_id)
+        except Exception:
+            log.warning("not expiring order %s: could not check its payment with Stripe",
+                        order_id, exc_info=True)
+            return False
+
+    with tenant_session(restaurant_id) as session:
+        order = session.get(Order, order_id)
+        if order is None or order.status != OrderStatus.PENDING_PAYMENT.value:
+            return False
+        payment = session.execute(
+            select(Payment).where(Payment.order_id == order.id)
+        ).scalar_one_or_none()
+        if payment and payment.succeeded_at is not None:
+            return False  # paid; the handler that recorded it owns the order
+        transition(order, OrderStatus.EXPIRED.value)
+        return True
