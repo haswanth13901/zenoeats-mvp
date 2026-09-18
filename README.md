@@ -610,6 +610,20 @@ at most once per `DELIVERY_ETA_REFRESH_SECONDS` per order. The browser only
 reports position while the page is open, so a native driver app is the next
 step if drivers need to lock their phones.
 
+The map also requires a non-empty `GOOGLE_MAPS_MAP_ID`: use `DEMO_MAP_ID`
+locally and a Google Cloud Map ID in production. After editing `.env` in
+Docker, recreate the API with `docker compose --profile app up -d --no-deps
+--no-build --force-recreate api`; restarting an existing container does not
+load changed environment values. Pickup and unpaid orders have no delivery
+tracking map. Driver GPS requires HTTPS and browser location permission;
+the HTTP `spicehouse.zenoeats.local:8080` development origin cannot share
+GPS. Use a trusted HTTPS deployment for testing actual driver movement,
+and keep the driver's Deliveries page open after marking the order picked up.
+
+Uploaded menu images under `/images/` are served by the API. Both development
+and production nginx configurations route that prefix to the API, including
+when the frontend runs as a static Docker container.
+
 **What a customer-facing release still needs.** Stripe Tax
 sources tax at the restaurant's address, which is right for collection and
 wrong for a delivery in a destination-sourced state, so the customer's
