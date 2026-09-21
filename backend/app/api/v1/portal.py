@@ -6,18 +6,15 @@ cannot reach another tenant's catalog.
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
-from app.api.deps import TenantContext, current_restaurant, resolve_tenant, tenant_db
+from app.api.deps import TenantContext, TenantDb, current_restaurant, resolve_tenant
 from app.config import settings
 from app.core.ratelimit import per_ip
-from app.models import (
-    Category, Item, ItemModifierGroup, Meal, ModifierGroup, Restaurant,
-    RestaurantPaymentAccount,
-)
-from app.schemas.api import (
-    CategoryOut, ItemOut, MealOut, MenuOut, ModifierGroupOut, OptionOut, PortalOut,
-)
+from app.models import Restaurant, RestaurantPaymentAccount
+from app.schemas.api import MenuOut, PortalOut
+from app.services import delivery, storefront
+from app.services.menu import load_menu
 
 router = APIRouter(tags=["portal"])
 
@@ -30,19 +27,24 @@ router = APIRouter(tags=["portal"])
 def get_portal(
     tenant: TenantContext = Depends(resolve_tenant),
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
     account = db.execute(select(RestaurantPaymentAccount)).scalar_one_or_none()
     return PortalOut(
+        storefront=storefront.public(db, restaurant),
         restaurant_id=restaurant.id,
         slug=restaurant.slug,
         name=restaurant.name,
+        pickup_address=restaurant.pickup_address_line or None,
         tagline=restaurant.tagline,
         currency=restaurant.currency,
         is_orderable=restaurant.is_orderable,
         accepting_orders=restaurant.accepting_orders,
         stripe_publishable_key=settings.STRIPE_PUBLISHABLE_KEY,
         stripe_account_id=account.stripe_account_id if account else None,
+        delivery_offered=delivery.offered(restaurant),
+        maps_browser_key=settings.GOOGLE_MAPS_BROWSER_KEY or None,
+        maps_map_id=settings.GOOGLE_MAPS_MAP_ID if settings.GOOGLE_MAPS_BROWSER_KEY else None,
     )
 
 
@@ -53,74 +55,12 @@ def get_portal(
 )
 def get_menu(
     restaurant: Restaurant = Depends(current_restaurant),
-    db: Session = Depends(tenant_db),
+    db: Session = TenantDb,
 ):
-    meals = db.execute(
-        select(Meal)
-        .where(Meal.is_active.is_(True), Meal.deleted_at.is_(None))
-        .order_by(Meal.sort_order, Meal.name)
-        .options(
-            selectinload(Meal.categories)
-            .selectinload(Category.items)
-            .selectinload(Item.modifier_links)
-            .selectinload(ItemModifierGroup.group)
-            .selectinload(ModifierGroup.options)
-        )
-    ).scalars().all()
+    """The sellable menu.
 
-    out: list[MealOut] = []
-    for meal in meals:
-        categories: list[CategoryOut] = []
-        for category in meal.categories:
-            if category.deleted_at is not None:
-                continue
-            items: list[ItemOut] = []
-            for item in category.items:
-                if item.deleted_at is not None:
-                    continue
-                groups: list[ModifierGroupOut] = []
-                for link in sorted(item.modifier_links, key=lambda l: l.sort_order):
-                    group = link.group
-                    if group.deleted_at is not None:
-                        continue
-                    groups.append(
-                        ModifierGroupOut(
-                            id=group.id,
-                            name=group.name,
-                            selection_type=group.selection_type,
-                            is_required=group.is_required,
-                            min_select=group.min_select,
-                            max_select=group.max_select,
-                            options=[
-                                OptionOut(
-                                    id=o.id,
-                                    name=o.name,
-                                    price_delta_minor=o.price_delta_minor,
-                                    is_default=o.is_default,
-                                    is_available=o.is_available,
-                                )
-                                for o in sorted(group.options, key=lambda o: o.sort_order)
-                                if o.deleted_at is None
-                            ],
-                        )
-                    )
-                items.append(
-                    ItemOut(
-                        id=item.id,
-                        name=item.name,
-                        description=item.description,
-                        base_price_minor=item.base_price_minor,
-                        currency=item.currency,
-                        is_available=item.is_available,
-                        image_path=item.image_path,
-                        modifier_groups=groups,
-                    )
-                )
-            if items:
-                categories.append(
-                    CategoryOut(id=category.id, name=category.name, kind=category.kind, items=items)
-                )
-        if categories:
-            out.append(MealOut(id=meal.id, name=meal.name, categories=categories))
-
-    return MenuOut(meals=out)
+    A meal period serving nothing is dropped: a customer has nothing to do
+    with an empty heading. The restaurant portal reads the same tree unpruned
+    from /restaurant/menu.
+    """
+    return load_menu(db, include_empty=False)

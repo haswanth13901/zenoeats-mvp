@@ -3,6 +3,9 @@ name: CI
 on:
   push:
     branches: [main, dev]
+    # A release is cut by tagging. Without this the tag would build nothing
+    # and there would be no image to deploy from it.
+    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -20,6 +23,25 @@ jobs:
           --health-timeout 5s --health-retries 10
         ports: ["5432:5432"]
 
+      # The driver's position on the tracking map is kept in Redis, so the
+      # tests that read it need a real one. Two instances in production, for
+      # reasons that matter there and not here (one evicts, one must never);
+      # one instance with two databases is enough to run against.
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+        ports: ["6379:6379"]
+
+    # Everything app/config.py has no usable default for. A developer gets
+    # these from the .env at the repository root, which is not committed and
+    # is not here -- so anything missing shows up as a test failure that makes
+    # no sense, like "HMAC key must not be empty" on 238 tests at once.
+    #
+    # None of these values is a secret. They exist so the code under test has
+    # something well-formed to work with, and they are deliberately worded so
+    # that a copy of one turning up anywhere real is obvious.
     env:
       PGPASSWORD: postgres_dev_pw
       DATABASE_URL_APP: postgresql+psycopg2://zenoeats_app:app_dev_pw@localhost:5432/zenoeats
@@ -27,6 +49,16 @@ jobs:
       DATABASE_URL_MIGRATE: postgresql+psycopg2://zenoeats_migrate:migrate_dev_pw@localhost:5432/zenoeats
       FIELD_ENCRYPTION_KEY: kZ0nQx3Yk8vJ9pL2mN7bR4tS6wU1cE5gH8jK0aD3fI4=
       ROOT_DOMAIN: zenoeats.local
+      # Signs staff, platform-admin and guest sessions. Without it every test
+      # that issues one fails inside PyJWT rather than anywhere informative.
+      SESSION_SECRET: ci-only-session-secret-not-used-anywhere-real-000
+      REDIS_RUNTIME_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      # The webhook tests sign an event with this and post it, so what it is
+      # does not matter -- only that both sides agree and it is not empty,
+      # which Stripe's verifier refuses outright.
+      STRIPE_CONNECT_WEBHOOK_SECRET: whsec_ci_only_not_a_real_endpoint_secret
 
     steps:
       - uses: actions/checkout@v4
@@ -39,12 +71,41 @@ jobs:
         working-directory: backend
         run: pip install -r requirements.txt
 
+      # A dependency with a published vulnerability fails the build here,
+      # rather than waiting for someone to remember to look. The pins in
+      # requirements.txt were last cleared against this check; when it fails,
+      # upgrade the named package and let the test suite below judge it.
+      - name: Dependency vulnerability audit
+        working-directory: backend
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --progress-spinner off
+
       - name: Create database roles
         run: psql -h localhost -U postgres -d zenoeats -f infra/postgres/01-roles.sql
 
       - name: Apply migrations
         working-directory: backend
         run: alembic upgrade head
+
+      # Before the tests, on the empty schema they are about to fill, because
+      # what this proves is that the chain of migrations is internally
+      # consistent -- every upgrade has a downgrade that undoes it.
+      #
+      # It deliberately does not prove that a downgrade is safe over real
+      # data, and it cannot: 0002 is what lets a user exist without a Clerk
+      # id, so undoing it deletes every staff member and platform admin, and
+      # seven foreign keys point at users. A rollback of a live database is a
+      # decision made against that database, not something a pipeline can
+      # sign off (see STEPS_BEFORE_PRODUCTION.md, "Backups and recovery").
+      #
+      # Run after the suite instead and it fails on the rows the suite left
+      # behind, which says nothing about the migrations.
+      - name: Migration is reversible
+        working-directory: backend
+        run: |
+          alembic downgrade base
+          alembic upgrade head
 
       # These four gates are the reason this pipeline exists. A green build
       # without them is not evidence of tenant isolation.
@@ -56,39 +117,162 @@ jobs:
         working-directory: backend
         run: pytest tests/ -v --ignore=tests/test_rls_isolation.py
 
-      - name: Migration is reversible
-        working-directory: backend
-        run: |
-          alembic downgrade base
-          alembic upgrade head
-
   frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - working-directory: frontend
-        run: npm ci
-      - working-directory: frontend
-        run: npx tsc --noEmit
-      - working-directory: frontend
-        env:
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk
-          CLERK_SECRET_KEY: sk_test_ci_placeholder
-        run: npm run build
+          cache-dependency-path: web/package-lock.json
 
+      # tsconfig.json has more readers than tsc, and they do not agree on what
+      # the file is. TypeScript parses it as JSONC and accepts // comments;
+      # plenty of other tooling reaches for an ordinary JSON parser, where a
+      # comment is a syntax error. So a comment here stays invisible to every
+      # command in this job and throws somewhere else entirely. Keep the
+      # configuration valid strict JSON and the question never comes up.
+      - name: Config files are valid strict JSON
+        run: node -e "for (const f of ['tsconfig.json','package.json','package-lock.json']) JSON.parse(require('fs').readFileSync(f,'utf8'))"
+
+      - run: npm ci
+      # Runtime dependencies only: they are what ships to browsers. Build
+      # tooling advisories (a dev server, a linter) do not reach customers and
+      # would otherwise fail builds over code that never runs in production.
+      - name: Dependency vulnerability audit
+        run: npm audit --omit=dev --audit-level=high
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      # No Clerk key: the bundle carries none. It is supplied to the web
+      # container at start and written to /config.js.
+      - run: npm run build
+
+      # Rollup once dead-code-eliminated the entire application, because an
+      # unset build-time key made a condition statically true. The build still
+      # succeeded and shipped only an error page. Assert the app is actually
+      # in the bundle rather than trusting the exit code.
+      - name: Bundle contains the application
+        run: |
+          test -f dist/index.html
+          test -f dist/login/admin-login.html
+          test -f dist/login/staff-login.html
+          test -f dist/login/change-password.html
+          test -f dist/login/customer-sign-in.html
+          test -f dist/login/customer-sign-up.html
+          test -f dist/login/customer-forgot-password.html
+          test -f dist/login/customer-sso-callback.html
+          # Google, Apple and Facebook will not approve sign-in while any of
+          # these 404s, and a missing Vite entry is silent -- the build still
+          # succeeds, the page is simply not in dist.
+          test -f dist/legal/privacy.html
+          test -f dist/legal/terms.html
+          test -f dist/legal/refunds.html
+          test -f dist/legal/data-deletion.html
+          test -f dist/config.js
+          grep -q '/config.js' dist/index.html
+          grep -rq "Waiting for the payment confirmation" dist/assets/
+          grep -rq "Zenoeats platform" dist/
+
+      # The page a QR code opens must not carry the two operator portals.
+      #
+      # Nothing about this is visible in review. One static import from the
+      # shell -- a guard, a shared component, a helper that looked harmless --
+      # merges them back into the first load, the build still succeeds, and
+      # the only symptom is a customer on restaurant wifi waiting longer.
+      - name: The customer's first load stays small
+        run: |
+          set -euo pipefail
+          # Both portals exist, and as chunks of their own.
+          ls dist/assets/ManageArea-*.js >/dev/null
+          ls dist/assets/AdminArea-*.js >/dev/null
+          # And the entry does not reach for either of them.
+          if grep -qE 'ManageArea|AdminArea' dist/index.html; then
+            echo "index.html pulls in an operator portal; the split has regressed" >&2
+            exit 1
+          fi
+          # A budget on the entry chunk, generous enough never to nag: it sits
+          # near 70 kB, and merging a portal back in would put it past 350.
+          bytes=$(stat -c%s dist/assets/app-*.js)
+          echo "entry chunk: $((bytes / 1024)) kB"
+          test "$bytes" -lt 204800
+
+  # Build once, tag by commit, promote the SAME image from staging to
+  # production. Never rebuild between environments (rule 12).
+  #
+  # A pull request builds and throws the result away: that proves the
+  # Dockerfiles still work without publishing an image from code nobody has
+  # merged. A push to main, or a version tag, publishes to GHCR.
   docker:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    permissions:
+      contents: read
+      # What lets GITHUB_TOKEN write to ghcr.io. No registry secret to store,
+      # rotate or leak -- the token is minted per run and dies with it.
+      packages: write
     steps:
       - uses: actions/checkout@v4
-      # Build once, tag by commit, promote the SAME image from staging to
-      # production. Never rebuild between environments (rule 12).
+
+      # ghcr.io rejects an uppercase path, and a GitHub owner may contain
+      # capitals, so the name is lowered here rather than assumed.
+      - name: Work out the image names
+        run: |
+          echo "IMAGE_BASE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       - name: Build images
         run: |
-          docker build -t ghcr.io/${{ github.repository }}/api:${{ github.sha }} ./backend
-          docker build -t ghcr.io/${{ github.repository }}/web:${{ github.sha }} ./frontend
+          docker build -t "$IMAGE_BASE/api:${{ github.sha }}" ./backend
+          docker build -t "$IMAGE_BASE/web:${{ github.sha }}" ./web
+
+      # Everything below is skipped on a pull request, where GITHUB_TOKEN is
+      # read-only anyway and a push would fail rather than be refused.
+      - name: Sign in to the registry
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        run: echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      # The commit sha is the tag that matters: it is the one a deployment
+      # names, and it never moves. `main` is a convenience for "what is on
+      # main right now", and a version tag is what a release is cut from.
+      #
+      # Deliberately no `latest`. A moving tag is how staging and production
+      # end up on different images while both claim to be up to date, which is
+      # the whole thing rule 12 exists to prevent.
+      - name: Publish images
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        run: |
+          set -euo pipefail
+          for image in api web; do
+            docker push "$IMAGE_BASE/$image:${{ github.sha }}"
+            if [ '${{ github.ref }}' = 'refs/heads/main' ]; then
+              docker tag  "$IMAGE_BASE/$image:${{ github.sha }}" "$IMAGE_BASE/$image:main"
+              docker push "$IMAGE_BASE/$image:main"
+            else
+              version='${{ github.ref_name }}'
+              docker tag  "$IMAGE_BASE/$image:${{ github.sha }}" "$IMAGE_BASE/$image:$version"
+              docker push "$IMAGE_BASE/$image:$version"
+            fi
+          done
+
+      # So the release step in a deploy can be copied from here rather than
+      # reconstructed from memory under pressure.
+      - name: Say what was published
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        run: |
+          {
+            echo "### Images published"
+            echo
+            echo '```'
+            echo "$IMAGE_BASE/api:${{ github.sha }}"
+            echo "$IMAGE_BASE/web:${{ github.sha }}"
+            echo '```'
+            echo
+            echo "Migrate with the same api image before rolling out:"
+            echo
+            echo '```'
+            echo "docker run --rm --env-file <prod.env> $IMAGE_BASE/api:${{ github.sha }} alembic upgrade head"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

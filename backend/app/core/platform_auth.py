@@ -42,6 +42,8 @@ SESSION_COOKIE = "zenoeats_admin_session"
 @dataclass(frozen=True)
 class PlatformAdmin:
     email: str
+    # Epoch seconds the session token was issued; None for a fresh sign-in.
+    issued_at: float | None = None
 
 
 def hash_password(password: str) -> str:
@@ -122,7 +124,9 @@ def issue_session(admin: PlatformAdmin) -> str:
         {
             "sub": admin.email,
             "typ": TOKEN_TYPE,
-            "iat": now,
+            # Sub-second, so signing back in straight after signing out is not
+            # caught by the revocation that sign-out just recorded.
+            "iat": now.timestamp(),
             "exp": now + timedelta(minutes=settings.ADMIN_SESSION_TTL_MINUTES),
         },
         settings.SESSION_SECRET,
@@ -155,7 +159,7 @@ def verify_session(token: str) -> PlatformAdmin | None:
         log.info("session rejected: %s is no longer in ADMIN_USERS", email)
         return None
 
-    return PlatformAdmin(email=email)
+    return PlatformAdmin(email=email, issued_at=float(claims["iat"]))
 
 
 # A real argon2 hash of a value nobody knows, used only to burn time on the

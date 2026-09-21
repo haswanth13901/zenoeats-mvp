@@ -1,7 +1,7 @@
 # Zenoeats MVP — pickup ordering through successful payment
 
 A working slice of the v3.0 architecture baseline: multi-tenant subdomain
-portals, Clerk identity, a Meal → Category → Item → Modifier menu, and Stripe
+portals, Clerk-backed customer sign-in on our own pages, an Item → Modifier menu served by meal periods, and Stripe
 Connect checkout that ends with a webhook-confirmed paid order on the kitchen
 board.
 
@@ -10,19 +10,31 @@ board.
 | Area | Included |
 |---|---|
 | Tenancy | Wildcard subdomain resolution, PostgreSQL RLS, three-role DB model |
-| Identity | Clerk for customers and staff, webhook mirror into `users` |
-| Menu | Meals, categories (FOOD / BEVERAGE / SAUCE), items, reusable modifier groups |
+| Identity | Customers: Clerk (email/password, Google) behind our own `/account` pages. Staff: platform-issued passwords. Admins: `ADMIN_USERS` |
+| Customer profile | `/profile`: name, phone and address; order history at this restaurant; favourite items (accounts only), saved from a heart on the menu |
+| Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
+| Storefront | Each restaurant sets its own palette, fonts, logo, rotating banners with their own framing, category shortcuts and collections — behind a platform switch |
 | Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
 | Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
-| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports |
+| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports, deliveries the restaurant runs itself, self-service settings, storefront editor |
 | Admin | Super admin portal: onboarding, activation, platform reports, CSV |
+| Policies | Privacy, terms, refunds and data deletion as files outside React, linked from sign-up, checkout and every customer page; agreement recorded per customer |
 | Infra | Docker Compose, Nginx, two Redis instances, Celery, Alembic, GitHub Actions |
 
 ## What is deliberately not here
 
-Delivery, drivers, GPS, WebSockets, cash payments, reconciliation, promotions,
+Route planning, a native driver app, WebSockets, cash payments, reconciliation, promotions,
 reviews, SMS, push, PITR. All of it stays in the v3.0 baseline for later
 releases. See "Adding delivery" at the bottom.
+
+Checkout requires a name, phone number and address on every order, plus the
+email the customer signed in or started their guest session with. A customer
+of a restaurant that delivers chooses Pickup or Delivery there: the address is
+priced against the restaurant's rings on the quote and again when the order is
+created, and the fee is charged with the food. A manager still assigns the
+driver. Name and phone are kept on the order as a snapshot and shown on the
+kitchen ticket and the driver's card; the customer's row keeps the latest copy
+to fill in next time.
 
 ## The payment sequence
 
@@ -54,27 +66,35 @@ This is the part worth reading before changing anything.
    PENDING_PAYMENT → AUTO_ACCEPTED → PREPARING.
 
 6. The customer's page polls GET /orders/{id} and sees the real state.
+   If the payment has sat in PROCESSING for 10 seconds with no webhook, the
+   poll also reads the PaymentIntent back from Stripe (after responding, at
+   most every 10 seconds per payment) and applies it through the same
+   handlers as step 5. The 5-minute expiry sweep does the same before it
+   expires anything, so a lost webhook cannot expire a charged order.
 ```
 
 Three rules hold this together. The order row exists before any charge. Only
-a verified webhook can say PAID. A partial unique index on
+Stripe can say PAID: a verified webhook, or the intent read back from Stripe
+with the platform key, never the browser. A partial unique index on
 `payments (order_id) WHERE succeeded_at IS NOT NULL` means a second
 successful payment on one order is impossible at the database level, even
 after a refund.
 
 ## The three portals
 
-All three are the same Next.js app. Which one you get depends on the URL.
+All three are the same React app, built by Vite. Which one you get depends
+on the URL.
 
 | URL | Who | What |
 |---|---|---|
 | `spicehouse.zenoeats.local:8080/` | Customers | Menu, cart, checkout, order tracking |
-| `spicehouse.zenoeats.local:8080/manage` | Restaurant staff | Kitchen board, menu builder, staff, reports |
+| `spicehouse.zenoeats.local:8080/manage` | Restaurant staff | Kitchen board, deliveries, menu builder, staff, reports |
 | `admin.zenoeats.local:8080/admin` | Platform | Create and activate restaurants, platform reports |
 
 The restaurant screens must be opened **on that restaurant's subdomain**. The
 tenant is resolved from the `Host` header and nothing else, so
-`localhost:3000/manage` will not work. Always browse through nginx on `:8080`.
+`localhost:3000/manage` will not work. Always browse through nginx on `:8080`,
+or through the Vite dev server on a `*.zenoeats.local` subdomain.
 
 `admin` is a reserved slug, so it never resolves as a tenant. The super admin
 endpoints do not use tenant context at all; they run through the audited
@@ -83,25 +103,206 @@ system read surface.
 ### Restaurant screens
 
 - **Kitchen** polls every five seconds. Unpaid orders never appear here.
-  Tickets show quantity, modifiers and notes, and turn the elapsed time red
-  past fifteen minutes. "Collect with PIN" needs the customer's six digits;
-  five wrong attempts locks that order until a manager overrides.
-- **Menu** has two tabs. *Meals and items* builds the
-  Meal → Category → Item tree and toggles sold-out. *Modifier library* creates
-  reusable groups. Options are entered one per line, with an optional price
-  change at the end: `Jalapenos +0.50`, `No cheese -0.50`.
+  A new order chimes (once sound is switched on with a tap, which browsers
+  require), is marked "new" and counts in the tab title. Tickets show
+  quantity, modifiers and notes, and time from payment, turning red past
+  fifteen minutes. "Done today" lists today's handed-over and cancelled
+  orders, searchable by number, with who did it and any reason given. "Collect with PIN" needs the customer's six digits;
+  five wrong attempts locks that order. A manager can hand an order over
+  without the PIN or cancel a paid one, each with a reason; cancelling does
+  not refund, which stays in the restaurant's Stripe Dashboard. A ticket
+  refunded there is marked "refunded".
+- **Deliveries** is for the orders a restaurant runs out itself. Customers
+  cannot order a delivery: a manager assigns a paid order to one of the
+  restaurant's drivers and types the address taken by phone, which is what
+  makes it a delivery. The kitchen's "ready" then means ready for the driver,
+  and the driver marks it picked up, then delivered -- no PIN at a doorstep,
+  so the driver saying so is what completes it, recorded against them. A
+  driver sees their own deliveries and nothing else; a manager sees them all
+  and can press the same buttons for a driver whose hands are full. A manager
+  can also hand the order to a different driver, or take it back to being a
+  collection -- until the driver has it, at which point the choices are let
+  them deliver it or cancel.
+- **Stock** is the sold-out toggle for everyone on the floor: sold-out items
+  first, a search box, one button per item.
+- **Menu** has four tabs. *Items* is everything the restaurant sells, each
+  with a type and the meal periods that serve it, plus the sold-out toggle.
+  *Meal periods* adds a period and chooses what it serves, pulling from that
+  item list. Item types are managed above the item list, on the Items tab. *Combos* bundles a period's items into meal deals with a
+  discount. *Modifier library* creates reusable groups, each shown on any
+  number of item types. Options are entered a row at a time, name beside
+  price change; a blank price means no change and a negative one is allowed,
+  like `-0.50` for no cheese.
 - **Staff** sends invitations. An invited person shows as "waiting to accept"
-  and has no access until they sign in to this restaurant and accept.
-- **Reports** shows paid orders, gross, average order value, tax, top items,
-  and how many checkouts expired unpaid.
+  and has no access until they sign in to this restaurant and accept. An admin
+  can change a member's role, which applies on their next click, and reset a
+  forgotten password: the person is signed out everywhere and gets a
+  temporary password, shown once. You cannot remove yourself, change your own
+  role, or leave the restaurant without an active admin. Resets are refused
+  for another admin, and for a login that also works at another Zenoeats
+  restaurant; Zenoeats support resets those.
+- **Storefront** is available to admins and managers when the platform enables
+  Storefront customisation. At `/manage/storefront`, save banners, category
+  shortcut photos and visibility, featured collections, and brand settings
+  independently. Uploads are drafts until saved; the live preview shows unsaved
+  choices. Category order stays on Menu. Collections reference existing items
+  and always use today's menu prices and availability. Turning the module off
+  restores the original customer appearance without discarding saved settings.
+- **Settings** is the admin's own screen, in six parts. *Your account* is
+  your display name and the address you sign in with -- the name saves on its
+  own, the address asks for your password, since it is a credential and a name
+  is not. *The restaurant* is the trading name, tagline and whether you are
+  taking orders. *Where you are* is the pickup address, which is also the
+  address your sales tax is worked out for, and your timezone, which decides
+  which day an order counts on in reports. *Delivery* is below. *Tax* is a flat
+  rate or Stripe Tax, which needs a connected account that has finished its own
+  tax setup -- until it has, the option says so rather than offering a switch
+  that would be refused. Your subdomain, status and currency are shown but not
+  editable, under *Set by Zenoeats*: the first is printed on your tables, the
+  second has its own readiness checks, and the third is what your existing
+  orders are counted in.
+- **Delivery**, inside Settings, is three things in the only order that works.
+  Place the restaurant on the map, which geocodes the pickup address and is
+  what every distance is then measured from. Draw the rings: each is how far it
+  reaches and what it costs, typed as "3 miles, $4" -- the inner edge is the
+  previous ring's outer one, so a gap is impossible, and past the last ring is
+  no delivery rather than free delivery. Then switch delivery on, which is
+  refused until the first two exist. Editing the address afterwards drops the
+  coordinates and pauses delivery until the restaurant is placed again, because
+  measuring from where a restaurant used to be would charge every customer the
+  wrong fee and nothing about editing a street says so. Under a flat rate you
+  also say whether your state taxes the fee; under Stripe Tax you do not,
+  because Stripe is handed the amount and decides for the jurisdiction.
+- **Reports** covers today, yesterday, the last 7 days, this month or chosen
+  dates -- the restaurant's own days, in its timezone, with each order counted
+  on the day it was paid there. It shows net sales (gross less refunds made
+  from the Stripe Dashboard), paid orders, average order, tax net of refunds,
+  combo discounts, cancelled orders, a by-day breakdown, top items (leaving out
+  cancelled and fully refunded orders), and checkouts that expired unpaid.
+  Deliveries are counted apart from collections and per driver -- the same
+  sales, split, not added -- since they cost the restaurant someone's time in
+  a car.
+
+### Staff roles
+
+Every member of a restaurant's team has one of six roles. The same person
+can hold a different role at another restaurant.
+
+| Role | Kitchen | Deliveries | Stock | Menu | Staff | Reports | Storefront* | Settings |
+|---|---|---|---|---|---|---|---|---|
+| Admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Manager | ✓ | ✓ | ✓ | ✓ | | ✓ | ✓ | |
+| Kitchen | ✓ | | ✓ | | | | | |
+| Cashier | ✓ | | ✓ | | | | | |
+| Driver | | ✓ | | | | | | |
+| IT support | read | | read | read | | | ✓ | ✓ |
+
+*Storefront requires the platform's per-restaurant switch. Only a super admin
+can change that switch, from the restaurant edit form; the change is audited.
+
+A driver is not floor staff with an extra screen. Deliveries is the whole
+portal to them, and it shows only the orders assigned to them.
+
+IT support is the other role that is not floor staff: it works on the
+restaurant rather than in it. Three of its screens open read-only, and the
+portal shows them that way -- the board loses its two buttons, the stock list
+its toggles, and the menu builder keeps only its preview tab. What the role
+does own is the setup a restaurant rings support about: the storefront's
+presentation, the trading name and address, the timezone, the tax rate and
+the delivery rings. Every one of those changes is audited to the person who
+made it.
+
+What it deliberately cannot do is change what is sold, act on a live order,
+read the takings or touch the team. Those are the four ways a support login
+would become a way to move money or take over the restaurant, and not having
+them is what makes the role safe to give to someone outside it.
+
+The actions split further:
+
+| Action | Admin | Manager | Kitchen | Cashier | Driver | IT support |
+|---|---|---|---|---|---|---|
+| See the board and today's history | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| See what is sold out | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| Read the menu | ✓ | ✓ | | | | ✓ |
+| Mark ready, collect with PIN | ✓ | ✓ | ✓ | ✓ | | |
+| Mark items sold out or back in stock | ✓ | ✓ | ✓ | ✓ | | |
+| Hand over without the PIN | ✓ | ✓ | | | | |
+| Cancel a paid order | ✓ | ✓ | | | | |
+| Edit storefront presentation (when enabled) | ✓ | ✓ | | | | ✓ |
+| Edit the menu | ✓ | ✓ | | | | |
+| Read reports | ✓ | ✓ | | | | |
+| Send an order out with a driver | ✓ | ✓ | | | | |
+| Pick up and deliver | ✓ | ✓ | | | ✓ | |
+| Invite and remove staff, change roles, reset passwords | ✓ | | | | | |
+| Edit the restaurant's name, address, timezone and tax | ✓ | | | | | ✓ |
+| Set the delivery area, its fees and whether they are taxed | ✓ | | | | | ✓ |
+| Change your own display name and sign-in address | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+The last row is not an oversight. Your own name and your own login belong to
+you whatever you do at the restaurant, so a driver may change theirs exactly as
+an owner may. Only the Settings screen offers it today, which admins and IT
+support can open, so a screen for the rest of the team is a route away rather
+than a rewrite.
+
+### How roles are enforced
+
+The API decides; the portal only follows. Every restaurant endpoint runs
+these checks in order, and any one of them refuses the request:
+
+1. **Who you are.** The staff session cookie is a signed token naming a
+   person, never a restaurant. It is refused if expired, if it was issued
+   before a password change or reset (`users.sessions_valid_after`), or if
+   the account is inactive. An account still holding a temporary password can
+   only ask who it is, sign out, and change that password. "Sign out" is
+   this device only, because restaurants share logins across tablets; "Sign
+   out all devices" ends every session the account holds.
+2. **Which restaurant.** The tenant comes from the `Host` header and nothing
+   else, so a request cannot name a restaurant it is not on.
+3. **Your role there.** `require_staff(...)` in `app/api/deps.py` reads your
+   `restaurant_users` row for that restaurant, under row-level security, and
+   requires it to be `ACTIVE` with a role in the endpoint's list. It is read
+   on every request, so removing someone or changing their role takes effect
+   on their next click. The lists live at the top of the staff API in
+   `app/api/v1/restaurant.py`: `MANAGE` (Admin, Manager), `ANY_STAFF` (the
+   four who work the floor, deliberately not Driver), `STAFF_ADMIN` (Admin
+   alone), `DELIVERY` (Admin, Manager, Driver) and `OWN_ACCOUNT` (everyone,
+   for the two endpoints that are about you rather than about the
+   restaurant). IT support adds four more, each one of those plus
+   `IT_SUPPORT`: `FLOOR_VIEW` and `MENU_VIEW` are the read halves of
+   `ANY_STAFF` and `MANAGE`, with every write beside them left on the
+   original, while `STOREFRONT` and `SETTINGS` are read and write both.
+   Keeping the reads and the writes on separate lists is what makes the role
+   read-only where it is meant to be, rather than a promise in a comment.
+4. **Row-level security.** The query itself runs with
+   `app.current_tenant` set, so even a wrong role check could not read or
+   write another restaurant's rows.
+5. **Origin pinning.** A request whose `Origin` is another hostname is
+   refused, so a page on a neighbouring subdomain cannot use a signed-in
+   operator's cookie.
+
+The portal mirrors the role lists in `web/src/features/restaurant/nav.ts` to
+decide which tabs and buttons to show, and a page opened outside your role
+says so instead of loading. That is a convenience: removing it would change
+what people see, not what they can do.
+
+`tests/test_role_coverage.py` holds the whole map of endpoint to roles. It
+fails if an endpoint is added without a role check, or if an endpoint's roles
+change without the map changing with it. So adding an endpoint, or widening
+one, means editing that table on purpose. When you do, update the tables above
+and `nav.ts` to match. Two further tests in that file are about IT support
+alone: one fails if the role gains a write outside its own configuration, and
+one names the endpoints it must never reach -- cancel, override, item edits,
+reports and the whole staff screen -- so a widening that reaches one of them
+is caught even if the map was edited to allow it.
 
 ### Super admin screen
 
 Create a restaurant (starts in draft), connect its Stripe account through
-hosted onboarding, then activate. Activation is gated: it refuses unless the
-connected account has charges enabled and at least one menu item is
-available. Every read on this page writes to `platform_audit_logs` with your
-user, the scope requested, and a correlation id.
+hosted onboarding, then activate. Activation is gated on payments only: it
+refuses unless the connected account has charges enabled. The menu is not
+part of the gate, so a restaurant can go live and fill its menu afterwards.
+Every read on this page writes to `platform_audit_logs` with your user, the
+scope requested, and a correlation id.
 
 ## Running it
 
@@ -127,13 +328,74 @@ make key            # prints a Fernet key -> FIELD_ENCRYPTION_KEY
 
 Then fill in `.env`:
 
-**Clerk.** Create one application. Under Domains, set the primary domain to
-the parent (`zenoeats.local` in dev, `zenoeats.com` in production) so the
-session cookie is scoped to `.zenoeats.com` and one login works across every
-restaurant subdomain. Copy the publishable key, secret key, JWKS URL and
-issuer. Add a webhook endpoint pointing at
-`https://api.yourdomain/api/v1/webhooks/clerk` subscribed to `user.created`,
-`user.updated` and `user.deleted`, and copy its signing secret.
+**Sessions.** Set `SESSION_SECRET` (`openssl rand -base64 32`). It signs the
+admin and staff session cookies.
+
+**Clerk (customers).** Create one application. Enable *Email address* +
+*Password*, and *Google* under social connections if you want the button
+(development instances use Clerk's shared Google credentials, so there is
+nothing to set up at Google). Copy the publishable key into
+`VITE_CLERK_PUBLISHABLE_KEY`, and the secret key, JWKS URL and issuer into the
+`CLERK_*` settings. For production, set the primary domain to the parent
+(`zenoeats.com`) so one sign-in covers every restaurant subdomain, and add a
+webhook endpoint at `https://yourdomain/api/v1/webhooks/clerk` for
+`user.created`, `user.updated` and `user.deleted`.
+
+**Google Maps (delivery only).** Attach a billing account to the Google Cloud
+project and enable **Maps JavaScript API**, **Places API (Legacy)**,
+**Geocoding API**, and **Routes API**. API activation itself is not billed;
+Google charges for usage after the applicable free allowances.
+
+Create two separate credentials and put them in the root `.env`:
+
+```dotenv
+# Private backend credential. Never expose this value to browser code.
+GOOGLE_MAPS_API_KEY=replace_with_server_key
+
+# Public browser credential. Its website and API restrictions protect it.
+GOOGLE_MAPS_BROWSER_KEY=replace_with_browser_key
+
+# Fine for local development; use a Cloud Map ID for production styling.
+GOOGLE_MAPS_MAP_ID=DEMO_MAP_ID
+```
+
+Configure the **server key** with API restrictions for **Geocoding API** and
+**Routes API**. In production, add an IP-address application restriction for
+the API server's fixed outbound IP. An HTTP-referrer restriction will break
+this key because calls originate from the backend.
+
+Configure the **browser key** with the **Websites** application restriction,
+allow `http://spicehouse.zenoeats.local:8080/*` for local development, and add
+each deployed storefront origin before release. Restrict this key to **Maps
+JavaScript API** and **Places API (Legacy)**. Do not reuse the server key as
+the browser key.
+
+The server key geocodes delivery addresses and calculates arrival estimates.
+The browser key provides the checkout suggestion list and customer tracking
+map. Delivery cannot be quoted when server geocoding is unavailable; checkout
+continues to accept manual addresses if browser suggestions fail. Coordinates
+are cached in Redis for 30 days to reduce requests.
+
+After changing these settings, restart the API so the public portal response
+contains the browser configuration. For the normal native development setup,
+stop the terminal running `make api` and start it again:
+
+```bash
+make api
+```
+
+When rehearsing the containerized application instead, run:
+
+```bash
+docker compose --profile app restart api
+```
+
+Open the checkout page, choose **Delivery**, and type part of an address. A
+Google suggestion list should appear. Select a suggestion and confirm that a
+delivery quote replaces the address-checking message. If Google reports
+`REQUEST_DENIED`, verify billing, key restrictions, enabled APIs, and allowed
+website referrers; Google configuration changes can take several minutes to
+propagate.
 
 **Stripe.** Enable Connect in test mode. Copy the secret and publishable
 keys. Create a webhook endpoint **on the Connect tab** (not the account tab)
@@ -171,6 +433,18 @@ stripe listen --forward-connect-to localhost:8000/api/v1/webhooks/stripe/connect
 Copy the `whsec_` it prints into `STRIPE_CONNECT_WEBHOOK_SECRET` and restart
 the api container.
 
+The CLI listens on whichever Stripe account it is logged in to, which is not
+necessarily the one `STRIPE_SECRET_KEY` belongs to. If they differ, nothing is
+forwarded and every order sits on "Confirming your payment" even though Stripe
+took the money. Either `stripe login` to the same account, or pass the key:
+`stripe listen --api-key "$STRIPE_SECRET_KEY" --forward-connect-to ...`. The
+secret it prints depends on the account, so copy it again after switching.
+
+Keep `make worker` running too. The webhook only stores the event; the worker
+is what marks the order paid. Without either, the order page still gets there
+by asking Stripe after about 10 seconds, but that is the fallback, so a slow
+confirmation locally usually means one of the two is not running.
+
 ### 6. Pay
 
 Card `4242 4242 4242 4242`, any future expiry, any CVC. The order page will
@@ -193,6 +467,55 @@ role has `BYPASSRLS`, that no runtime role owns a table, and that
 If you change the migration, run these before merging. They are the only
 thing standing between you and a cross-tenant data leak.
 
+## Customer sign-in
+
+The pages are ours; the identity is Clerk's. `/account/sign-in`,
+`/account/sign-up` and `/account/forgot-password` are plain HTML entries
+styled like the rest of the storefront, and they call Clerk's JavaScript SDK
+directly -- no Clerk component is rendered.
+
+* **Sign-up** sends a 6-digit code, entered on the same page.
+* **Forgot password** sends a 6-digit code, entered with the new password.
+* **Google** goes through Clerk and returns to `/account/sso-callback`, which
+  finishes the sign-in (or sign-up) and continues to checkout.
+* **The API** verifies Clerk's session token on every order request, checks it
+  was minted for one of our own hosts, and keeps one `users` row per Clerk
+  user. A new customer's email and name are read from Clerk's Backend API the
+  first time they appear, so receipts do not wait for the webhook.
+
+The SDK is loaded from the Clerk instance at runtime (about 80 KB), not
+bundled, and only on customer pages.
+
+## Policies and consent
+
+Four documents, served as real files by nginx rather than as routes in the
+app: `/legal/privacy`, `/legal/terms`, `/legal/refunds` and
+`/legal/data-deletion`. They render with no JavaScript and answer on the root
+domain as well as every restaurant subdomain, which is what Google, Apple and
+Facebook need — a reviewer is given one canonical URL and it cannot be a
+tenant's address. Google and Apple require a reachable privacy policy before
+they will approve sign-in; Facebook requires the deletion page too.
+
+They are **drafts**. Each opens with a banner saying so and ends with the
+questions a lawyer has to answer for that page. `STEPS_BEFORE_PRODUCTION.md`
+§9 tracks what is left.
+
+Agreement is asked for in three places and recorded in one:
+
+* **Sign-up** will not submit without the checkbox, and the provider buttons
+  are held behind it too. Clerk finishes a social sign-up by itself whenever
+  the provider supplied everything, and returns nobody to a consent step — so
+  the checkbox has to be passed before the browser leaves for Google.
+* **The customer guard** shows a consent form in place of checkout for an
+  account that still has nothing on record, which covers anyone who reached
+  an account another way. Guests are not gated.
+* **Checkout** says above the button that continuing means agreeing, and
+  placing the order writes `users.terms_accepted_at` and `terms_version`.
+  Guests included, since a guest never signs up.
+
+Bump `CURRENT_VERSION` in `app/services/terms.py` when the wording changes
+materially; every customer re-agrees on their next order.
+
 ## Development without Clerk
 
 For backend work you can skip Clerk entirely:
@@ -201,8 +524,8 @@ For backend work you can skip Clerk entirely:
 AUTH_DEV_BYPASS=true
 ```
 
-The `Authorization: Bearer` header is then read as a bare user id. The seed
-prints three: `user_dev_customer`, `user_dev_owner`, `user_dev_superadmin`.
+The `Authorization: Bearer` header is then read as a bare Clerk user id. The
+seed creates `user_dev_customer`.
 
 ```bash
 curl -H "Authorization: Bearer user_dev_customer" \
@@ -218,24 +541,76 @@ The app refuses to boot with `AUTH_DEV_BYPASS=true` and `ENV=production`.
 ## Menu model
 
 ```
-Meal                    "Lunch"
-  Category  kind=FOOD       "Burgers"
-    Item                      "Smash Burger"
-      ModifierGroup             "Veggies"      MULTI,  0-5, optional
-        ModifierOption            "Lettuce"    +$0.00
-        ModifierOption            "Jalapenos"  +$0.50
-  Category  kind=BEVERAGE   "Cold Drinks"
-    Item                      "Iced Tea"
-      ModifierGroup             "Ice level"    SINGLE, 1-1, required
-        ModifierOption            "Light" / "Regular" / "Heavy"
-  Category  kind=SAUCE      "Sides & Sauces"
-    Item                      "Garlic Aioli"
+ItemType                "Food"  "Drinks"  "Sides"  "Sauces"   <- the restaurant's own
+  ItemType                "Burgers"  parent=Food                <- optional, one level
+
+Item  type=Burgers      "Smash Burger"
+  ModifierGroup           "Veggies"      MULTI,  0-5, optional
+    ModifierOption          "Lettuce"    +$0.00
+    ModifierOption          "Jalapenos"  +$0.50
+Item  type=Drinks       "Iced Tea"
+  ModifierGroup           "Ice level"    SINGLE, 1-1, required
+    ModifierOption          "Light" / "Regular" / "Heavy"
+Item  type=Sides        "Fries"
+Item  type=Sauces       "Garlic Aioli"
+
+Meal                    "Lunch"     serves all four
+Meal                    "Dinner"    serves the burger, the tea and the fries
+
+Combo "Burger Meal"     sold during Lunch, 10% off
+  slot Food               Smash Burger
+  slot Drinks             Iced Tea
+  slot Sides              Fries
 ```
+
+Item types are rows, not an enum. Four hard-coded words meant a tiffin house
+filed tiffins, thalis and chaat under "Food" and read a stranger's vocabulary
+back on its own menu. A restaurant is created with Food, Drinks, Sides and
+Sauces as a starting point and renames, reorders, adds to or deletes them from
+the portal. `item_types.sort_order` is the order headings read down a
+storefront. Deleting a type still on items is refused rather than cascading,
+because the alternative is taking real menu items with it.
+
+A type may name a parent, which makes it a subcategory: Food holding Burgers
+and Nuggets, Drinks holding Hot Beverages. Two levels and no more, capped by a
+composite foreign key rather than by a rule the code has to remember, so
+nothing walks a tree. Leaving the parent blank is the ordinary case and the
+one most menus stay in.
+
+The nesting is a heading on the storefront and nothing else. Combos and the
+modifier-group filter read the top-level type, so a slot asking for a food
+offers burgers and nuggets together and a group offered for Food reaches every
+burger. Making Burgers and Nuggets top-level types instead would have split
+that one slot into two, each offering half the choice, and forced the group to
+be named against both. `sort_order` on a subcategory orders it among its
+siblings, not across the menu. A heading with subcategories under it cannot be
+deleted or filed under a third type while they are there.
+
+An item belongs to the restaurant, not to a meal period, and a period serves
+it through `meal_items`. So one item can be on breakfast and lunch alike, with
+one price and one sold-out toggle. The headings a customer reads inside a
+period are derived from the types of the items served, not stored. A
+subcategory becomes a block inside its parent's heading rather than a heading
+of its own, and what is filed on the heading itself reads before it.
+
+A combo is one item from each of several item types, sold together for less. It
+belongs to one meal period and may only offer items that period serves. Each
+slot takes exactly one item of one type and is always required. The discount is a
+percentage in basis points or a flat amount in minor units, and it is capped
+at what the chosen items cost.
+
+A combo is not an order line. It becomes one line per slot at each item's own
+price, tagged with `combo_id`, `combo_name_snapshot` and `combo_group`, and
+the saving lands in `orders.discount_minor`. So the subtotal is still what the
+food costs, the saving is a figure a receipt can show, and the kitchen sees
+the items it has to plate.
 
 Modifier groups belong to the restaurant, not to a single item, and attach
 through `item_modifier_groups`. Define "Ice level" once and reuse it on every
-drink. `applies_to_kind` filters the library in the menu builder so adding a
-beverage surfaces Ice level rather than Veggies.
+drink. The item types a group names filter the library in the menu builder, so
+adding a drink surfaces Ice level rather than Veggies. It is a list, so a
+"Size" group can be offered on drinks and sides at once; naming none means
+every type.
 
 `modifier_options.price_delta_minor` is the one money column without a
 non-negative constraint, because "no cheese −$0.50" is legitimate. Everything
@@ -245,54 +620,204 @@ else is `BIGINT` minor units with `CHECK >= 0`.
 
 ```
 backend/
-  app/core/         auth, tenant resolution, money, crypto, idempotency
-  app/db/           engines and the SET LOCAL tenant session
+  app/core/         auth, tenant resolution, money, crypto, idempotency,
+                    stall-watch (says which line blocked the event loop)
+  app/db/           engines and the SET LOCAL tenant session; every wait bounded
   app/models/       SQLAlchemy models, frozen enums, transition matrix
-  app/services/     pricing, orders, tax, Stripe
-  app/api/v1/       portal, orders, restaurant, admin, webhooks
+  app/services/     pricing, orders, tax, Stripe, storefront, images, terms
+  app/api/v1/       portal, orders, customer, restaurant, admin, webhooks
   app/workers/      Celery app and tasks
   alembic/          schema, RLS policies, role grants
   tests/            unit tests plus the RLS gates
-frontend/
-  app/              customer: menu, checkout, order tracking
-  app/manage/       restaurant: kitchen, menu builder, staff, reports
-  app/admin/        platform: restaurants, onboarding, reports
-  components/       modifier sheet, cart bar, operator shell
-  lib/              API client, cart context, auth hooks, formatting
+web/
+  src/routes/             the route table, and one lazy area per portal
+  src/pages/storefront/   customer: menu, checkout, order tracking
+  src/pages/manage/       restaurant: kitchen, menu builder, staff, reports,
+                          storefront editor
+  src/pages/admin/        platform: restaurants, onboarding, reports
+  src/features/           cart and session state, one RTK Query API per portal
+  src/services/           HTTP client and the RTK Query base query
+  src/components/         modifier sheet, cart bar, operator shell, guards
+  login/                  the sign-in pages, deliberately outside React
+  legal/                  privacy, terms, refunds, deletion -- files, no React
+  qa/, tests/             browser regression checks against fixtures
+  nginx.conf              static serving: SPA fallback, real files for
+                          /login and /legal
 infra/
   postgres/         role creation, runs on first boot
   nginx/            origin edge with subdomain routing
+scripts/
+  dev_preflight.py  refuses to run the app natively and in Docker at once
 ```
+
+### What a customer downloads
+
+One app, three portals, but not one bundle. The page a QR code opens is a
+menu on a phone, and it used to carry the kitchen board, the menu builder and
+the platform admin screens — a third of its weight, none of it openable by
+the person holding the phone.
+
+```
+entry      ~70 kB   the shell and the storefront
+vendor    ~330 kB   React, the router, Redux -- cached across deploys
+manage    ~150 kB   fetched when someone opens /manage
+admin      ~24 kB   fetched when someone opens /admin
+```
+
+The boundary is the import graph, not a config list: each portal owns its own
+sub-routes *and* its own guard behind one lazy import, because listing a page
+in the main route table is what drags it back into the shell. `Guards.tsx` is
+split for the same reason — the operator guards import both portal APIs and
+the manage shell, so they live behind the boundary rather than beside it.
+
+CI asserts it, since one static import undoes the whole thing and leaves no
+other trace.
 
 ## Before real money
 
-Six things this build does not do that a production launch needs:
+`STEPS_BEFORE_PRODUCTION.md` is the checklist: every code change, account,
+infrastructure, legal and rehearsal step before launch, with what has been done
+and what is still open. Keep it current rather than a list here.
 
-1. **Tax.** `TaxService` uses one flat rate per restaurant. Texas prepared
-   food is state plus local jurisdiction and varies by address. Wire Stripe
-   Tax behind the same interface before launch.
-2. **Backups.** Nightly encrypted `pg_dump` copied off the VM, and one
-   timed restore drill. A backup you have never restored is not a backup.
-3. **TLS.** Let's Encrypt wildcard certificate via DNS validation, plus
-   monitoring on expiry. A lapsed wildcard cert takes down every portal.
-4. **Error tracking.** Wire Sentry or equivalent into the FastAPI handler and
-   the Celery tasks. Scrub tokens, card data and PINs.
-5. **Rate limiting.** `redis-runtime` is running and unused. Add limits on
-   auth, order creation and PaymentIntent creation.
-6. **Receipts.** No email is sent yet. Add a Celery task on the
-   `payment_intent.succeeded` path.
-
-Two smaller gaps worth knowing about. Staff invitations create the membership
-row but send no email; wire that to the same notification task as receipts, or
-use Clerk Organizations invitations if you would rather Clerk own the flow.
-And the invited person currently has to be told the URL to visit, since there
-is no invitation landing page yet.
+The production edge and deployment shape are in `docker-compose.prod.yml` and
+`infra/nginx/production/`.
 
 ## Adding delivery later
 
-The seams are already in place. `Order.fulfillment_type` exists and is always
-`PICKUP`. The transition matrix in `app/models/commerce.py` is missing exactly
-the five delivery states from Appendix A.5; add them there and the guard
-rejects everything you have not explicitly allowed. Polling in the order page
-is the thing to replace with WebSockets, and section 12 of the baseline
-already specifies how.
+Customers can choose delivery at checkout. What is missing is everything after
+the driver sets off.
+
+**What works.** `Order.fulfillment_type` is `DELIVERY` when the customer chose
+it at checkout, or when a manager sends a paid collection out, and the transition matrix in `app/models/commerce.py` carries
+READY_FOR_DELIVERY and OUT_FOR_DELIVERY. Who is delivering is a column,
+`orders.driver_user_id`, rather than the baseline's DRIVER_ASSIGNED and
+DRIVER_ACCEPTED states: a manager may assign or reassign at any point, which as
+states would mean an edge from everywhere to everywhere. A restaurant draws
+rings in Settings (`delivery_zones`), is geocoded to a point of its own, and
+`app/services/delivery.py` will price an address against those rings.
+`price_cart` takes the fee, keeps it out of the subtotal and puts it in the
+total, and `TaxService` taxes it per the restaurant's answer under a flat rate
+or hands it to Stripe as `shipping_cost` under Stripe Tax. An order keeps the
+fee and the distance it was charged for.
+
+**Live tracking.** From payment, a delivery's order page shows its steps --
+paid, driver assigned, ready, picked up, delivered -- read from
+`order_events`. Once the driver presses Picked up, the Deliveries page on
+their phone shares GPS every five seconds (`POST
+/restaurant/driver/location`, refused unless they have an order of their own
+on the road) and keeps the screen awake. The position lives in Redis for
+minutes, never in Postgres, and the customer's map (Google Maps JavaScript
+API, `GOOGLE_MAPS_BROWSER_KEY`) shows it while fresh. The arrival time comes
+from the Routes API with the server key, asked after the poll's response and
+at most once per `DELIVERY_ETA_REFRESH_SECONDS` per order. The browser only
+reports position while the page is open, so a native driver app is the next
+step if drivers need to lock their phones.
+
+The map also requires a non-empty `GOOGLE_MAPS_MAP_ID`: use `DEMO_MAP_ID`
+locally and a Google Cloud Map ID in production. After editing `.env` in
+Docker, recreate the API with `docker compose --profile app up -d --no-deps
+--no-build --force-recreate api`; restarting an existing container does not
+load changed environment values. Pickup and unpaid orders have no delivery
+tracking map. Driver GPS requires HTTPS and browser location permission;
+the HTTP `spicehouse.zenoeats.local:8080` development origin cannot share
+GPS. Use a trusted HTTPS deployment for testing actual driver movement,
+and keep the driver's Deliveries page open after marking the order picked up.
+
+Uploaded menu images under `/images/` are served by the API. Both development
+and production nginx configurations route that prefix to the API, including
+when the frontend runs as a static Docker container.
+
+They are served `Cache-Control: public, max-age=31536000, immutable`, which
+is true rather than optimistic: `services/images` mints a random key per
+upload, writes it once, and releases it only when no row refers to it, so the
+bytes at a key never change. Without it an ETag alone meant the browser asked
+about every photograph on every view and was told 304 — thirty round trips
+for a thirty-photo menu, and nothing a CDN could answer on its own.
+
+Storage stays on the API host's disk for launch, which caps the deployment at
+one API machine and makes backing up `IMAGES_DIR` non-negotiable. Rows hold
+keys and never URLs and `IMAGES_PUBLIC_BASE` already takes an absolute URL,
+so moving to a bucket later is one class and one setting. The triggers for
+doing so are in `STEPS_BEFORE_PRODUCTION.md` §4.
+
+The local edge prefers the `api` and `web` containers directly when the app
+profile is running. Docker DNS refreshes their addresses after recreation;
+native development uses the host gateway backup. This avoids intermittent
+timeouts caused by routing container traffic through Windows port forwarding.
+The configuration requires nginx 1.27.3 or newer (the Compose image supplies
+1.27.5). After editing it, run `docker compose exec nginx nginx -t` and
+`docker compose exec nginx nginx -s reload`. A temporary menu failure also
+offers **Try again**, which only refetches the public menu and restaurant details.
+Check the real edge after startup or upgrades with
+`python scripts/check_storefront.py --slug spicehouse`. It makes 20 read-only
+requests, reports latency, and exits unsuccessfully for errors or responses
+taking 10 seconds or longer. Use your restaurant's slug if different.
+For failures, `docker compose logs --tail 50 nginx` includes total request,
+upstream connection and response times. Query strings, cookies and request
+bodies are excluded from these access logs.
+
+Run one local application mode at a time. With `--profile app`, stop native
+Uvicorn, Vite and Celery terminals first. To switch back to native development,
+run `docker compose --profile app stop api web worker beat` before starting
+those terminals; leave PostgreSQL, Redis and nginx running. Duplicate app
+stacks waste memory, can compete for published ports, and run extra task
+consumers. `make up-all`, `make api`, `make web` and `make worker` now refuse
+to start while the other mode is running (`scripts/dev_preflight.py`).
+On an 8 GB laptop, avoid concurrent frontend builds while serving
+the app: memory pressure can cause API worker restarts and request timeouts.
+When Windows runs short of memory it pages Docker's VM out to disk, and an API
+that has sat idle is paged out first: its next request then hangs for a minute
+or more, which the browser shows as "Can't reach the server". The API log says
+which kind of silence it was: `the whole API process was paused` means the
+host, not the code; `event loop blocked` is a real bug and prints the line
+responsible. The portal pages now retry and reconnect on their own either way.
+Local Compose defaults to one API worker to reduce memory usage and avoid
+multiprocess watchdog restarts on a busy laptop. Set `API_WORKERS` explicitly
+for a production host after sizing its resources and database pools.
+
+**What a customer-facing release still needs.** Stripe Tax
+sources tax at the restaurant's address, which is right for collection and
+wrong for a delivery in a destination-sourced state, so the customer's
+structured address has to reach `stripe_tax.calculate`. Then DELIVERY_FAILED
+with the retry and refund handling around it, a minimum order value if that is
+wanted. Polling in the order page is the thing to replace with WebSockets if
+five-second updates stop being enough, and section 12 of the baseline already
+specifies how.
+
+**What was decided along the way**, so it is not relitigated. Distance is
+straight-line rather than driving distance: routing costs more per lookup and
+rings on a map are what a restaurant means by "we deliver within three miles".
+Coordinates are cached for thirty days and never stored on an order, because
+Google's terms allow caching rather than keeping; what an order keeps is the
+distance and the fee, which are ours. A ring's id is not stored either, since
+rings are replaced as a set on every edit and the pointer would dangle, while
+"3.2 miles, $4" stays true.
+
+
+### Storefront customisation limits
+
+Eight banners total (including inactive drafts), six collections and twelve
+existing items per collection. Banner dates are stored with timezones; the
+editor labels dates in the device's timezone. Slides rotate every 2-10 seconds,
+with focus/hover pause, touch navigation and a static reduced-motion mode.
+There is no pause button: reaching the slides with a pointer or the keyboard
+stops them, and the dots move between them. Photos are uploaded through the
+existing image service, with a 2400px longest edge for banners and 1600px for
+other images.
+
+Each banner carries its own framing, because the banner is a fixed shape and
+a photograph is not: a focal point (`focal_x`, `focal_y`, percentages of the
+image) and a zoom of 100-200%. The portal's Framing control drags the photo
+or takes arrow keys, previews through the same function the storefront
+renders with, and shades where the headline sits. The defaults (50, 60, 100)
+reproduce the fixed crop every banner had before, so migration 0032 changes
+no existing storefront's appearance.
+
+The public `/portal` response includes a nullable `storefront` block. The
+module is off by default, and `/menu` keeps its existing contract. Themes use
+four colours, validated on the server for readable contrast, and a curated
+font pairing. Staff and platform screens keep their own theme.
+
+Custom domains, custom CSS or HTML, per-page layouts and object storage are
+out of scope. Applying restaurant themes to the separate `web/login/`
+customer sign-in pages remains a follow-up.

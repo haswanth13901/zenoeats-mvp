@@ -1,0 +1,253 @@
+import { useState } from "react";
+import { MenuImage } from "@/components/common/MenuImage";
+import { QuantityStepper, Sheet } from "@/components/common/Sheet";
+import { money, signedMoney } from "@/utils/format";
+import type { Combo, Item, Option } from "@/types";
+import {
+  defaultSelection,
+  toggleOption,
+  unitPrice,
+  unmetGroups,
+  type Selection,
+} from "../modifiers";
+import { ModifierGroups } from "./ModifierGroups";
+
+/** What one slot has been filled with, if anything yet. */
+type SlotChoice = { item: Item; selected: Selection };
+
+/**
+ * Build one combo: choose an item for every slot, then change it if you like.
+ *
+ * Every slot is required and takes exactly one item, which is what makes a
+ * meal deal a meal deal rather than a discount on whatever you fancy. The
+ * button stays disabled until each slot is filled and each chosen item's own
+ * required modifiers are answered, and the footer says which is missing --
+ * a combo has several ways to be incomplete and "not yet" is no use.
+ *
+ * The running total is a preview. Every price, rule and discount here is
+ * enforced again by the server at checkout, and its answer is what is
+ * charged.
+ */
+export function ComboSheet({
+  combo,
+  currency,
+  onClose,
+  onAdd,
+}: {
+  combo: Combo;
+  currency: string;
+  onClose: () => void;
+  onAdd: (
+    chosen: { slotId: string; slotLabel: string; item: Item; selected: Selection }[],
+    quantity: number,
+    note?: string,
+  ) => void;
+}) {
+  // Keyed by slot id, not by index: two slots can offer the same item, and a
+  // combo can be edited to have fewer slots than a stale render expects.
+  const [choices, setChoices] = useState<Record<string, SlotChoice>>({});
+  const [quantity, setQuantity] = useState(1);
+  const [note, setNote] = useState("");
+
+  function chooseItem(slotId: string, item: Item) {
+    setChoices((prev) => {
+      // Re-picking the same item leaves its modifiers alone. Choosing a
+      // different one starts that item's own defaults, because the previous
+      // item's options mean nothing on it.
+      if (prev[slotId]?.item.id === item.id) return prev;
+      return { ...prev, [slotId]: { item, selected: defaultSelection(item) } };
+    });
+  }
+
+  function toggle(slotId: string, group: Item["modifier_groups"][number], option: Option) {
+    setChoices((prev) => {
+      const current = prev[slotId];
+      if (!current) return prev;
+      return {
+        ...prev,
+        [slotId]: { ...current, selected: toggleOption(current.selected, group, option) },
+      };
+    });
+  }
+
+  const filled = combo.slots
+    .map((slot) => {
+      const choice = choices[slot.id];
+      return choice ? { slot, choice } : null;
+    })
+    .filter((x): x is { slot: Combo["slots"][number]; choice: SlotChoice } => x !== null);
+
+  const emptySlots = combo.slots
+    .filter((slot) => !choices[slot.id])
+    .map((slot) => slot.label);
+
+  const unanswered = filled.flatMap(({ choice }) =>
+    unmetGroups(choice.item, choice.selected),
+  );
+
+  const itemsSubtotal = filled.reduce(
+    (sum, { choice }) => sum + unitPrice(choice.item, choice.selected),
+    0,
+  );
+
+  // The same arithmetic the server runs, so the preview and the receipt
+  // agree: round the percentage once, never take off more than the food.
+  const rawDiscount =
+    combo.discount_kind === "PERCENT"
+      ? Math.round((itemsSubtotal * combo.discount_value) / 10000)
+      : combo.discount_kind === "AMOUNT"
+        ? Math.max(0, combo.discount_value)
+        : 0;
+  const discount = Math.min(rawDiscount, itemsSubtotal);
+  const unit = Math.max(0, itemsSubtotal - discount);
+
+  const ready = emptySlots.length === 0 && unanswered.length === 0;
+
+  const helper =
+    emptySlots.length > 0
+      ? `Still to choose: ${emptySlots.join(", ")}.`
+      : unanswered.length > 0
+        ? `Choose an option for ${unanswered.join(", ")}.`
+        : null;
+
+  return (
+    <Sheet
+      title={combo.name}
+      description={combo.description}
+      eyebrow={
+        <p className="mt-3 text-[13px] font-[650] text-brick">{savingLabel(combo, currency)}</p>
+      }
+      onClose={onClose}
+      footer={
+        <>
+          {discount > 0 && (
+            <div className="mb-[13px] flex items-baseline justify-between text-caption">
+              <span className="text-muted">{money(itemsSubtotal, currency)} separately</span>
+              {/* Replaced, never counted up: a preview must not flash an
+                  amount it is not. */}
+              <span className="tnum font-[650] text-brick">{signedMoney(-discount, currency)}</span>
+            </div>
+          )}
+          {/* Named, not merely counted. A combo has several ways to be
+              unfinished and the customer should not have to hunt for which. */}
+          {helper && (
+            <p id="combo-helper" className="mb-2.5 text-caption text-danger">
+              {helper}
+            </p>
+          )}
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <QuantityStepper value={quantity} min={1} max={20} label="items" onChange={setQuantity} />
+            <button
+              type="button"
+              className="btn-primary flex-1 rounded-full px-[11px] sm:px-[19px]"
+              disabled={!ready}
+              aria-describedby={helper ? "combo-helper" : undefined}
+              onClick={() => {
+                onAdd(
+                  filled.map(({ slot, choice }) => ({
+                    slotId: slot.id,
+                    slotLabel: slot.label,
+                    item: choice.item,
+                    selected: choice.selected,
+                  })),
+                  quantity,
+                  note.trim() || undefined,
+                );
+                onClose();
+              }}
+            >
+              Add {quantity} · <span className="tnum">{money(unit * quantity, currency)}</span>
+            </button>
+          </div>
+        </>
+      }
+    >
+      {combo.slots.map((slot) => {
+        const choice = choices[slot.id];
+        return (
+          <section key={slot.id}>
+            <fieldset>
+              {/* The type name as a heading, with no article in front: it is
+                  the restaurant's own word and may be plural, so "Choose a
+                  Tiffins" is a sentence this cannot write. */}
+              <legend className="mb-1 text-sm font-semibold">
+                {slot.label}
+                <span className="text-caption font-normal text-muted"> · Choose one</span>
+              </legend>
+              {slot.items.map((item) => {
+                const checked = choice?.item.id === item.id;
+                return (
+                  <label
+                    key={item.id}
+                    className={`mt-2 flex min-h-[52px] items-center gap-3 rounded-button border px-3 py-[11px] transition-colors duration-color ease-standard ${
+                      checked ? "border-brick bg-brickSoft/60" : "border-hairline"
+                    } ${item.is_available ? "cursor-pointer" : "cursor-not-allowed opacity-[.45]"}`}
+                  >
+                    <input
+                      type="radio"
+                      name={`slot:${slot.id}`}
+                      checked={checked}
+                      disabled={!item.is_available}
+                      onChange={() => chooseItem(slot.id, item)}
+                      className="h-5 w-5 shrink-0"
+                    />
+                    <MenuImage
+                      src={item.image_url}
+                      className="h-10 w-10 shrink-0 rounded-status bg-paper object-cover"
+                    />
+                    <span className="min-w-0 flex-1 text-sm">
+                      {item.name}
+                      {!item.is_available && <span className="text-danger"> · Sold out</span>}
+                    </span>
+                    <span className="tnum ml-auto whitespace-nowrap text-caption">
+                      {money(item.base_price_minor, currency)}
+                    </span>
+                  </label>
+                );
+              })}
+            </fieldset>
+
+            {/* The chosen item's own modifiers, in place. A combo does not
+                relax them: a required choice is still required inside one. */}
+            {choice && choice.item.modifier_groups.length > 0 && (
+              <div className="ml-5 mt-4 flex animate-disclose flex-col gap-4 border-l-2 border-brickSoft pl-4">
+                <ModifierGroups
+                  item={choice.item}
+                  currency={currency}
+                  selected={choice.selected}
+                  scope={slot.id}
+                  onToggle={(group, option) => toggle(slot.id, group, option)}
+                />
+              </div>
+            )}
+          </section>
+        );
+      })}
+
+      <label className="block">
+        <span className="label">Note for the kitchen</span>
+        <textarea
+          className="field mt-[7px]"
+          value={note}
+          maxLength={280}
+          placeholder="Allergies, how you'd like it cooked"
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </label>
+    </Sheet>
+  );
+}
+
+/** What the deal saves, in the words the customer reads on the menu too. */
+export function savingLabel(combo: Combo, currency: string): string {
+  if (combo.discount_kind === "PERCENT" && combo.discount_value > 0) {
+    // Basis points, so 1250 is 12.5%. Trailing zeros are dropped: "10% off"
+    // rather than "10.0% off".
+    const percent = combo.discount_value / 100;
+    return `${Number(percent.toFixed(2))}% off`;
+  }
+  if (combo.discount_kind === "AMOUNT" && combo.discount_value > 0) {
+    return `${money(combo.discount_value, currency)} off`;
+  }
+  return "Pick one of each";
+}

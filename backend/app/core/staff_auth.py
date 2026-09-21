@@ -44,6 +44,9 @@ DEFAULT_TTL_MINUTES = 720
 @dataclass(frozen=True)
 class StaffPrincipal:
     user_id: UUID
+    # When the token was issued, in epoch seconds, so a session ended on the
+    # server (users.sessions_valid_after) can be told apart from a live one.
+    issued_at: float
 
 
 def hash_password(password: str) -> str:
@@ -77,7 +80,9 @@ def issue_session(user_id: UUID) -> str:
         {
             "sub": str(user_id),
             "typ": TOKEN_TYPE,
-            "iat": now,
+            # Sub-second, not whole seconds: a sign-in straight after a
+            # revocation must not land in the same second and be refused.
+            "iat": now.timestamp(),
             "exp": now + timedelta(minutes=settings.STAFF_SESSION_TTL_MINUTES),
         },
         settings.SESSION_SECRET,
@@ -103,7 +108,9 @@ def verify_session(token: str) -> StaffPrincipal | None:
         return None
 
     try:
-        return StaffPrincipal(user_id=UUID(str(claims.get("sub"))))
+        return StaffPrincipal(
+            user_id=UUID(str(claims.get("sub"))), issued_at=float(claims["iat"])
+        )
     except (ValueError, TypeError):
         return None
 

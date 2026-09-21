@@ -14,6 +14,11 @@ from app.db.base import Base
 import app.models  # noqa: F401  -- registers all mappers
 
 config = context.config
+if not settings.DATABASE_URL_MIGRATE:
+    raise RuntimeError(
+        "DATABASE_URL_MIGRATE is not set. Migrations run as zenoeats_migrate, the "
+        "schema owner, and only the migration job is given its credentials."
+    )
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_MIGRATE)
 
 if config.config_file_name is not None:

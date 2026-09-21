@@ -110,6 +110,40 @@ def test_no_runtime_role_has_bypassrls():
         assert role.rolbypassrls is False, f"{role.rolname} has BYPASSRLS"
 
 
+def test_every_tenant_table_has_rls_enabled_and_forced():
+    """Any table carrying restaurant_id is tenant-owned and must be locked.
+
+    Both flags matter and they fail differently. Without ENABLE there is no
+    policy at all. Without FORCE the policies stop applying to the table
+    owner, and the migration role owns every table -- so a migration that
+    lifts FORCE to move data and forgets to put it back leaves the table
+    quietly readable across tenants by anything connecting as that role.
+    """
+    with system_session() as session:
+        rows = session.execute(
+            text(
+                """
+                SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+                  FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE n.nspname = 'public'
+                   AND c.relkind = 'r'
+                   AND EXISTS (
+                     SELECT 1 FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = c.relname
+                        AND column_name = 'restaurant_id'
+                   )
+                """
+            )
+        ).all()
+
+    assert rows, "found no tenant tables at all, which means this gate is not looking"
+    for row in rows:
+        assert row.relrowsecurity, f"{row.relname} has RLS disabled"
+        assert row.relforcerowsecurity, f"{row.relname} does not FORCE RLS"
+
+
 def test_app_role_is_not_a_table_owner():
     """zenoeats_app must be a non-owner so FORCE RLS binds it."""
     with system_session() as session:

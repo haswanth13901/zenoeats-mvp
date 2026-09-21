@@ -1,0 +1,172 @@
+# Production edge: HTTPS for the root domain and every restaurant subdomain.
+#
+# This is a template. The nginx image renders every *.template file in
+# /etc/nginx/templates into /etc/nginx/conf.d at container start, replacing
+# ${ROOT_DOMAIN} from the environment. Only variables that exist in the
+# environment are substituted, so nginx's own lowercase variables below
+# ($host, $remote_addr, ...) pass through untouched.
+#
+# Wired up by docker-compose.prod.yml. Development keeps using
+# infra/nginx/nginx.conf.
+#
+# What differs from the development edge, and why:
+#
+#   * TLS only. Port 80 exists to redirect and to answer ACME HTTP-01
+#     challenges, nothing else.
+#
+#   * Unknown hosts are refused. A request whose Host is not ROOT_DOMAIN or a
+#     subdomain of it never reaches the app, so a forged Host header cannot
+#     make the API build links or cookies for someone else's domain.
+#
+#   * Forwarding headers are overwritten, never appended to. X-Forwarded-For
+#     is set to the one address this edge saw (after Cloudflare's real-IP
+#     substitution), so nothing a client sends survives into the API.
+#
+#   * /images/ goes to the API. In development the Vite server forwards it;
+#     in production the web container is static nginx and would answer an
+#     image request with the app's HTML.
+
+include /etc/nginx/snippets/cloudflare-realip.conf;
+
+upstream zenoeats_api {
+    server api:8000;
+    keepalive 32;
+}
+
+upstream zenoeats_web {
+    server web:3000;
+    keepalive 32;
+}
+
+# --- Anything that is not ours -------------------------------------------
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    # Refuse the TLS handshake outright rather than presenting our
+    # certificate to a scanner that asked for some other name.
+    ssl_reject_handshake on;
+}
+
+# --- HTTP: redirect, and ACME ----------------------------------------------
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${ROOT_DOMAIN} *.${ROOT_DOMAIN};
+
+    # HTTP-01 challenges, for a certificate issued per name. A wildcard
+    # certificate needs DNS-01 instead and never uses this.
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# --- HTTPS ------------------------------------------------------------------
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${ROOT_DOMAIN} *.${ROOT_DOMAIN};
+
+    # A wildcard certificate covering ROOT_DOMAIN and *.ROOT_DOMAIN, mounted
+    # read-only. With Cloudflare in front, a Cloudflare Origin Certificate
+    # works here too.
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:ZenoeatsTLS:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    client_max_body_size 8m;
+
+    # Browsers remember for a year to use HTTPS for this domain and every
+    # subdomain, so a first visit typed as http:// on a café's Wi-Fi cannot
+    # be downgraded. includeSubDomains is right here because every restaurant
+    # is a subdomain and all of them are HTTPS. Not "preload": joining the
+    # browser preload list is hard to undo, and worth deciding separately.
+    #
+    # The Content-Security-Policy is set by the web container, which knows
+    # this environment's Clerk host; see web/docker-entrypoint.d.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    location /api/ {
+        proxy_pass http://zenoeats_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        # Tenancy is resolved from Host, so it passes through unchanged.
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        # The slug header is a development fallback for requests without a
+        # subdomain. Here Host always carries the tenant, so a client-sent
+        # value is stripped rather than forwarded.
+        proxy_set_header X-Zenoeats-Restaurant "";
+        proxy_read_timeout 30s;
+    }
+
+    location /images/ {
+        proxy_pass http://zenoeats_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location = /health {
+        proxy_pass http://zenoeats_api/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        access_log off;
+    }
+
+    # The platform portal lives at admin.${ROOT_DOMAIN} and nowhere else.
+    # Its API already refuses every other hostname; without this its sign-in
+    # page would still be served on every restaurant's address, which is a
+    # super-admin login form on a thousand hostnames -- and a convincing one
+    # to phish with. "^~" so this wins over any later prefix match.
+    location ^~ /admin {
+        if ($host != admin.${ROOT_DOMAIN}) {
+            return 404;
+        }
+        proxy_pass http://zenoeats_web;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location / {
+        proxy_pass http://zenoeats_web;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}

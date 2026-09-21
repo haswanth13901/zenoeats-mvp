@@ -1,0 +1,1031 @@
+[
+  {
+    "id": "A1",
+    "title": "Restaurant homepage & menu",
+    "files": [
+      "web/src/pages/storefront/StorefrontPage.tsx"
+    ],
+    "source": "storefrontApi: GET /portal, /menu, soft /orders/session; tenant cart Redux/localStorage",
+    "states": [
+      "default",
+      "loading",
+      "error",
+      "closed",
+      "empty",
+      "one-period",
+      "overnight",
+      "no-photos",
+      "broken-photo",
+      "no-tagline",
+      "sold-out",
+      "account-loading",
+      "signed-in",
+      "guest",
+      "guest-confirm",
+      "lunch-menu",
+      "dinner-menu"
+    ],
+    "motion": "Original food photography with subtle 160–250 ms hover depth on fine pointers only. Category jump scroll respects reduced motion. No autoplay, carousel, or blocking animation. Reduced motion removes transforms.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A2",
+    "title": "Customize an item",
+    "files": [
+      "web/src/features/cart/components/ModifierSheet.tsx",
+      "web/src/features/cart/components/ModifierGroups.tsx"
+    ],
+    "source": "Item from /menu; modifier selection; cart.itemAdded",
+    "states": [
+      "default",
+      "no-photo",
+      "no-groups",
+      "required",
+      "max",
+      "sold-option",
+      "negative",
+      "quantity-20",
+      "coffee",
+      "iced-tea"
+    ],
+    "motion": "Sheet rises 16 px in 220 ms ease-out; Add resolves to cart in 180 ms. Reduced motion: instant sheet and count update.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A3",
+    "title": "Build a combo",
+    "files": [
+      "web/src/features/cart/components/ComboSheet.tsx"
+    ],
+    "source": "Combo slots from /menu; included modifiers; cart.comboAdded",
+    "states": [
+      "default",
+      "partial",
+      "missing-modifiers",
+      "ready",
+      "none",
+      "percent",
+      "amount",
+      "sold-out",
+      "shared-item"
+    ],
+    "motion": "Slot disclosure 160 ms; sheet 220 ms; total changes immediately, never counts up. Reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A4",
+    "title": "Cart bar",
+    "files": [
+      "web/src/pages/storefront/StorefrontPage.tsx"
+    ],
+    "source": "selectCartCount/selectCartTotalPreview, portal orderability",
+    "states": [
+      "default",
+      "empty",
+      "closed"
+    ],
+    "motion": "Bar translates 8 px in 180 ms after first Add, static under reduced motion.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A5",
+    "title": "Customer sign-in",
+    "files": [
+      "web/login/customer-sign-in.html",
+      "web/login/customer-sign-in.ts",
+      "web/src/features/storefront/components/GuestSession.tsx"
+    ],
+    "source": "Clerk SignIn/2FA; /orders/guest-session; safe next",
+    "states": [
+      "default",
+      "providers-0",
+      "providers-1",
+      "root",
+      "loading",
+      "busy",
+      "error",
+      "social-failed",
+      "not-configured",
+      "unreachable",
+      "sms",
+      "email-code",
+      "totp",
+      "backup",
+      "checking",
+      "unsupported",
+      "incomplete",
+      "already",
+      "guest",
+      "guest-error",
+      "guest-busy",
+      "tenant-loading",
+      "validation-1",
+      "validation-2",
+      "validation-3",
+      "validation-4",
+      "validation-5",
+      "validation-6",
+      "validation-7",
+      "validation-8"
+    ],
+    "motion": "CSS ambience is static depth; step crossfade 120 ms; reduced motion: instant.",
+    "baseline": "Existing sign-in; guest component new in working tree"
+  },
+  {
+    "id": "A6",
+    "title": "Create customer account",
+    "files": [
+      "web/login/customer-sign-up.html",
+      "web/login/customer-sign-up.ts"
+    ],
+    "source": "Clerk SignUp/verification/captcha, existing session continuation",
+    "states": [
+      "default",
+      "no-name",
+      "providers-0",
+      "providers-1",
+      "short",
+      "mismatch",
+      "challenge",
+      "busy",
+      "continue",
+      "continue-email",
+      "continue-name",
+      "continue-terms",
+      "code",
+      "cooldown",
+      "checking",
+      "expired",
+      "unsupported",
+      "incomplete",
+      "already",
+      "validation-1",
+      "validation-2",
+      "validation-3",
+      "validation-4",
+      "validation-5",
+      "validation-6",
+      "validation-7"
+    ],
+    "motion": "Step crossfade 120 ms; reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A7",
+    "title": "Reset customer password",
+    "files": [
+      "web/login/customer-forgot-password.html",
+      "web/login/customer-forgot-password.ts"
+    ],
+    "source": "Clerk reset-password/email-code; safe next",
+    "states": [
+      "default",
+      "loading",
+      "sending",
+      "code",
+      "short",
+      "mismatch",
+      "cooldown",
+      "busy",
+      "additional-step",
+      "success",
+      "validation-1",
+      "validation-2",
+      "validation-3",
+      "validation-4"
+    ],
+    "motion": "Step crossfade 120 ms, instant under reduced motion.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A8",
+    "title": "Social return",
+    "files": [
+      "web/login/customer-sso-callback.html",
+      "web/login/customer-sso-callback.ts"
+    ],
+    "source": "Clerk redirect callback/session",
+    "states": [
+      "default",
+      "to-checkout",
+      "to-continue",
+      "to-code",
+      "to-2fa",
+      "failed"
+    ],
+    "motion": "One 120 ms status crossfade, no loop under reduced motion.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A9",
+    "title": "Review and checkout",
+    "files": [
+      "web/src/pages/storefront/CheckoutPage.tsx"
+    ],
+    "source": "storefrontApi quote/createOrder/createPaymentIntent; customer session; cart Redux",
+    "states": [
+      "default",
+      "loading",
+      "unavailable",
+      "empty",
+      "quoting",
+      "requote",
+      "busy",
+      "closed",
+      "price-changed",
+      "item-unavailable",
+      "network",
+      "no-discount",
+      "quantity-one",
+      "large-quantity",
+      "guest",
+      "guest-confirm",
+      "restore",
+      "validation-1",
+      "validation-2",
+      "guest-complete",
+      "guest-invalid",
+      "delivery",
+      "delivery-quoted",
+      "delivery-quoting",
+      "delivery-outside",
+      "delivery-unavailable",
+      "delivery-error",
+      "delivery-free",
+      "guest-delivery"
+    ],
+    "motion": "Quoted totals replace immediately; 120 ms state crossfade only. No 3D. Reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A10",
+    "title": "Secure payment",
+    "files": [
+      "web/src/pages/storefront/PaymentPage.tsx"
+    ],
+    "source": "Stripe Elements/confirmPayment; createPaymentIntent recovery; GET order",
+    "states": [
+      "default",
+      "loading",
+      "recovering",
+      "no-id",
+      "error",
+      "processing",
+      "card-error",
+      "stripe-loading",
+      "challenge",
+      "redirect",
+      "delivery"
+    ],
+    "motion": "None: static by design. No 3D or parallax on payment.",
+    "baseline": "Existing page; payment route added in current redesign"
+  },
+  {
+    "id": "A11",
+    "title": "Order confirmation & tracking",
+    "files": [
+      "web/src/pages/storefront/OrderPage.tsx",
+      "web/src/features/storefront/components/DeliveryTracking.tsx"
+    ],
+    "source": "GET /orders/:id authorized token/cookie; tracking; Google Maps optional",
+    "states": [
+      "default",
+      "AUTO_ACCEPTED",
+      "PREPARING",
+      "READY_FOR_PICKUP",
+      "COMPLETED",
+      "CANCELLED",
+      "EXPIRED",
+      "unknown",
+      "no-pin",
+      "refunded",
+      "partial-refund",
+      "loading",
+      "error",
+      "READY_FOR_DELIVERY",
+      "OUT_FOR_DELIVERY",
+      "token",
+      "token-error",
+      "combo-groups",
+      "linked",
+      "delivery-preparing",
+      "map-loading",
+      "map-waiting",
+      "map-stale",
+      "map-offline",
+      "map-error",
+      "delivery-arriving",
+      "delivery-completed",
+      "delivery-cancelled",
+      "delivery-pending",
+      "delivery-confirmed"
+    ],
+    "motion": "Status illustration changes with server state in 180 ms; PIN reveals once over 180 ms. Static CSS depth. Pending pulse disabled in reduced motion. Demo movement changes only the marker. Reduced motion removes interpolation.",
+    "baseline": "Existing tracking; live map component new in working tree"
+  },
+  {
+    "id": "A12",
+    "title": "Customer access states",
+    "files": [
+      "web/src/components/layout/Guards.tsx"
+    ],
+    "source": "RequireCustomer: GET /orders/session, redirects/errors",
+    "states": [
+      "default",
+      "unreachable",
+      "redirect"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "A13",
+    "title": "Manage profile",
+    "files": [
+      "web/src/pages/storefront/ProfilePage.tsx",
+      "web/src/features/storefront/components/ChangeEmail.tsx",
+      "backend/app/api/v1/customer.py"
+    ],
+    "source": "GET /orders/session; PUT /customer/profile; Clerk email verification + POST email-sync; own orders/favourites",
+    "states": [
+      "default",
+      "editing",
+      "saving",
+      "saved",
+      "save-error",
+      "verify-email",
+      "loading",
+      "unauthorized"
+    ],
+    "motion": "Static form. Success is announced without moving focus. No 3D.",
+    "baseline": "New in current working tree (not in HEAD); route alias and verified email completed in this continuation"
+  },
+  {
+    "id": "B0",
+    "title": "Staff shell",
+    "files": [
+      "web/src/features/restaurant/components/ManageShell.tsx",
+      "web/src/components/layout/Shell.tsx",
+      "web/src/features/restaurant/nav.ts"
+    ],
+    "source": "GET /restaurant/me -> sessionSlice/navFor; own account/logout",
+    "states": [
+      "default",
+      "MANAGER",
+      "KITCHEN",
+      "CASHIER",
+      "unknown",
+      "account",
+      "busy",
+      "DRIVER",
+      "signout-all"
+    ],
+    "motion": "Nav active indicator crossfades 120 ms; reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B1",
+    "title": "Restaurant sign-in",
+    "files": [
+      "web/login/staff-login.html",
+      "web/login/staff-login.ts"
+    ],
+    "source": "POST /restaurant/login, staff session",
+    "states": [
+      "default",
+      "busy",
+      "error",
+      "temporary",
+      "DRIVER",
+      "validation-1"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B2",
+    "title": "Change staff password",
+    "files": [
+      "web/login/change-password.html",
+      "web/login/change-password.ts"
+    ],
+    "source": "GET /restaurant/me; POST /restaurant/change-password",
+    "states": [
+      "default",
+      "voluntary",
+      "short",
+      "mismatch",
+      "busy",
+      "error",
+      "success",
+      "redirect",
+      "validation-1"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B3",
+    "title": "Accept staff invitation",
+    "files": [
+      "web/src/components/layout/Guards.tsx"
+    ],
+    "source": "GET /restaurant/me; accept invitation mutation",
+    "states": [
+      "default",
+      "ADMIN",
+      "MANAGER",
+      "CASHIER",
+      "busy",
+      "error",
+      "DRIVER"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B4",
+    "title": "Role access denied",
+    "files": [
+      "web/src/components/layout/Guards.tsx"
+    ],
+    "source": "StaffMe role and navFor; server role guards preserved",
+    "states": [
+      "default",
+      "CASHIER",
+      "MANAGER",
+      "DRIVER",
+      "ADMIN"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B5",
+    "title": "Kitchen and counter",
+    "files": [
+      "web/src/pages/manage/KitchenBoardPage.tsx",
+      "web/src/features/restaurant/components/BoardColumn.tsx"
+    ],
+    "source": "restaurantApi orders polling, history, drivers, ready/PIN/override/cancel/assign mutations",
+    "states": [
+      "default",
+      "MANAGER",
+      "KITCHEN",
+      "CASHIER",
+      "loading",
+      "empty",
+      "making-empty",
+      "waiting-empty",
+      "error",
+      "overdue",
+      "refunded",
+      "partly-refunded",
+      "pin",
+      "wrong-pin",
+      "locked",
+      "locked-kitchen",
+      "override",
+      "cancel",
+      "cancel-refunded",
+      "busy",
+      "notice-override",
+      "notice-cancel",
+      "notice-refunded",
+      "assign",
+      "assign-error",
+      "assign-busy",
+      "no-drivers",
+      "delivery-making",
+      "delivery-ready",
+      "delivery-road",
+      "change-driver",
+      "back-collection",
+      "history-open",
+      "history-empty",
+      "new-order",
+      "sound-resume"
+    ],
+    "motion": "Arrival 160 ms fade/8 px; movement 180 ms; overdue border changes once. No looping animation, no 3D. Reduced motion: instant position and persistent labels.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B6",
+    "title": "Stock availability",
+    "files": [
+      "web/src/pages/manage/StockPage.tsx"
+    ],
+    "source": "restaurantApi stock 30s polling; availability mutation",
+    "states": [
+      "default",
+      "loading",
+      "empty",
+      "all-stock",
+      "all-sold",
+      "search",
+      "no-match",
+      "error",
+      "busy"
+    ],
+    "motion": "Row settles in destination over 180 ms after response; reduced motion: instant movement plus announcement.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B7",
+    "title": "Menu builder shell",
+    "files": [
+      "web/src/pages/manage/MenuPage.tsx"
+    ],
+    "source": "restaurantApi menu, items, types, combos, modifier groups; shared error",
+    "states": [
+      "default",
+      "loading",
+      "error",
+      "MANAGER"
+    ],
+    "motion": "Tab body 120 ms fade; reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B7a",
+    "title": "Menu preview",
+    "files": [
+      "web/src/features/restaurant/components/MenuPreview.tsx"
+    ],
+    "source": "menu/types query; menuPreview selector; local preview",
+    "states": [
+      "default",
+      "empty",
+      "single-period",
+      "no-exclusive",
+      "no-photo",
+      "broken-photo",
+      "sold-out",
+      "exclusive"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B7b",
+    "title": "Items and item types",
+    "files": [
+      "web/src/features/restaurant/components/ItemLibrary.tsx",
+      "web/src/features/restaurant/components/ItemTypeManager.tsx"
+    ],
+    "source": "items, itemTypes, meals, modifier groups; CRUD, uploads, staged changes",
+    "states": [
+      "default",
+      "empty",
+      "filter",
+      "no-match",
+      "add-type",
+      "no-types",
+      "type-added",
+      "types-edit",
+      "types-staged",
+      "types-refused",
+      "add",
+      "no-periods",
+      "no-groups",
+      "upload",
+      "photo-error",
+      "bulk",
+      "expanded",
+      "staged",
+      "save-error",
+      "busy",
+      "validation-1",
+      "validation-2",
+      "validation-3",
+      "validation-4",
+      "validation-5",
+      "validation-6"
+    ],
+    "motion": "Staged deletion strike 120 ms; disclosure 160 ms; no row removal before Save. Reduced motion: instant strike/disclosure.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B7c",
+    "title": "Meal periods",
+    "files": [
+      "web/src/features/restaurant/components/MealPeriods.tsx"
+    ],
+    "source": "menu meals/items/types; meal CRUD; ordering, membership",
+    "states": [
+      "default",
+      "empty",
+      "edit",
+      "overnight",
+      "no-hours",
+      "delete",
+      "delete-empty",
+      "picker",
+      "all-added",
+      "all-day",
+      "all-folded",
+      "empty-period",
+      "busy",
+      "validation-1",
+      "validation-2",
+      "validation-3",
+      "validation-4",
+      "validation-5"
+    ],
+    "motion": "Fold/disclosure 160 ms; inline confirm 160 ms; reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B7d",
+    "title": "Combos",
+    "files": [
+      "web/src/features/restaurant/components/ComboBuilder.tsx"
+    ],
+    "source": "combos/meals/items/types; combo CRUD and slots",
+    "states": [
+      "default",
+      "empty",
+      "no-periods",
+      "add",
+      "edit",
+      "none",
+      "amount",
+      "percent",
+      "no-items",
+      "empty-slots",
+      "hidden",
+      "delete",
+      "busy",
+      "validation-1",
+      "validation-2",
+      "validation-3",
+      "validation-4",
+      "validation-5",
+      "validation-6",
+      "validation-7"
+    ],
+    "motion": "Inline card expansion 160 ms; no 3D. Reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B7e",
+    "title": "Modifier library",
+    "files": [
+      "web/src/features/restaurant/components/ModifierLibrary.tsx"
+    ],
+    "source": "modifier groups/types; group/option CRUD; immediate image uploads",
+    "states": [
+      "default",
+      "empty",
+      "pick-one",
+      "required",
+      "narrowed",
+      "last-row",
+      "upload",
+      "creating",
+      "edit",
+      "add-option",
+      "staged-option",
+      "staged-group",
+      "all-options",
+      "save-error",
+      "validation-1",
+      "validation-2",
+      "validation-3",
+      "validation-4",
+      "validation-5",
+      "validation-6",
+      "validation-7",
+      "validation-8",
+      "validation-9",
+      "validation-10"
+    ],
+    "motion": "New option row 120 ms fade; staged strike 120 ms; reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B8",
+    "title": "Team and invitations",
+    "files": [
+      "web/src/pages/manage/StaffPage.tsx"
+    ],
+    "source": "restaurantApi staff; invitation, role/status, reset password/remove",
+    "states": [
+      "default",
+      "loading",
+      "empty",
+      "error",
+      "invite-new",
+      "invite-existing",
+      "invite-busy",
+      "role-manager",
+      "role-admin",
+      "role-cashier",
+      "reset",
+      "reset-issued",
+      "remove",
+      "cancel-invite",
+      "self",
+      "only-admin",
+      "busy",
+      "role-driver",
+      "invite-driver"
+    ],
+    "motion": "Inline confirm 160 ms; secret appears once 120 ms; reduced motion: instant.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B9",
+    "title": "Restaurant reports",
+    "files": [
+      "web/src/pages/manage/ReportsPage.tsx"
+    ],
+    "source": "restaurantApi restaurantReports 60s; restaurant-local date ranges",
+    "states": [
+      "default",
+      "loading",
+      "error",
+      "empty",
+      "yesterday",
+      "last-7",
+      "month",
+      "dates",
+      "refreshing",
+      "no-deliveries"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "B10",
+    "title": "Deliveries",
+    "files": [
+      "web/src/pages/manage/DeliveriesPage.tsx",
+      "web/src/features/restaurant/useShareDriverLocation.ts"
+    ],
+    "source": "restaurantApi deliveries 5s; pickup/deliver; driver location publication",
+    "states": [
+      "default",
+      "DRIVER",
+      "ADMIN",
+      "MANAGER",
+      "preparing",
+      "on-road",
+      "empty",
+      "loading",
+      "error",
+      "busy",
+      "overdue",
+      "not-found"
+    ],
+    "motion": "Only a brief 180 ms column move after server confirmation. Reduced motion: instant position plus status announcement.",
+    "baseline": "Existing in HEAD (verified; not net-new)"
+  },
+  {
+    "id": "B11",
+    "title": "Restaurant settings",
+    "files": [
+      "web/src/pages/manage/SettingsPage.tsx",
+      "web/src/features/restaurant/components/DeliveryArea.tsx",
+      "web/src/features/restaurant/components/OwnAccount.tsx"
+    ],
+    "source": "restaurant profile partial patches, own account, delivery settings/origin/rings independently",
+    "states": [
+      "default",
+      "loading",
+      "load-error",
+      "unplaced",
+      "address-stale",
+      "address-dirty",
+      "no-provider",
+      "lookup-error",
+      "rings-empty",
+      "rings-blank",
+      "rings-duplicate",
+      "rings-limit",
+      "rings-last",
+      "locating",
+      "rings-saving",
+      "profile-saving",
+      "stripe-address",
+      "stripe-tax",
+      "stripe-disabled",
+      "email-change",
+      "email-conflict",
+      "save-error",
+      "saved"
+    ],
+    "motion": "None: static by design. Preserve all unsaved fields across independent saves.",
+    "baseline": "Existing in HEAD (verified; not net-new)"
+  },
+  {
+    "id": "C0",
+    "title": "Platform shell",
+    "files": [
+      "web/src/features/admin/components/AdminShell.tsx",
+      "web/src/components/layout/Guards.tsx"
+    ],
+    "source": "GET /admin/me; sessionSlice; logout",
+    "states": [
+      "default",
+      "loading",
+      "error",
+      "redirect"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "C1",
+    "title": "Platform sign-in",
+    "files": [
+      "web/login/admin-login.html",
+      "web/login/admin-login.ts"
+    ],
+    "source": "POST /admin/login; named admin credentials",
+    "states": [
+      "default",
+      "busy",
+      "error"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "C2",
+    "title": "Restaurants dashboard",
+    "files": [
+      "web/src/pages/admin/AdminRestaurantsPage.tsx",
+      "web/src/features/admin/components/RestaurantRow.tsx",
+      "web/src/features/admin/components/RestaurantForms.tsx",
+      "web/src/features/admin/components/RestaurantEditForm.tsx"
+    ],
+    "source": "adminApi restaurants/reports; create/update/owner/Stripe/status/delete/purge",
+    "states": [
+      "default",
+      "loading",
+      "empty",
+      "error",
+      "currencies",
+      "show-deleted",
+      "add",
+      "invalid-slug",
+      "creating",
+      "owner",
+      "credential",
+      "credential-invited",
+      "existing-owner",
+      "edit",
+      "stripe-tax",
+      "stripe-needs",
+      "stripe-synced",
+      "activate-error",
+      "delete",
+      "purge",
+      "purge-refused",
+      "busy",
+      "empty-reports"
+    ],
+    "motion": "Inline forms 160 ms; optional CSS depth Stripe-link emblem 180 ms on connection result, never table animation. Reduced motion: static.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "C3",
+    "title": "Restaurant orders",
+    "files": [
+      "web/src/pages/admin/AdminOrdersPage.tsx"
+    ],
+    "source": "adminApi restaurantOrders; filter, offset/limit; privacy-restricted backend",
+    "states": [
+      "default",
+      "loading",
+      "error",
+      "empty",
+      "filter",
+      "filter-empty",
+      "page-two",
+      "last-page",
+      "no-payment"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "G1",
+    "title": "Checking session",
+    "files": [
+      "web/src/components/layout/Guards.tsx",
+      "web/src/components/common/Feedback.tsx"
+    ],
+    "source": "Actual session query loading state",
+    "states": [
+      "default"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "G2",
+    "title": "API unavailable",
+    "files": [
+      "web/src/components/layout/Guards.tsx",
+      "web/src/services/apiClient.ts"
+    ],
+    "source": "API timeout/network/server errors and Retry",
+    "states": [
+      "default",
+      "timeout",
+      "offline",
+      "server"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "G3",
+    "title": "Page not found",
+    "files": [
+      "web/src/routes/AppRoutes.tsx",
+      "web/src/components/common/Feedback.tsx"
+    ],
+    "source": "Catch-all route, no data",
+    "states": [
+      "default"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "G4",
+    "title": "Customer identity check",
+    "files": [
+      "web/src/components/layout/Guards.tsx"
+    ],
+    "source": "Customer session check, token route skip",
+    "states": [
+      "default"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "E1",
+    "title": "Order confirmation email",
+    "files": [
+      "backend/app/services/notifications.py"
+    ],
+    "source": "Paid order/item snapshots; guest capability; email.send; HTML/plain text",
+    "states": [
+      "default",
+      "no-discount",
+      "no-name",
+      "guest"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "E2",
+    "title": "Staff invitation email",
+    "files": [
+      "backend/app/services/notifications.py"
+    ],
+    "source": "Staff invitation row/role; no password in email; HTML/plain text",
+    "states": [
+      "default",
+      "existing",
+      "driver"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "E3",
+    "title": "Stripe Connect handoff",
+    "files": [
+      "web/src/features/admin/components/RestaurantRow.tsx",
+      "backend/app/services/stripe_service.py"
+    ],
+    "source": "Existing Stripe Connect account-link/sync APIs; Stripe hosts onboarding",
+    "states": [
+      "default",
+      "return"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  },
+  {
+    "id": "E4",
+    "title": "Stripe payment boundary",
+    "files": [
+      "web/src/pages/storefront/PaymentPage.tsx"
+    ],
+    "source": "Stripe-owned Payment Element and issuer challenge",
+    "states": [
+      "default",
+      "challenge"
+    ],
+    "motion": "None: static by design.",
+    "baseline": "Existing"
+  }
+]

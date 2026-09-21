@@ -8,30 +8,35 @@ for platform analytics.
 import csv
 import io
 import logging
+import uuid
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import require_platform_admin
+from app.api.deps import ensure_platform_admin_user, require_platform_admin
 from app.config import settings
 from app.core import platform_auth
 from app.core.ratelimit import per_ip
 from app.core import staff_auth
 from app.core import errors
+from app.core.logsafe import email_for_log
+from app.core.tenant import admin_host
 from app.db.base import utcnow
 from app.db.session import system_session, tenant_session
 from app.models import (
-    Restaurant, RestaurantOrderCounter, RestaurantPaymentAccount,
-    RestaurantStatus, RestaurantUser, StaffRole, StaffStatus, User,
+    ItemType, Restaurant, RestaurantOrderCounter, RestaurantPaymentAccount,
+    RestaurantStatus, RestaurantUser, StaffRole, StaffStatus, TaxMode, User, UserKind,
+    STARTER_ITEM_TYPES,
 )
 from app.schemas.api import (
     AdminOrderOut, AdminOrderPageOut, CreateOwnerIn, CreateOwnerOut,
     CreateRestaurantIn, RestaurantOut, RestaurantReportOut, StripeSyncOut,
     UpdateRestaurantIn,
 )
-from app.services import stripe_service
+from app.services import images, restaurant_profile, stripe_service, stripe_tax
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["super-admin"])
@@ -58,7 +63,7 @@ def login(body: LoginIn, response: Response):
     if admin is None:
         # One message for both "no such admin" and "wrong password". The
         # difference would tell an attacker which addresses are worth attacking.
-        log.warning("failed platform admin sign-in for %r", body.email[:64])
+        log.warning("failed platform admin sign-in for %s", email_for_log(body.email))
         raise errors.ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
 
     response.set_cookie(
@@ -80,7 +85,35 @@ def login(body: LoginIn, response: Response):
 
 
 @router.post("/logout", status_code=204)
-def logout(response: Response):
+def logout(request: Request, response: Response):
+    """Sign out -- on the server, and everywhere.
+
+    Deleting the cookie alone left the token valid until it expired, so a
+    copy taken before sign-out kept working for hours. Recording the moment
+    on the account ends every session this admin holds. Answers 204 either
+    way, so signing out twice or with an expired cookie is never an error.
+    """
+    token = request.cookies.get(platform_auth.SESSION_COOKIE)
+    admin = platform_auth.verify_session(token) if token else None
+    if admin is not None:
+        # The account row is otherwise created on the first authenticated
+        # request. Sign in and straight back out, and there is no row to mark
+        # -- leaving the token that was just signed out still valid.
+        try:
+            ensure_platform_admin_user(admin.email)
+        except errors.ApiError:
+            pass  # an inactive account's sessions are refused regardless
+        with system_session() as session:
+            session.execute(
+                # The app's clock, not the database's: tokens carry the app's
+                # time, and comparing across two clocks could refuse a
+                # sign-in made straight after this one.
+                text(
+                    "UPDATE users SET sessions_valid_after = :now "
+                    "WHERE email = :email AND kind = 'PLATFORM_ADMIN'"
+                ),
+                {"now": utcnow(), "email": admin.email},
+            )
     response.delete_cookie(
         key=platform_auth.SESSION_COOKIE,
         path="/",
@@ -166,8 +199,10 @@ def list_restaurants(
             text(
                 """
                 SELECT r.id, r.slug, r.name, r.status, r.currency, r.tax_rate_bps,
-                       r.accepting_orders, r.created_at, r.tagline, r.timezone,
-                       r.deleted_at,
+                       r.storefront_customization_enabled, r.accepting_orders, r.created_at, r.tagline, r.timezone,
+                       r.deleted_at, r.tax_mode, r.tax_code, r.address_line1,
+                       r.address_line2, r.address_city, r.address_state,
+                       r.address_postal_code, r.address_country,
                        rpa.stripe_account_id, rpa.charges_enabled
                 FROM restaurants r
                 LEFT JOIN restaurant_payment_accounts rpa ON rpa.restaurant_id = r.id
@@ -183,14 +218,23 @@ def list_restaurants(
             id=r["id"], slug=r["slug"], name=r["name"], status=r["status"],
             currency=r["currency"], tax_rate_bps=r["tax_rate_bps"],
             accepting_orders=r["accepting_orders"],
+            storefront_customization_enabled=r["storefront_customization_enabled"],
             stripe_account_id=r["stripe_account_id"],
             charges_enabled=bool(r["charges_enabled"]),
             created_at=r["created_at"],
             tagline=r["tagline"], timezone=r["timezone"],
             deleted_at=r["deleted_at"],
+            **_tax_fields(r),
         )
         for r in rows
     ]
+
+
+# Shared with the restaurant's own Settings screen, which writes the same row
+# and must not be allowed to write it by looser rules.
+TAX_AND_ADDRESS_FIELDS = restaurant_profile.TAX_AND_ADDRESS_FIELDS
+_tax_fields = restaurant_profile.tax_fields
+_stripe_tax_blockers = restaurant_profile.stripe_tax_blockers
 
 
 def _restaurant_out(session, restaurant: Restaurant) -> RestaurantOut:
@@ -206,10 +250,12 @@ def _restaurant_out(session, restaurant: Restaurant) -> RestaurantOut:
         status=restaurant.status, currency=restaurant.currency,
         tax_rate_bps=restaurant.tax_rate_bps,
         accepting_orders=restaurant.accepting_orders,
+        storefront_customization_enabled=restaurant.storefront_customization_enabled,
         stripe_account_id=account["stripe_account_id"] if account else None,
         charges_enabled=bool(account["charges_enabled"]) if account else False,
         created_at=restaurant.created_at, tagline=restaurant.tagline,
         timezone=restaurant.timezone, deleted_at=restaurant.deleted_at,
+        **_tax_fields(restaurant),
     )
 
 
@@ -230,16 +276,33 @@ def update_restaurant(
     if not changes:
         raise errors.validation_error("No fields to update.")
 
+    changes = restaurant_profile.normalize(changes)
+
+    # Stripe Tax is checked before anything is written, and outside the
+    # transaction, because the check asks Stripe. It runs whenever the result
+    # would be a Stripe Tax restaurant and a tax or address field changed --
+    # clearing the street of a live Stripe Tax restaurant is refused just like
+    # switching one on without it.
+    with system_session() as session:
+        current = session.get(Restaurant, restaurant_id)
+        if current is None or current.deleted_at is not None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        # Read inside the session: the check runs after it closes, and a
+        # detached instance would raise rather than answer.
+        current_tax = restaurant_profile.tax_fields(current)
+        account_id = session.execute(
+            text("SELECT stripe_account_id FROM restaurant_payment_accounts WHERE restaurant_id = :rid"),
+            {"rid": str(restaurant_id)},
+        ).scalar_one_or_none()
+
+    restaurant_profile.guard_stripe_tax(current_tax, changes, account_id)
+
     with system_session() as session:
         restaurant = session.get(Restaurant, restaurant_id)
         if restaurant is None or restaurant.deleted_at is not None:
             raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
 
-        if changes.get("currency"):
-            changes["currency"] = changes["currency"].upper()
-
-        for field, value in changes.items():
-            setattr(restaurant, field, value)
+        restaurant_profile.apply_changes(restaurant, changes)
 
         _audit(
             session, admin, "SUPER_ADMIN_UPDATE_RESTAURANT",
@@ -254,10 +317,14 @@ def delete_restaurant(restaurant_id: UUID, admin: User = Depends(require_platfor
     """Soft delete. The row stays and deleted_at is set; every query already
     filters on it.
 
-    Never a hard delete. Orders, payments and audit rows hang off this record
-    and must survive for financial and tax retention. zenoeats_system is
-    granted SELECT, INSERT and UPDATE on restaurants but deliberately not
-    DELETE, so the database would refuse one anyway.
+    Never a hard delete here. Orders, payments and audit rows hang off this
+    record and must survive for financial and tax retention. zenoeats_system
+    is granted SELECT, INSERT and UPDATE on restaurants but deliberately not
+    DELETE, so the database would refuse one from this session anyway.
+
+    A restaurant that never traded can be removed for good afterwards, by the
+    purge endpoint below. That one refuses anything holding an order or a
+    payment, so the retention promise above is kept where it applies.
 
     An ACTIVE restaurant has to be suspended first: removing one out from
     under customers mid-checkout should not be a single click.
@@ -284,6 +351,147 @@ def delete_restaurant(restaurant_id: UUID, admin: User = Depends(require_platfor
         )
 
     return {"restaurant_id": str(restaurant_id), "deleted": True}
+
+
+# Every tenant-owned table, deepest first. A purge walks this in order, so a
+# row is always gone before the row it points at.
+#
+# Written out rather than discovered from the metadata, because the order is
+# the whole correctness argument and a loop over table names would hide it.
+# A new tenant table missing from this list leaves orphans behind, which is
+# why the test beside it checks the list against the schema.
+_PURGE_ORDER = [
+    "storefront_collection_items",
+    "storefront_banners",
+    "storefront_collections",
+    "order_item_modifiers",
+    "order_items",
+    # Before orders: an event names the order it happened to.
+    "order_events",
+    # Before orders: a payment points at the order it paid for.
+    "payments",
+    "orders",
+    "combo_slot_items",
+    "combo_slots",
+    "combos",
+    "item_included_options",
+    "item_modifier_groups",
+    "modifier_group_item_types",
+    "modifier_options",
+    "modifier_groups",
+    "meal_items",
+    # Before menu_items: a favourite points at the item it saved.
+    "customer_favourites",
+    "menu_items",
+    "item_types",
+    "meals",
+    "delivery_zones",
+    "restaurant_users",
+    "restaurant_payment_accounts",
+    "restaurant_order_counters",
+]
+
+
+@router.delete("/restaurants/{restaurant_id}/permanent", response_model=dict)
+def purge_restaurant(restaurant_id: UUID, admin: User = Depends(require_platform_admin)):
+    """Remove a restaurant and everything it owns, for good.
+
+    The ordinary delete is a soft one and stays that way: a restaurant that
+    has traded has orders, payments and tax history hanging off it, and those
+    have to survive. This is for the other case -- a draft nobody ever used, a
+    duplicate created by a typo, a throwaway left behind by a test run -- where
+    the row is clutter and there is nothing to protect.
+
+    Two guards decide which case this is, and neither is a warning the caller
+    can click past:
+
+    It has to be soft-deleted already. Purging is the second half of a
+    decision, not a shortcut past it, and a live restaurant cannot be reached
+    from here at all.
+
+    It has to have no orders and no payments. That is what "nothing to
+    protect" means in a system that keeps financial records, and the count
+    comes back in the refusal so the answer is actionable rather than a flat
+    no. There is no override: a restaurant that has taken money is not
+    purgeable through this API by anyone.
+
+    Audit rows are deliberately left behind. They record what an administrator
+    did, not what the restaurant was, and a purge that erased its own trace
+    would be the one action on this API nobody could review.
+
+    Runs as zenoeats_app rather than zenoeats_system, because the system role
+    is granted SELECT, INSERT and UPDATE on restaurants and deliberately not
+    DELETE. Row-level security scopes every statement below to this tenant, so
+    a wrong id deletes nothing rather than something else.
+    """
+    with system_session() as session:
+        restaurant = session.get(Restaurant, restaurant_id)
+        if restaurant is None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        if restaurant.deleted_at is None:
+            raise errors.ApiError(
+                409,
+                "NOT_DELETED",
+                "Delete this restaurant first. Permanent removal is the second step.",
+            )
+        slug = restaurant.slug
+        name = restaurant.name
+
+    with tenant_session(restaurant_id) as session:
+        orders = session.execute(
+            text("SELECT count(*) FROM orders WHERE restaurant_id = :r"),
+            {"r": restaurant_id},
+        ).scalar_one()
+        payments = session.execute(
+            text("SELECT count(*) FROM payments WHERE restaurant_id = :r"),
+            {"r": restaurant_id},
+        ).scalar_one()
+
+        if orders or payments:
+            raise errors.ApiError(
+                409,
+                "RESTAURANT_HAS_HISTORY",
+                f"{name} has {orders} order(s) and {payments} payment(s). "
+                "A restaurant that has taken money cannot be removed permanently.",
+            )
+
+        removed = {}
+        for table in _PURGE_ORDER:
+            result = session.execute(
+                text(f"DELETE FROM {table} WHERE restaurant_id = :r"), {"r": restaurant_id}
+            )
+            if result.rowcount:
+                removed[table] = result.rowcount
+
+        gone = session.execute(
+            text("DELETE FROM restaurants WHERE id = :r"), {"r": restaurant_id}
+        ).rowcount
+        if not gone:
+            # RLS returning zero rows here would mean the tenant context and
+            # the id disagree, which is a bug rather than a missing row.
+            raise errors.ApiError(
+                500, "INTERNAL_ERROR", "The restaurant row could not be removed."
+            )
+
+    # The rows are gone and committed, so nothing can show these any more.
+    # After the transaction rather than inside it: a purge that failed and
+    # rolled back must not have already deleted the menu's pictures.
+    #
+    # Fails soft. The restaurant is removed either way, and a folder left
+    # behind is disk to reclaim by hand, not a reason to report the purge as
+    # failed when everything it promised has happened.
+    try:
+        images.storage().delete_restaurant(restaurant_id)
+    except (OSError, ValueError):
+        log.warning("purged %s but could not remove its images", slug, exc_info=True)
+
+    with system_session() as session:
+        _audit(
+            session, admin, "SUPER_ADMIN_PURGE_RESTAURANT",
+            {"restaurant_id": str(restaurant_id), "slug": slug, "removed": removed},
+        )
+
+    return {"restaurant_id": str(restaurant_id), "purged": True, "removed": removed}
 
 
 @router.post("/restaurants/{restaurant_id}/restore", response_model=dict)
@@ -316,6 +524,8 @@ def create_restaurant(body: CreateRestaurantIn, admin: User = Depends(require_pl
     if body.slug in RESERVED_SLUGS:
         raise errors.validation_error("That subdomain is reserved.")
 
+    # A friendly answer for the ordinary case. The unique index on slug is
+    # still what decides a race between two admins, below.
     with system_session() as session:
         exists = session.execute(
             text("SELECT 1 FROM restaurants WHERE slug = :slug"), {"slug": body.slug}
@@ -323,22 +533,45 @@ def create_restaurant(body: CreateRestaurantIn, admin: User = Depends(require_pl
         if exists:
             raise errors.ApiError(409, "SLUG_TAKEN", "That subdomain is already in use.")
 
-        restaurant = Restaurant(
-            slug=body.slug, name=body.name, timezone=body.timezone,
-            currency=body.currency, tax_rate_bps=body.tax_rate_bps,
-            tagline=body.tagline, status=RestaurantStatus.DRAFT.value,
-        )
-        session.add(restaurant)
-        session.flush()
-
-        session.add(
-            RestaurantOrderCounter(
-                restaurant_id=restaurant.id, next_order_number=1001, updated_at=utcnow()
+    # Everything the new restaurant owns is written in ONE transaction, as the
+    # tenant role scoped to the new id -- so it is created whole or not at all.
+    #
+    # Not the system role. Item types are tenant menu data, and
+    # zenoeats_system is deliberately barred from menu tables (the RLS gate
+    # test asserts it). Writing them through it failed with "permission denied
+    # for table item_types" and rolled the whole creation back. The tenant
+    # role's policies already allow exactly this: a row whose restaurant is
+    # the current tenant, including the restaurant row itself.
+    rid = uuid.uuid4()
+    try:
+        with tenant_session(rid) as session:
+            session.add(
+                Restaurant(
+                    id=rid, slug=body.slug, name=body.name, timezone=body.timezone,
+                    currency=body.currency, tax_rate_bps=body.tax_rate_bps,
+                    tagline=body.tagline, status=RestaurantStatus.DRAFT.value,
+                )
             )
-        )
+            session.flush()
+            session.add(
+                RestaurantOrderCounter(
+                    restaurant_id=rid, next_order_number=1001, updated_at=utcnow()
+                )
+            )
+            # Item types are the restaurant's own, but it has to start with
+            # some: an item cannot be created without one, so a restaurant with
+            # an empty list would have a menu builder that refuses every first
+            # step. These four are a starting vocabulary, not a rule -- rename,
+            # reorder, add to or delete them from the portal like anything else.
+            for order, name in enumerate(STARTER_ITEM_TYPES):
+                session.add(ItemType(restaurant_id=rid, name=name, sort_order=order))
+    except IntegrityError as exc:
+        # Another admin took the slug between the check above and this insert.
+        raise errors.ApiError(409, "SLUG_TAKEN", "That subdomain is already in use.") from exc
+
+    with system_session() as session:
         _audit(session, admin, "SUPER_ADMIN_CREATE_RESTAURANT",
-               {"restaurant_id": str(restaurant.id), "slug": body.slug})
-        rid = restaurant.id
+               {"restaurant_id": str(rid), "slug": body.slug})
 
     return RestaurantOut(
         id=rid, slug=body.slug, name=body.name, status=RestaurantStatus.DRAFT.value,
@@ -355,22 +588,37 @@ def create_restaurant(body: CreateRestaurantIn, admin: User = Depends(require_pl
 def create_restaurant_owner(
     restaurant_id: UUID,
     body: CreateOwnerIn,
+    background: BackgroundTasks,
     admin: User = Depends(require_platform_admin),
 ):
-    """Issue the owner login for a restaurant.
+    """Give a restaurant its owner: a staff account with the ADMIN role.
 
-    The platform creates exactly one account per restaurant -- the owner, with
-    the ADMIN role -- and the owner invites their own staff from the
-    restaurant portal. Creating every kitchen hire here would turn each one
-    into a support request for the platform.
+    The platform sets up the owner; the owner invites their own staff from the
+    restaurant portal. Three cases, by what the address already has:
 
-    The temporary password is returned once, in this response, and never
-    again: only its argon2 hash is stored. must_change_password is set, so it
-    is worthless the moment the owner signs in and replaces it.
+      no staff login        A login is created with a temporary password, and
+                            the owner is ACTIVE here straight away -- the
+                            account did not exist, so nobody else's access is
+                            being extended.
 
-    There is no email step yet, so the super admin passes the password to the
-    owner out of band. That is also why forgotten passwords are reissued here
-    rather than reset by the account holder.
+      a login never used    Its password is still a temporary one nobody
+                            chose (a restaurant purged before its owner signed
+                            in, say). A fresh temporary password is issued and
+                            the owner is ACTIVE, exactly as for a new login.
+
+      a login in real use   Someone who already runs another restaurant.
+                            Their account is left alone -- no password is
+                            issued or changed -- and they are INVITED as owner
+                            here. Rule 27: an email match never grants access
+                            on its own; they sign in with the password they
+                            have and accept. They are emailed the invitation.
+
+    This used to refuse every address that already had a login, and the
+    password reset only works for staff already at the restaurant, so a
+    person who owned two restaurants could not be set up at all.
+
+    A temporary password is returned once, in this response, and never again:
+    only its argon2 hash is stored.
     """
     email = body.email.strip().lower()
 
@@ -380,50 +628,95 @@ def create_restaurant_owner(
             raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
         slug = restaurant.slug
 
-        existing = session.execute(
-            select(User).where(User.email == email, User.password_hash.isnot(None))
+        user = session.execute(
+            select(User)
+            .where(User.email == email, User.kind == UserKind.STAFF.value)
+            # A real login before a leftover invite placeholder, if both exist.
+            .order_by(User.password_hash.is_(None))
+            .limit(1)
         ).scalar_one_or_none()
-        if existing is not None:
-            # One credentialed account per address, enforced by a partial
-            # unique index as well. Reissuing here would silently move an
-            # existing owner between restaurants.
+        user_id = user.id if user else None
+        in_use = bool(user and user.password_hash and not user.must_change_password)
+
+    # Membership is tenant-owned, so it is read and written under the tenant
+    # role with RLS in force. Checked before any password is touched, so a
+    # refusal changes nothing.
+    with tenant_session(restaurant_id) as session:
+        membership = (
+            session.execute(
+                select(RestaurantUser).where(RestaurantUser.user_id == user_id)
+            ).scalar_one_or_none()
+            if user_id else None
+        )
+        if membership is not None and membership.status == StaffStatus.ACTIVE.value:
             raise errors.ApiError(
-                409, "EMAIL_TAKEN",
-                "That email already has a restaurant login.",
+                409, "ALREADY_STAFF", "That person is already on this restaurant's team."
             )
 
-        temp_password = staff_auth.generate_temp_password()
-        owner = User(
-            clerk_user_id=None,
-            email=email,
-            full_name=body.full_name,
-            password_hash=staff_auth.hash_password(temp_password),
-            must_change_password=True,
-        )
-        session.add(owner)
-        session.flush()
-        owner_id = owner.id
+    temp_password = None
+    with system_session() as session:
+        if user_id is None:
+            temp_password = staff_auth.generate_temp_password()
+            owner = User(
+                kind=UserKind.STAFF.value,
+                email=email,
+                full_name=body.full_name,
+                password_hash=staff_auth.hash_password(temp_password),
+                must_change_password=True,
+            )
+            session.add(owner)
+            session.flush()
+            user_id = owner.id
+        elif not in_use:
+            temp_password = staff_auth.generate_temp_password()
+            owner = session.get(User, user_id)
+            owner.password_hash = staff_auth.hash_password(temp_password)
+            owner.must_change_password = True
+            if body.full_name and not owner.full_name:
+                owner.full_name = body.full_name
 
+        status = StaffStatus.INVITED.value if in_use else StaffStatus.ACTIVE.value
         _audit(
             session, admin, "SUPER_ADMIN_CREATE_RESTAURANT_OWNER",
-            {"restaurant_id": str(restaurant_id), "slug": slug, "owner_email": email},
+            {"restaurant_id": str(restaurant_id), "slug": slug, "owner_email": email,
+             "status": status},
         )
 
-    # Membership is a tenant-owned row, so it is written under the tenant role
-    # with RLS in force rather than through the platform's system role.
+    now = utcnow()
     with tenant_session(restaurant_id) as session:
-        session.add(
-            RestaurantUser(
-                restaurant_id=restaurant_id,
-                user_id=owner_id,
-                role_code=StaffRole.ADMIN.value,
-                status=StaffStatus.ACTIVE.value,
-                invited_at=utcnow(),
-                accepted_at=utcnow(),
-            )
-        )
+        membership = session.execute(
+            select(RestaurantUser).where(RestaurantUser.user_id == user_id)
+        ).scalar_one_or_none()
+        if membership is None:
+            membership = RestaurantUser(restaurant_id=restaurant_id, user_id=user_id)
+            session.add(membership)
+        membership.role_code = StaffRole.ADMIN.value
+        membership.status = status
+        membership.invited_by_user_id = admin.id
+        membership.invited_at = now
+        membership.accepted_at = now if status == StaffStatus.ACTIVE.value else None
+        membership.revoked_at = None
+        session.flush()
+        membership_id = membership.id
 
-    return CreateOwnerOut(user_id=owner_id, email=email, temporary_password=temp_password)
+    if status == StaffStatus.INVITED.value:
+        background.add_task(_queue_owner_invitation, restaurant_id, membership_id)
+
+    return CreateOwnerOut(
+        user_id=user_id, email=email, temporary_password=temp_password, status=status
+    )
+
+
+def _queue_owner_invitation(restaurant_id, membership_id) -> None:
+    """Email an existing login that it has been invited as owner. After the
+    response, so the membership has committed; best effort, like staff
+    invitations -- the invitation stands without the email."""
+    from app.workers.tasks import send_staff_invitation
+
+    try:
+        send_staff_invitation.delay(str(restaurant_id), str(membership_id))
+    except Exception:
+        log.warning("could not queue the owner invitation email", exc_info=True)
 
 
 @router.post("/restaurants/{restaurant_id}/owner/reset-password", response_model=CreateOwnerOut)
@@ -444,8 +737,14 @@ def reset_owner_password(
         restaurant = session.get(Restaurant, restaurant_id)
         if restaurant is None or restaurant.deleted_at is not None:
             raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
+        # Any staff account, including a placeholder with no password yet: a
+        # restaurant's invite never issues one to an existing account, so this
+        # is the only way such a person is ever given a login.
         user = session.execute(
-            select(User).where(User.email == email, User.password_hash.isnot(None))
+            select(User)
+            .where(User.email == email, User.kind == UserKind.STAFF.value)
+            .order_by(User.password_hash.is_(None))
+            .limit(1)
         ).scalar_one_or_none()
         if user is None:
             raise errors.ApiError(404, "USER_NOT_FOUND", "No login for that email.")
@@ -459,29 +758,89 @@ def reset_owner_password(
             raise errors.ApiError(
                 404, "USER_NOT_FOUND", "That login is not staff at this restaurant."
             )
+        membership_status = membership.status
 
     temp_password = staff_auth.generate_temp_password()
     with system_session() as session:
         user = session.get(User, user_id)
         user.password_hash = staff_auth.hash_password(temp_password)
         user.must_change_password = True
+        # A reset usually means a lost password or a lost device. Whoever
+        # holds a session from before it is signed out.
+        user.sessions_valid_after = utcnow()
         _audit(
             session, admin, "SUPER_ADMIN_RESET_STAFF_PASSWORD",
             {"restaurant_id": str(restaurant_id), "user_email": email},
         )
 
-    return CreateOwnerOut(user_id=user_id, email=email, temporary_password=temp_password)
+    return CreateOwnerOut(
+        user_id=user_id, email=email, temporary_password=temp_password,
+        status=membership_status,
+    )
+
+
+def _restaurant_owner_email(restaurant_id: UUID) -> str | None:
+    """The address of the restaurant's owner, or None if it has no owner yet.
+
+    The earliest ADMIN membership, which is the account the super admin issued
+    when the restaurant was set up. An invitation that has not been accepted
+    still counts: the person exists and the address is theirs, and waiting for
+    them to click accept would only delay onboarding.
+    """
+    with tenant_session(restaurant_id) as session:
+        user_id = session.execute(
+            select(RestaurantUser.user_id)
+            .where(
+                RestaurantUser.restaurant_id == restaurant_id,
+                RestaurantUser.role_code == StaffRole.ADMIN.value,
+                RestaurantUser.status.in_(
+                    [StaffStatus.ACTIVE.value, StaffStatus.INVITED.value]
+                ),
+            )
+            .order_by(RestaurantUser.created_at)
+            .limit(1)
+        ).scalar_one_or_none()
+
+    if user_id is None:
+        return None
+    with system_session() as session:
+        return session.execute(
+            select(User.email).where(User.id == user_id)
+        ).scalar_one_or_none()
+
+
+def _admin_portal_url(request: Request) -> str:
+    """The portal's restaurants page, as an absolute URL.
+
+    Built from the hostname the request arrived on, which require_admin_host
+    has already pinned to admin.<root domain>, so this cannot be pointed
+    anywhere else. The scheme is forced to https in production rather than
+    read from the request, which reaches the app over plain HTTP behind the
+    proxy that terminated TLS.
+    """
+    host = request.headers.get("host", admin_host())
+    scheme = "https" if settings.ENV == "production" else request.url.scheme
+    return f"{scheme}://{host}/admin"
 
 
 @router.post("/restaurants/{restaurant_id}/stripe-onboarding")
 def start_stripe_onboarding(
+    request: Request,
     restaurant_id: UUID,
-    return_url: str,
-    refresh_url: str,
     admin: User = Depends(require_platform_admin),
 ):
     """Create or reuse the connected account and return a hosted onboarding
-    link. Zenoeats never touches KYC data."""
+    link. Zenoeats never touches KYC data.
+
+    Where Stripe sends the operator back is decided here, not by the caller.
+    Both URLs used to arrive as query parameters, so anyone who could make
+    this call could have Stripe's own onboarding flow hand the operator on to
+    an address of their choosing -- a redirect carrying Stripe's credibility,
+    landing on a page that looks like the portal and asks to sign in again.
+    There was never a second destination to choose: the portal has one page
+    for this, and the server knows its address.
+    """
+    portal_url = _admin_portal_url(request)
     with tenant_session(restaurant_id) as session:
         restaurant = session.get(Restaurant, restaurant_id)
         if restaurant is None:
@@ -489,15 +848,24 @@ def start_stripe_onboarding(
         account = session.execute(select(RestaurantPaymentAccount)).scalar_one_or_none()
         existing_account_id = account.stripe_account_id if account else None
         restaurant_name = restaurant.name
-        admin_email = admin.email
 
     if existing_account_id is None:
-        # contact_email is still the platform admin's: Restaurant has no
-        # contact field yet. It becomes the owner's address once restaurant
-        # accounts exist, and Stripe's notifications about this account should
-        # go to them, not to us.
+        # The account's contact is the restaurant's owner, because everything
+        # Stripe sends there is the restaurant's business: identity documents
+        # to upload, a payout that failed, a dispute with a deadline. This was
+        # the platform admin's address, which quietly made us the middleman
+        # for every one of those -- on an account we are deliberately not the
+        # merchant of record for.
+        owner_email = _restaurant_owner_email(restaurant_id)
+        if owner_email is None:
+            raise errors.ApiError(
+                409,
+                "OWNER_REQUIRED",
+                "Create the owner account first. Stripe sends verification and payout "
+                "notices to this address, and they have to reach the restaurant.",
+            )
         account_id = stripe_service.create_connected_account(
-            email=admin_email,
+            email=owner_email,
             display_name=restaurant_name,
         )
         with tenant_session(restaurant_id) as session:
@@ -510,7 +878,11 @@ def start_stripe_onboarding(
             )
         existing_account_id = account_id
 
-    url = stripe_service.create_account_link(existing_account_id, refresh_url, return_url)
+    # Both are the portal's own page. Stripe sends the operator to return_url
+    # when the form is finished and to refresh_url when the link has expired
+    # or was abandoned; the portal re-reads the account from Stripe on load,
+    # so the same page answers both.
+    url = stripe_service.create_account_link(existing_account_id, portal_url, portal_url)
     return {"onboarding_url": url, "stripe_account_id": existing_account_id}
 
 
@@ -588,7 +960,17 @@ def refresh_stripe_status(
 @router.post("/restaurants/{restaurant_id}/activate", response_model=dict)
 def activate_restaurant(restaurant_id: UUID, admin: User = Depends(require_platform_admin)):
     """Readiness gate. Activation requires a connected account with charges
-    enabled and at least one available menu item."""
+    enabled.
+
+    Deliberately says nothing about the menu. Activation is about whether
+    money can be taken, which is the one thing a restaurant cannot fix for
+    itself; what is on the menu is the restaurant's own business and changes
+    every day. An active restaurant with nothing on it shows an empty
+    storefront, which is honest and is undone by adding an item -- it does
+    not need a super admin's attention. The storefront also refuses orders
+    whenever accepting_orders is off, so an empty menu was never the thing
+    standing between a customer and a bad order.
+    """
     with tenant_session(restaurant_id) as session:
         restaurant = session.get(Restaurant, restaurant_id)
         if restaurant is None:
@@ -600,16 +982,24 @@ def activate_restaurant(restaurant_id: UUID, admin: User = Depends(require_platf
             blockers.append("No Stripe connected account.")
         elif not account.charges_enabled:
             blockers.append("Stripe account cannot accept charges yet.")
+        uses_stripe_tax = restaurant.tax_mode == TaxMode.STRIPE_TAX.value
+        tax_view = dict(_tax_fields(restaurant))
+        account_id = account.stripe_account_id if account else None
 
-        item_count = session.execute(
-            text("SELECT count(*) FROM menu_items WHERE is_available = true AND deleted_at IS NULL")
-        ).scalar_one()
-        if item_count == 0:
-            blockers.append("No available menu items.")
+    # A Stripe Tax restaurant that went live without working tax settings
+    # would refuse every checkout. Asked outside the transaction (rule 6).
+    if uses_stripe_tax and not blockers:
+        from types import SimpleNamespace
 
-        if blockers:
-            raise errors.ApiError(409, "NOT_READY_FOR_ACTIVATION", " ".join(blockers))
+        blockers.extend(_stripe_tax_blockers(SimpleNamespace(**tax_view), account_id))
 
+    if blockers:
+        raise errors.ApiError(409, "NOT_READY_FOR_ACTIVATION", " ".join(blockers))
+
+    with tenant_session(restaurant_id) as session:
+        restaurant = session.get(Restaurant, restaurant_id)
+        if restaurant is None:
+            raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
         restaurant.status = RestaurantStatus.ACTIVE.value
 
     with system_session() as session:

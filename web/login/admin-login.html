@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zenoeats platform sign-in</title>
+    <!-- Render-blocking on purpose. Imported from JS the stylesheet was
+         injected only after the entry module and its whole import graph had
+         loaded, so every page painted unstyled for as long as that took. A
+         link in the head is fetched in parallel with the script and blocks
+         the first paint until it lands. Vite serves it compiled in dev and
+         emits one hashed, shared asset in the build. -->
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+  </head>
+  <body>
+    <main class="auth">
+      <aside class="auth-art" aria-hidden="true">
+        <div class="auth-brand"><span class="brand-mark">z</span>Zenoeats</div>
+        <div>
+          <div class="cloche ml-10 mt-10 scale-150"><span class="cloche-plate"></span><span class="cloche-dome"></span><span class="cloche-knob"></span></div>
+          <p class="auth-art-caption">A little order.<br />A better service.</p>
+        </div>
+        <p class="text-caption text-muted">The care behind every order.</p>
+      </aside>
+
+      <section class="auth-form">
+        <div class="auth-brand"><span class="brand-mark" aria-hidden="true">z</span>Zenoeats</div>
+        <h1>Zenoeats platform</h1>
+        <p class="auth-intro">Super administrator sign-in.</p>
+
+        <form id="login-form" class="auth-stack" novalidate>
+          <label class="block">
+            <span class="label">Email</span>
+            <input id="email" class="field mt-[7px]" type="email" autocomplete="username" required autofocus />
+          </label>
+
+          <label class="block">
+            <span class="label">Password</span>
+            <input id="password" class="field mt-[7px]" type="password" autocomplete="current-password" required />
+          </label>
+
+          <p id="error" class="note-error" role="alert" hidden></p>
+
+          <button id="submit" class="btn-primary w-full" type="submit">Sign in</button>
+        </form>
+
+        <p class="auth-foot">
+          Administrators are configured in the deployment environment. Contact
+          whoever holds it if you need access.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="/login/admin-login.ts"></script>
+  </body>
+</html>

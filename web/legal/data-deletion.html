@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deleting your data — Zenoeats</title>
+    <meta
+      name="description"
+      content="How to have your Zenoeats account and personal information deleted, and what happens to your past orders."
+    />
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+  </head>
+  <body>
+    <main class="legal">
+      <p class="legal-draft">
+        <strong>Draft — not yet reviewed by a lawyer.</strong>
+        The process described here is the one the software actually supports.
+        Whether it satisfies the deletion rights that apply where you operate
+        has not been checked. See “Before this page goes live” at the foot.
+      </p>
+
+      <header class="legal-head">
+        <a class="auth-brand" href="/"
+          ><span class="brand-mark" aria-hidden="true">z</span>Zenoeats</a
+        >
+        <h1>Deleting your data</h1>
+        <p class="legal-meta">
+          Last updated <time datetime="2026-09-21">21 September 2026</time>
+        </p>
+      </header>
+
+      <p>
+        You can ask for your Zenoeats account and the personal information held
+        with it to be deleted. This page explains how, and what happens to your
+        past orders.
+      </p>
+
+      <h2>How to ask</h2>
+      <p>
+        Email
+        <a href="mailto:PLACEHOLDER@example.com">PLACEHOLDER@example.com</a>
+        from the address you use to sign in, with the subject
+        <strong>Delete my data</strong>.
+      </p>
+      <p>
+        Sending it from the address on the account is what lets us confirm the
+        request is yours. If you cannot, say so in the message and we will ask
+        you to confirm another way — we will not delete an account on the word
+        of an address we cannot connect to it.
+      </p>
+      <p>
+        You will get confirmation within <strong>PLACEHOLDER days</strong>, and
+        the deletion will be complete within <strong>PLACEHOLDER days</strong>
+        of that.
+      </p>
+
+      <h2>If you signed in with Google, Apple or Facebook</h2>
+      <p>
+        Removing Zenoeats from your Google, Apple or Facebook account stops it
+        being used to sign in, but it does not by itself delete what Zenoeats
+        holds. Email us as above to have that removed.
+      </p>
+
+      <h2>What gets deleted</h2>
+      <ul>
+        <li>Your sign-in details, which are held by our identity provider.</li>
+        <li>
+          Your name, email address, phone number and saved address on your
+          Zenoeats profile.
+        </li>
+        <li>Your saved favourite items.</li>
+        <li>Your ability to sign in. The account is closed.</li>
+      </ul>
+
+      <h2>What is kept, and why</h2>
+      <p>
+        Orders you have already placed and paid for are kept. They are the
+        restaurant’s business and tax record of a sale that happened, and both
+        the restaurant and Zenoeats are required to be able to account for it.
+      </p>
+      <p>
+        A kept order still carries the name, phone number and address that were
+        on it when it was placed, because that is what the record of the sale
+        consists of. It is no longer linked to a usable account.
+      </p>
+      <p>
+        The payment itself is held by Stripe on the restaurant’s account and is
+        subject to the restaurant’s and Stripe’s own retention rules.
+      </p>
+
+      <h2>If you ordered as a guest</h2>
+      <p>
+        There is no account to delete. A guest record that never became an
+        order is removed automatically after about 45 days. If a guest order
+        was placed, it is kept as described above; email us if you want the
+        contact details on it looked at.
+      </p>
+
+      <h2>Deleting one order</h2>
+      <p>
+        An individual paid order cannot be deleted on request, for the reason
+        above. If something on it is wrong — a misspelled name, the wrong phone
+        number — email us and it can be corrected.
+      </p>
+
+      <footer class="legal-foot">
+        <p class="legal-links">
+          <a href="/legal/privacy">Privacy Policy</a>
+          <a href="/legal/terms">Terms of Service</a>
+          <a href="/legal/refunds">Refunds &amp; Cancellations</a>
+          <a href="/">Back to the menu</a>
+        </p>
+        <p style="margin-top: 1.25rem">
+          <strong>Before this page goes live:</strong> this URL is what
+          Facebook Login requires as its data deletion instructions, so it must
+          resolve publicly before that app can go Live. Two things are needed
+          beyond replacing the placeholders. First, a monitored mailbox and a
+          named person behind it — a deletion page with no process behind it is
+          worse than none, and the response windows above are a commitment.
+          Second, note that the software has <em>no self-service account
+          deletion</em>: the only route today is a Clerk-side delete, which
+          soft-deletes the customer through the <code>user.deleted</code>
+          webhook. Everything above is therefore a manual procedure. A lawyer
+          should also confirm that retaining paid orders, and the contact
+          details on them, is justified under the law that applies to you, and
+          that the stated windows meet its deadlines. Delete this paragraph and
+          the banner at the top once that is done.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

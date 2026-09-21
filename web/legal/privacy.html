@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy Policy — Zenoeats</title>
+    <meta
+      name="description"
+      content="What Zenoeats collects when you order, who it is shared with, and how to have it deleted."
+    />
+    <!-- Render-blocking, for the same reason the sign-in pages do it: a
+         stylesheet imported from JS paints the page unstyled first. These
+         pages carry no script at all, so the link in the head is the whole
+         of their styling. -->
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+  </head>
+  <body>
+    <main class="legal">
+      <p class="legal-draft">
+        <strong>Draft — not yet reviewed by a lawyer.</strong>
+        This describes accurately what the Zenoeats software does with your
+        information. It has not been checked for legal sufficiency in any
+        jurisdiction. See “Before this page goes live” at the foot.
+      </p>
+
+      <header class="legal-head">
+        <a class="auth-brand" href="/"
+          ><span class="brand-mark" aria-hidden="true">z</span>Zenoeats</a
+        >
+        <h1>Privacy Policy</h1>
+        <p class="legal-meta">
+          Last updated <time datetime="2026-09-21">21 September 2026</time>
+        </p>
+      </header>
+
+      <h2>Who this is about</h2>
+      <p>
+        Zenoeats operates the ordering software that restaurants use to take
+        pickup and delivery orders. When you place an order you are dealing
+        with two organisations at once: the restaurant, which prepares your
+        food and receives your payment, and Zenoeats, which runs the site the
+        order is placed through.
+      </p>
+      <p>
+        Payment is taken by the restaurant, on the restaurant’s own payment
+        account. The restaurant — not Zenoeats — is the merchant of record for
+        your order, and refunds and card disputes are handled by them.
+      </p>
+      <p>
+        Questions about this policy, or about information held about you, go
+        to <a href="mailto:PLACEHOLDER@example.com">PLACEHOLDER@example.com</a>.
+      </p>
+
+      <h2>What is collected, and why</h2>
+      <dl>
+        <dt>Your name, email address and phone number</dt>
+        <dd>
+          Required on every order. The restaurant needs to know whose order it
+          is and how to reach you if something is wrong with it, and your email
+          is where the confirmation goes.
+        </dd>
+
+        <dt>An address</dt>
+        <dd>
+          Required at checkout. For a delivery it is where the food goes, and
+          it is measured against the restaurant’s delivery area to work out the
+          fee. For a pickup order it is kept as part of your contact details.
+        </dd>
+
+        <dt>What you ordered</dt>
+        <dd>
+          The items, options and any note you attached, along with the prices
+          at the time. Kept as a record of the order.
+        </dd>
+
+        <dt>A pickup code</dt>
+        <dd>
+          Generated for you to collect the order with. It is stored encrypted
+          and is not readable by Zenoeats staff.
+        </dd>
+
+        <dt>Your account, if you create one</dt>
+        <dd>
+          Your sign-in details are held by Clerk, our identity provider, not by
+          Zenoeats. We keep your email, name, phone number, address and any
+          items you have saved as favourites, so you do not have to type them
+          again.
+        </dd>
+
+        <dt>Ordering without an account</dt>
+        <dd>
+          You can order as a guest. A cookie in your browser is then the only
+          thing linking you to that order — it is how you reach the order page
+          and your pickup code. Nothing about you is verified.
+        </dd>
+
+        <dt>A driver’s location, during a delivery</dt>
+        <dd>
+          While your delivery is on the road, the driver’s position is shown on
+          your order page. It is held only while the delivery is in progress.
+        </dd>
+
+        <dt>Technical records</dt>
+        <dd>
+          Server logs, and error reports when something breaks. Error reports
+          are stripped of personal information before they are sent: pickup
+          codes, payment identifiers, email addresses and order notes are
+          removed.
+        </dd>
+      </dl>
+
+      <h2>Cookies</h2>
+      <p>
+        Zenoeats sets a small number of cookies, all of them necessary for the
+        site to work. There is no advertising or analytics tracking.
+      </p>
+      <ul>
+        <li>
+          <strong>Your session.</strong> If you sign in, a cookie keeps you
+          signed in. If you order as a guest, a cookie is what identifies your
+          order to you afterwards.
+        </li>
+        <li>
+          <strong>Sign-in.</strong> Clerk sets cookies needed to sign you in and
+          keep you signed in.
+        </li>
+        <li>
+          <strong>Payment.</strong> Stripe sets cookies needed to process your
+          card payment and to detect fraud.
+        </li>
+      </ul>
+
+      <h2>Who your information is shared with</h2>
+      <p>
+        Only with the companies needed to take your order and get it to you.
+        None of them is given your information for their own marketing.
+      </p>
+      <dl>
+        <dt>The restaurant you ordered from</dt>
+        <dd>
+          Receives your name, phone number, email, the order itself, and the
+          delivery address where there is one. They receive nothing about
+          orders you placed with any other restaurant.
+        </dd>
+
+        <dt>Stripe — payments</dt>
+        <dd>
+          Your card details are entered directly into Stripe and never reach
+          Zenoeats’ servers. Stripe receives the amount, the order reference and
+          your email address for the receipt. Because the restaurant is the
+          merchant of record, the payment is on the restaurant’s Stripe account.
+        </dd>
+
+        <dt>Clerk — accounts and sign-in</dt>
+        <dd>
+          Holds your password and runs sign-in with Google, Apple or Facebook if
+          you choose one. Zenoeats never sees your password.
+        </dd>
+
+        <dt>Resend — email</dt>
+        <dd>
+          Sends your order confirmation. The confirmation never contains your
+          pickup code.
+        </dd>
+
+        <dt>Google — addresses and delivery</dt>
+        <dd>
+          An address you enter for delivery is sent to Google to turn it into a
+          location, so the distance and fee can be worked out. The resulting
+          coordinates are cached for up to 30 days; what is kept on the order is
+          the distance and the fee, not the coordinates.
+        </dd>
+
+        <dt>Sentry — error reporting</dt>
+        <dd>
+          Receives reports when something on the site fails, with personal
+          information removed as described above.
+        </dd>
+      </dl>
+
+      <h2>How long it is kept</h2>
+      <ul>
+        <li>
+          <strong>Orders</strong> are kept as a business and tax record for as
+          long as the restaurant is required to keep them.
+        </li>
+        <li>
+          <strong>Guest records</strong> that never became an order are removed
+          automatically after about 45 days.
+        </li>
+        <li>
+          <strong>Account details</strong> are kept until you delete your
+          account.
+        </li>
+        <li>
+          <strong>Delivery coordinates</strong> are cached for up to 30 days. A
+          driver’s position is not kept after the delivery finishes.
+        </li>
+      </ul>
+
+      <h2>Your choices</h2>
+      <p>
+        You can see and change your name, phone number and address, and see your
+        past orders, on your profile page while signed in.
+      </p>
+      <p>
+        You can ask for your account and personal information to be deleted. How
+        to do that, and what happens to your past orders, is set out on the
+        <a href="/legal/data-deletion">data deletion page</a>.
+      </p>
+      <p>
+        Depending on where you live you may have further rights over your
+        information — to get a copy of it, to correct it, or to object to how it
+        is used. Write to the address above.
+      </p>
+
+      <h2>Security</h2>
+      <p>
+        Each restaurant’s data is isolated from every other restaurant’s inside
+        the database itself, not merely by the application asking politely.
+        Pickup codes are encrypted. Card details never touch Zenoeats’ servers.
+        Connections are encrypted in transit.
+      </p>
+      <p>
+        No system is perfectly secure, and this policy is not a warranty that
+        one is.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        Zenoeats is not intended for children, and accounts are not knowingly
+        created for them.
+      </p>
+
+      <h2>Changes</h2>
+      <p>
+        If this policy changes materially, the date at the top changes and the
+        new version is published here before it takes effect.
+      </p>
+
+      <footer class="legal-foot">
+        <p class="legal-links">
+          <a href="/legal/terms">Terms of Service</a>
+          <a href="/legal/refunds">Refunds &amp; Cancellations</a>
+          <a href="/legal/data-deletion">Data Deletion</a>
+          <a href="/">Back to the menu</a>
+        </p>
+        <p style="margin-top: 1.25rem">
+          <strong>Before this page goes live,</strong> a lawyer needs to
+          confirm: the legal entity name, trading address and contact address
+          that replace the placeholders above; which privacy law applies and
+          whether the disclosures it requires are all present (UK/EU GDPR
+          lawful bases and an ICO-style rights section, or a CCPA notice, are
+          not included here); how Zenoeats and each restaurant are
+          characterised with respect to one another — the arrangement is
+          described accurately above, but whether that makes each of them a
+          controller, or one a processor for the other, is a legal
+          determination and it drives what the restaurant agreement must say;
+          the retention periods, against tax and accounting rules in your
+          jurisdiction; and whether a cookie consent banner is required where
+          you operate. Delete this paragraph and the banner at the top once
+          that is done.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

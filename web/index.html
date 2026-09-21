@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Order pickup</title>
+    <!-- Render-blocking on purpose. Imported from JS the stylesheet was
+         injected only after the entry module and its whole import graph had
+         loaded, so every page painted unstyled for as long as that took. A
+         link in the head is fetched in parallel with the script and blocks
+         the first paint until it lands. Vite serves it compiled in dev and
+         emits one hashed, shared asset in the build. -->
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+    <!-- Runtime configuration (the Clerk publishable key), written by the web
+         container at startup. A classic script, so it runs before the module
+         entry below reads it. -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

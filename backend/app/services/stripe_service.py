@@ -1,8 +1,9 @@
 """Stripe Connect. Direct charges on the restaurant's connected account.
 
 Section 8: the restaurant is the merchant of record, receives payouts and
-owns dispute operations. Zenoeats omits application_fee_amount, so the
-platform fee is $0 in MVP.
+owns dispute operations. Zenoeats' own revenue is an application fee on each
+charge, set by PLATFORM_FEE_BPS and PLATFORM_FEE_FIXED_MINOR; with both at 0
+no fee is sent at all.
 
 Every call here happens outside a database transaction (rule 6).
 """
@@ -27,6 +28,21 @@ stripe.max_network_retries = 2
 _client = stripe.StripeClient(settings.STRIPE_SECRET_KEY)
 
 
+def platform_fee_minor(total_minor: int) -> int:
+    """Zenoeats' fee on an order total, in minor units.
+
+    Rounded half up to the nearest cent, and never more than the order is
+    worth: Stripe rejects an application fee larger than the charge, and a
+    small order must not be refused because a fixed fee outgrew it.
+    """
+    if total_minor <= 0:
+        return 0
+    bps = max(0, settings.PLATFORM_FEE_BPS)
+    fixed = max(0, settings.PLATFORM_FEE_FIXED_MINOR)
+    percentage = (total_minor * bps + 5_000) // 10_000
+    return min(total_minor, percentage + fixed)
+
+
 def create_payment_intent(
     order: Order, account: RestaurantPaymentAccount, receipt_email: str | None
 ) -> stripe.PaymentIntent:
@@ -42,6 +58,9 @@ def create_payment_intent(
             "This restaurant cannot accept card payments right now."
         )
 
+    fee = platform_fee_minor(order.total_minor)
+    extra = {"application_fee_amount": fee} if fee > 0 else {}
+
     try:
         return stripe.PaymentIntent.create(
             amount=order.total_minor,
@@ -51,21 +70,53 @@ def create_payment_intent(
                 "order_id": str(order.id),
                 "restaurant_id": str(order.restaurant_id),
                 "order_number": str(order.order_number),
+                "platform_fee_minor": str(fee),
+                # Stripe's convention for a PaymentIntent whose amount came
+                # from a tax calculation. Empty for a flat-rate restaurant.
+                **({"tax_calculation": order.tax_calculation_id}
+                   if getattr(order, "tax_calculation_id", None) else {}),
             },
             receipt_email=receipt_email,
             stripe_account=account.stripe_account_id,
-            idempotency_key=f"order:{order.id}:pi:v1",
+            # The fee is part of the key. Stripe refuses to replay an
+            # idempotency key with different parameters, so without it a fee
+            # change made while a customer sat on the payment page would turn
+            # their retry into an error instead of a fresh intent.
+            idempotency_key=f"order:{order.id}:pi:v1:fee{fee}",
+            **extra,
         )
     except stripe.StripeError as exc:
         log.warning("stripe PaymentIntent failed for order %s: %s", order.id, exc.user_message or exc)
         raise errors.payment_provider_unavailable() from exc
 
 
-def retrieve_payment_intent(intent_id: str, stripe_account_id: str) -> stripe.PaymentIntent:
+# Stripe's answers that an intent is not there to be read. Anything else going
+# wrong is Stripe being unreachable or unwell, which says nothing about the
+# payment.
+_INTENT_GONE_CODES = {"resource_missing", "account_invalid"}
+
+
+def retrieve_payment_intent(intent_id: str, stripe_account_id: str) -> dict | None:
+    """Read a PaymentIntent straight from Stripe, as a plain dict.
+
+    The payment webhook is how an intent's outcome normally arrives; this is
+    the fallback for when it does not (tasks.reconcile_payment_intent). A
+    plain dict because that is the shape the webhook handlers read, and
+    stripe-python's objects raise on .get().
+
+    Returns None when Stripe answers that the intent does not exist on that
+    account, which is a definite answer. Raises when Stripe could not be
+    asked, which is not an answer at all: a caller must never read that as
+    "unpaid".
+    """
     try:
-        return stripe.PaymentIntent.retrieve(intent_id, stripe_account=stripe_account_id)
+        intent = stripe.PaymentIntent.retrieve(intent_id, stripe_account=stripe_account_id)
     except stripe.StripeError as exc:
+        if getattr(exc, "code", None) in _INTENT_GONE_CODES:
+            log.warning("stripe has no intent %s on %s: %s", intent_id, stripe_account_id, exc.code)
+            return None
         raise errors.payment_provider_unavailable() from exc
+    return intent.to_dict() if hasattr(intent, "to_dict") else dict(intent)
 
 
 def create_account_link(stripe_account_id: str, refresh_url: str, return_url: str) -> str:

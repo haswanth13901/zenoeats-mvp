@@ -10,7 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Inside Docker this path resolves to a file that does not exist, which is
 # correct: compose passes the same values as real environment variables via
 # env_file:, and pydantic-settings reads those first.
-ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = REPO_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -26,8 +27,12 @@ class Settings(BaseSettings):
     DATABASE_URL_APP: str
     # Narrow cross-tenant discovery role for workers and the webhook inbox.
     DATABASE_URL_SYSTEM: str
-    # Alembic only. Owns the schema. Never used by runtime code.
-    DATABASE_URL_MIGRATE: str
+    # Alembic only. Owns the schema. Optional here because runtime processes
+    # -- the API, the worker, beat -- must not be given it at all: a leaked
+    # API container would otherwise hold credentials that can drop tables and
+    # switch off row-level security. Only the migration job sets it, and a
+    # production API refuses to start if it is present (core/startup_checks).
+    DATABASE_URL_MIGRATE: str = ""
 
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 10
@@ -39,11 +44,27 @@ class Settings(BaseSettings):
     # purpose: this one evicts under pressure, the broker never does.
     REDIS_RUNTIME_URL: str = "redis://redis-runtime:6379/0"
 
-    # --- Clerk ------------------------------------------------------------
+    # --- Proxies ----------------------------------------------------------
+    # The networks our own reverse proxies connect from. Forwarding headers
+    # (X-Real-IP, X-Forwarded-For) are believed only on connections from
+    # these; from anywhere else they are ignored and the socket address is
+    # the client. The default covers loopback and the private ranges Docker
+    # and a VPC use. Narrow it in production to exactly where nginx runs.
+    TRUSTED_PROXY_CIDRS: str = "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+    # --- Clerk (customers only) --------------------------------------------
+    # Verifies customer session tokens. Staff and platform admins never touch
+    # Clerk.
     CLERK_JWKS_URL: str = ""
     CLERK_ISSUER: str = ""
+    # Backend API key. Used to read a new customer's email and name the first
+    # time they reach the API, so receipts have a real address without waiting
+    # for a webhook -- which, in local development, never arrives at all.
+    CLERK_SECRET_KEY: str = ""
     CLERK_WEBHOOK_SECRET: str = ""
-    # Set true only for local development without a Clerk instance.
+    # Set true only for local development without a Clerk instance: the
+    # Authorization: Bearer header is read as a bare Clerk user id. Startup
+    # refuses to boot with it on in production.
     AUTH_DEV_BYPASS: bool = False
 
     # --- Platform administrators ------------------------------------------
@@ -53,18 +74,37 @@ class Settings(BaseSettings):
     # Named rather than shared so platform_audit_logs.actor_user_id stays
     # meaningful. Empty means nobody can sign in to the super admin portal.
     ADMIN_USERS: str = ""
-    # Signs platform-admin session cookies. Rotating it logs every admin out.
+    # Signs platform-admin, restaurant staff and guest-customer session
+    # cookies. Rotating it signs every operator out, and drops every guest
+    # back to an anonymous browser. Signed-in customer sessions are Clerk's.
     SESSION_SECRET: str = ""
     ADMIN_SESSION_TTL_MINUTES: int = 480
     # Restaurant staff sessions. Longer than an admin session because it has
     # to outlast a shift on a kitchen tablet, shorter than a day so a device
     # left on the counter overnight is not still signed in.
     STAFF_SESSION_TTL_MINUTES: int = 720
+    # Guest customers -- ordering without an account. Long, because this
+    # cookie is the only thing that can find a guest's order again: losing it
+    # loses the pickup PIN and the tracking page with it. Nothing is
+    # authenticated here, so it grants no more than the orders it created.
+    GUEST_SESSION_TTL_MINUTES: int = 43200  # 30 days
+    # How long an abandoned guest row is kept -- one that was created by
+    # "continue as guest" and never reached an order. Comfortably longer than
+    # the session above, so a guest who comes back to a live cookie still
+    # finds their identity. Guests that did order are never swept. 0 disables.
+    GUEST_RETENTION_DAYS: int = 45
 
     # --- Stripe -----------------------------------------------------------
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_CONNECT_WEBHOOK_SECRET: str = ""
+    # Zenoeats' cut of each order, taken as a Stripe application fee on the
+    # restaurant's direct charge: a percentage in basis points (250 = 2.5%)
+    # plus a fixed amount in minor units (30 = $0.30). Both 0 means no fee.
+    # Applied when the PaymentIntent is created, so a change affects orders
+    # paid after it, never one already paid.
+    PLATFORM_FEE_BPS: int = 0
+    PLATFORM_FEE_FIXED_MINOR: int = 0
 
     # --- Crypto -----------------------------------------------------------
     # Fernet key. Generate with:
@@ -74,9 +114,88 @@ class Settings(BaseSettings):
     # --- Order policy -----------------------------------------------------
     PENDING_PAYMENT_TTL_MINUTES: int = 30
     IDEMPOTENCY_TTL_HOURS: int = 24
+    # How long a processed or ignored Stripe/Clerk webhook delivery is kept
+    # before the retention sweep removes it. Unprocessed and failed rows are
+    # never removed. 0 keeps everything forever.
+    WEBHOOK_EVENT_RETENTION_DAYS: int = 365
     MAX_ITEMS_PER_ORDER: int = 50
 
-    CORS_ORIGINS: str = "*"
+    # --- Images -----------------------------------------------------------
+    # Where uploaded menu images are written, and the directory /images/ is
+    # served from. A folder on disk rather than a bucket: one node, one
+    # place, nothing to sign. What goes in the database is a relative key,
+    # never a URL, so moving to object storage later rewrites this writer and
+    # leaves every row alone.
+    #
+    # The default is <repo>/images, which is what the API uses when it runs
+    # natively on the host. Compose overrides it with the path that same
+    # folder is bind-mounted at inside the container, so a containerised API
+    # and a native one read and write exactly the same bytes.
+    IMAGES_DIR: Path = REPO_ROOT / "images"
+    # What an image key is appended to when the API hands a URL to a browser.
+    # Relative by default: the storefront and portal reach the API's /images
+    # through the same origin they load from. Moving to object storage later
+    # means pointing this at the bucket's public domain, and nothing stored
+    # in the database changes, because rows hold keys and never URLs.
+    IMAGES_PUBLIC_BASE: str = "/images"
+
+    # --- Email (Resend) ---------------------------------------------------
+    # Order confirmations and staff invitations. Empty key means nothing is
+    # sent; each message is logged (without its contents) instead.
+    RESEND_API_KEY: str = ""
+    # Must be on a domain verified in Resend, e.g. "Zenoeats <orders@zenoeats.com>".
+    EMAIL_FROM: str = "Zenoeats <no-reply@zenoeats.local>"
+    EMAIL_REPLY_TO: str = ""
+    # How links in emails reach a restaurant's storefront or portal. {slug}
+    # and {root_domain} are filled in. Development behind nginx:
+    # http://{slug}.{root_domain}:8080
+    STOREFRONT_URL_TEMPLATE: str = "https://{slug}.{root_domain}"
+
+    # --- Geocoding (delivery) ---------------------------------------------
+    # Turning a customer's address into a distance from the restaurant, to
+    # find which delivery ring it falls in. Empty key means delivery cannot be
+    # switched on: a fee guessed without a distance is a fee charged wrongly.
+    #
+    # Google's terms allow caching a result for about 30 days rather than
+    # keeping it, so coordinates live in Redis with that TTL and only the
+    # derived distance and fee are kept on an order.
+    GEOCODING_PROVIDER: str = "google"
+    GOOGLE_MAPS_API_KEY: str = ""
+    # Seconds. Google permits 30 days; shorter is always safe.
+    GEOCODE_CACHE_TTL_SECONDS: int = 30 * 24 * 60 * 60
+    # A lookup sits on the checkout path, so it fails fast rather than
+    # holding a customer at a spinner.
+    GEOCODE_TIMEOUT_SECONDS: float = 4.0
+
+    # --- Live delivery tracking ---------------------------------------------
+    # The map on a customer's order page. Unlike GOOGLE_MAPS_API_KEY, which
+    # stays on the server, this key ships to every browser: restrict it in the
+    # Google Cloud console to the Maps JavaScript API and to your storefront
+    # domains. Empty means the page shows the timeline without a map.
+    GOOGLE_MAPS_BROWSER_KEY: str = ""
+    # A Map ID from the Google Cloud console, which the markers need.
+    # DEMO_MAP_ID works for development only.
+    GOOGLE_MAPS_MAP_ID: str = "DEMO_MAP_ID"
+    # A driver's position older than this is not shown: a phone that stopped
+    # reporting must not look like a driver parked on the road.
+    DRIVER_LOCATION_STALE_SECONDS: int = 120
+    # Driving time to the customer, from Google's Routes API with the server
+    # key. Asked at most this often per order, however many tabs are polling,
+    # because each ask is billed.
+    DELIVERY_ETA_REFRESH_SECONDS: int = 30
+    ROUTES_TIMEOUT_SECONDS: float = 4.0
+
+    # --- Error tracking ---------------------------------------------------
+    # Sentry. Empty DSN means off. See core/observability for what is and is
+    # not sent.
+    SENTRY_DSN: str = ""
+    # Defaults to ENV. Set it to tell staging and production apart when both
+    # run with ENV=production.
+    SENTRY_ENVIRONMENT: str = ""
+    # Share of requests traced for performance. 0 sends errors only.
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+    # Build identifier (a git tag or commit), attached to every event.
+    RELEASE: str = ""
 
 
 @lru_cache

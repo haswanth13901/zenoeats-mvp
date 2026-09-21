@@ -47,24 +47,31 @@ async def stripe_connect_webhook(
         return Response(status_code=400, content='{"code":"INVALID_SIGNATURE"}',
                         media_type="application/json")
 
+    # Everything below reads the plain dict, never the Event object.
+    # stripe-python's Event supports __getitem__ but raises on .get(), and
+    # mixing the two is what silently broke this endpoint: .get("account")
+    # threw AttributeError, the handler 500'd, and because the webhook is the
+    # only thing that can mark an order PAID, every payment stayed pending
+    # while Stripe had already taken the money. One shape, one access.
     event_dict = event.to_dict() if hasattr(event, "to_dict") else dict(event)
+    event_type = event_dict.get("type", "")
     row_id = None
 
     with system_session() as session:
         row = StripeEvent(
-            stripe_event_id=event["id"],
-            type=event["type"],
+            stripe_event_id=event_dict["id"],
+            type=event_type,
             payload=event_dict,
             status=(
                 StripeEventStatus.RECEIVED.value
-                if event["type"] in SUPPORTED_STRIPE_EVENTS
+                if event_type in SUPPORTED_STRIPE_EVENTS
                 else StripeEventStatus.IGNORED.value
             ),
             received_at=utcnow(),
             # Connect events carry the connected account. Rule 25: this is
             # the value the worker must match against the restaurant's
             # configured account before touching tenant state.
-            stripe_account_id=event.get("account"),
+            stripe_account_id=event_dict.get("account"),
         )
         session.add(row)
         try:
@@ -75,7 +82,7 @@ async def stripe_connect_webhook(
             # Duplicate delivery. Stripe retries aggressively and this is the
             # normal case, not an error. 200 and stop.
             session.rollback()
-            log.info("duplicate stripe event %s", event["id"])
+            log.info("duplicate stripe event %s", event_dict["id"])
             return {"received": True, "duplicate": True}
 
     if row_id and should_process:
@@ -96,8 +103,22 @@ async def clerk_webhook(request: Request):
     payload = await request.body()
     headers = {k.lower(): v for k, v in request.headers.items()}
 
+    # Building the verifier and using it fail for different reasons and
+    # deserve different answers. svix base64-decodes the secret in its
+    # constructor and raises a plain binascii error there, not a
+    # WebhookVerificationError, so an unset or malformed secret used to
+    # escape the handler as an opaque 500.
     try:
-        verified = Webhook(settings.CLERK_WEBHOOK_SECRET).verify(payload, headers)
+        verifier = Webhook(settings.CLERK_WEBHOOK_SECRET)
+    except Exception:
+        # Our misconfiguration, not a bad request. 503 so Svix keeps the
+        # delivery and retries once the secret is actually set.
+        log.error("CLERK_WEBHOOK_SECRET is missing or malformed; cannot verify webhooks")
+        return Response(status_code=503, content='{"code":"WEBHOOK_NOT_CONFIGURED"}',
+                        media_type="application/json")
+
+    try:
+        verified = verifier.verify(payload, headers)
     except WebhookVerificationError:
         log.warning("rejected clerk webhook: bad signature")
         return Response(status_code=400, content='{"code":"INVALID_SIGNATURE"}',

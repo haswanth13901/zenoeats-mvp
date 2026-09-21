@@ -6,6 +6,7 @@ Rule 6: no external network call inside a database transaction.
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
@@ -23,6 +24,20 @@ from app.models import (
 from app.services.pricing import PricedCart
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DeliveryDetails:
+    """Where an order is going, and how far that turned out to be.
+
+    Built from a priced delivery quote by the caller. The fee is not here: it
+    travels on the cart, because it is part of what the customer is charged
+    and has to have gone through the same pricing as everything else they are
+    about to pay for.
+    """
+
+    address: str
+    miles: float
 
 
 def allocate_order_number(session: Session, restaurant_id: UUID) -> int:
@@ -60,22 +75,37 @@ def create_pending_order(
     customer_user_id: UUID,
     cart: PricedCart,
     customer_note: str | None,
+    delivery: "DeliveryDetails | None" = None,
+    contact_name: str | None = None,
+    contact_phone: str | None = None,
 ) -> Order:
     """Create the order and its immutable snapshots. Commits nothing.
 
     The order is PENDING_PAYMENT. No money has moved and no Stripe call has
     been made. That happens in a separate request, after this transaction
     commits.
+
+    delivery is where it is going and how far, priced already: the fee rides
+    on the cart, because it is part of what the customer is about to be
+    charged and must have gone through the same pricing the total did.
     """
     if not restaurant.is_orderable:
         raise errors.restaurant_not_orderable()
+
+    # A fee with nowhere to deliver to is a bug rather than a cheap order, and
+    # the database refuses it too. Caught here so it names itself.
+    if cart.delivery_fee_minor and delivery is None:
+        raise errors.validation_error("A delivery fee needs a delivery address.")
 
     now = utcnow()
     order = Order(
         restaurant_id=restaurant.id,
         order_number=allocate_order_number(session, restaurant.id),
         customer_user_id=customer_user_id,
-        fulfillment_type="PICKUP",
+        fulfillment_type="DELIVERY" if delivery else "PICKUP",
+        delivery_address=delivery.address if delivery else None,
+        delivery_fee_minor=cart.delivery_fee_minor if delivery else 0,
+        delivery_miles=delivery.miles if delivery else None,
         status=OrderStatus.PENDING_PAYMENT.value,
         payment_method=PaymentMethod.STRIPE.value,
         currency=cart.currency,
@@ -83,7 +113,10 @@ def create_pending_order(
         discount_minor=cart.discount_minor,
         tax_minor=cart.tax_minor,
         total_minor=cart.total_minor,
+        tax_calculation_id=cart.tax_calculation_id,
         customer_note=customer_note,
+        contact_name=contact_name,
+        contact_phone=contact_phone,
         pickup_pin_encrypted=encrypt_field(generate_pickup_pin()),
         expires_at=now + timedelta(minutes=settings.PENDING_PAYMENT_TTL_MINUTES),
     )
@@ -100,6 +133,12 @@ def create_pending_order(
             quantity=line.quantity,
             line_total_minor=line.line_total_minor,
             item_note=line.note,
+            # Null on an ordinary line. Set on the lines a combo produced, so
+            # the kitchen plates a meal deal as one thing and a receipt can
+            # show what the deal was even after it is withdrawn.
+            combo_id=line.combo_id,
+            combo_name_snapshot=line.combo_name,
+            combo_group=line.combo_group,
         )
         session.add(order_item)
         session.flush()

@@ -10,6 +10,7 @@ In particular org_id in the token is a hint. It is never the tenant key.
 """
 
 import logging
+import re
 from dataclasses import dataclass
 
 import jwt
@@ -26,9 +27,29 @@ def _jwks() -> PyJWKClient:
     global _jwk_client
     if _jwk_client is None:
         if not settings.CLERK_JWKS_URL:
-            raise RuntimeError("CLERK_JWKS_URL is not configured")
+            # Our misconfiguration, but answered as a refused session rather
+            # than a 500: the storefront then sends the customer to sign in,
+            # and the log line says why that will not work.
+            log.error("CLERK_JWKS_URL is not configured; no customer can be authenticated")
+            raise AuthError("Customer sign-in is not configured.")
         _jwk_client = PyJWKClient(settings.CLERK_JWKS_URL, cache_keys=True)
     return _jwk_client
+
+
+def _authorized_party_is_ours(azp: str) -> bool:
+    """Whether the page a session token was minted for is one of ours.
+
+    Clerk stamps `azp` with the origin that asked for the token. Checking it is
+    Clerk's own recommendation: without it, a token obtained by some other site
+    running against the same Clerk instance would be accepted here.
+    """
+    scheme, sep, host = azp.partition("://")
+    if not sep or scheme not in ("http", "https"):
+        return False
+    pattern = (
+        r"^(?:[a-z0-9-]+\.)*" + re.escape(settings.ROOT_DOMAIN.lower()) + r"(?::\d{1,5})?$"
+    )
+    return bool(re.match(pattern, host.lower()))
 
 
 @dataclass(frozen=True)
@@ -66,6 +87,11 @@ def verify_clerk_token(token: str) -> ClerkPrincipal:
     except jwt.PyJWTError as exc:
         log.info("clerk token rejected: %s", type(exc).__name__)
         raise AuthError("Invalid or expired session.") from exc
+
+    azp = claims.get("azp")
+    if azp and not _authorized_party_is_ours(str(azp)):
+        log.warning("clerk token minted for a foreign origin: %r", str(azp)[:120])
+        raise AuthError("Invalid or expired session.")
 
     return ClerkPrincipal(
         clerk_user_id=claims["sub"],

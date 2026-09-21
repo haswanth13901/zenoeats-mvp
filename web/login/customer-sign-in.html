@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-surface="customer">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in to order</title>
+    <!-- Render-blocking on purpose, as on the portal login pages: a link in the
+         head blocks first paint until the stylesheet lands, instead of
+         painting unstyled while the script graph loads. -->
+    <link rel="stylesheet" href="/src/styles/globals.css" />
+    <!-- Runtime configuration (the Clerk publishable key), written by the web
+         container at startup. A classic script, so it runs before the module
+         entry below reads it. -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <main class="auth">
+      <!-- Decoration beside the form from 1024px up. Static: no motion. -->
+      <aside class="auth-art" aria-hidden="true">
+        <div class="auth-brand"><span class="brand-mark" data-wordmark-mark>Z</span><span data-wordmark-name>Zenoeats</span></div>
+        <div>
+          <div class="cloche ml-10 mt-10 scale-150"><span class="cloche-plate"></span><span class="cloche-dome"></span><span class="cloche-knob"></span></div>
+          <p class="auth-art-caption">Good food.<br />A little closer.</p>
+        </div>
+        <p class="auth-art-foot text-caption">From their kitchen to your hands.</p>
+      </aside>
+
+      <section class="auth-form">
+        <div class="auth-brand"><span class="brand-mark" aria-hidden="true" data-wordmark-mark>Z</span><span data-wordmark-name>Zenoeats</span></div>
+        <h1 id="heading">Sign in to order</h1>
+        <p class="auth-intro">
+          Browsing is open to everyone. An account is how your order and its pickup PIN
+          find their way back to you.
+        </p>
+
+        <p id="error" class="note-error mb-5" role="alert" hidden></p>
+
+        <section id="password-section">
+          <!-- One button per social sign-in switched on in Clerk (Google, Apple,
+               Facebook), rendered by customer-shared.ts. Hidden when there are none. -->
+          <section id="social-section" class="mb-[17px]" hidden>
+            <div id="social-buttons" class="flex flex-col gap-[9px]"></div>
+            <div class="divider mt-[17px]">or</div>
+          </section>
+
+          <form id="login-form" class="auth-stack" novalidate>
+            <label class="block">
+              <span class="label">Email</span>
+              <input id="email" class="field mt-[7px]" type="email" autocomplete="username" required />
+            </label>
+
+            <label class="block">
+              <span class="label flex items-baseline justify-between">
+                Password
+                <a id="forgot" class="text-caption font-normal text-muted underline underline-offset-[3px] hover:text-ink" href="/account/forgot-password">Forgot password?</a>
+              </span>
+              <input id="password" class="field mt-[7px]" type="password" autocomplete="current-password" required />
+            </label>
+
+            <button id="submit" class="btn-primary w-full" type="submit" disabled>Sign in</button>
+          </form>
+
+          <p class="auth-foot">
+            New here?
+            <a id="sign-up" class="text-ink underline underline-offset-[3px]" href="/account/sign-up">Create an account</a>
+          </p>
+
+          <!-- Ordering without an account. Last on the page and quieter than the
+               form above it, because an account is the better outcome for
+               anyone who will order twice -- but the counter still wants the
+               order of someone who will not. Revealed once a restaurant is
+               known: a guest session belongs to the restaurant being ordered
+               from, so on the platform root there is nothing to be a guest
+               of. It never waits on Clerk: this is the way through when the
+               sign-in service is unreachable or unconfigured. -->
+          <section id="guest-section" class="mt-[25px] border-t border-hairline pt-[25px] sm:mt-[30px]" aria-labelledby="guest-heading" hidden>
+            <h2 id="guest-heading" class="mb-2.5 font-display text-[22px] leading-[1.3]">Order without an account</h2>
+            <p class="text-caption text-muted">
+              We'll email your receipt and the link to your order. Keep this browser:
+              it's the only thing that can open your pickup PIN again.
+            </p>
+
+            <p id="guest-error" class="note-error mt-4" role="alert" hidden></p>
+
+            <form id="guest-form" class="auth-stack mt-4" novalidate>
+              <label class="block">
+                <span class="label text-caption">Email</span>
+                <input id="guest-email" class="field mt-[7px]" type="email" autocomplete="email" required />
+              </label>
+
+              <label class="block">
+                <span class="label text-caption">
+                  Name <span class="font-normal text-muted">(optional)</span>
+                </span>
+                <input id="guest-name" class="field mt-[7px]" type="text" autocomplete="name" maxlength="160" />
+              </label>
+
+              <button id="guest-submit" class="btn-quiet w-full" type="submit">
+                Continue as guest
+              </button>
+            </form>
+          </section>
+        </section>
+
+        <!-- The second step of signing in, when Clerk asks for one: an
+             authenticator app, a text message, an emailed code (also what a
+             new device is asked for), or a backup code. customer-sign-in.ts
+             fills in the wording for whichever it is, and offers the others. -->
+        <section id="code-section" hidden>
+          <p id="code-intro" class="auth-intro"></p>
+          <form id="code-form" class="auth-stack" novalidate>
+            <label class="block">
+              <span id="code-label" class="label">Verification code</span>
+              <input id="code" class="field code-input mt-[7px]" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required />
+            </label>
+            <button id="code-submit" class="btn-primary w-full" type="submit">Continue</button>
+          </form>
+          <div id="code-alternatives" class="mt-4 flex flex-col items-start"></div>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/login/customer-sign-in.ts"></script>
+  </body>
+</html>
