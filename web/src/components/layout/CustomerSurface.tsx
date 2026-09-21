@@ -1,7 +1,8 @@
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { usePortalQuery } from "@/features/storefront/storefrontApi";
 import { CustomerFooter } from "@/features/storefront/components/CustomerFooter";
 import { attachFont, themeVariables } from "@/features/storefront/theme";
+import { rememberRestaurantName } from "@/utils/restaurantName";
 import { Outlet } from "react-router-dom";
 
 /**
@@ -16,6 +17,10 @@ import { Outlet } from "react-router-dom";
 export function CustomerSurface() {
   const { data } = usePortalQuery();
   const theme = data?.storefront?.theme ?? null;
+  // Kept for the sign-in pages, which are served without the app and would
+  // otherwise show the platform's name until they had asked for this one.
+  const restaurantName = data?.name;
+  useEffect(() => rememberRestaurantName(restaurantName), [restaurantName]);
   useLayoutEffect(() => {
     const root = document.documentElement;
     const vars = themeVariables(theme);
