@@ -175,9 +175,17 @@ Stripe Dashboard).
       and failed deliveries are never removed. `app/services/retention.py`.
 - [x] **[SOON] Dead setting.** *(code)* *Fixed:* `CORS_ORIGINS` removed.
 - [x] **[SOON] Staff onboarding emails.** *(code)* *Fixed:* inviting someone
-      emails them the restaurant, their role and the sign-in link. The
-      temporary password is never emailed; the admin still passes it on, so
-      a forwarded invitation alone does not open the account.
+      emails them the restaurant, their role, the sign-in link and — for a
+      new login — the temporary password.
+      **Decided (2026-09-21):** the password is emailed, reversing the earlier
+      rule that the admin pass it on by hand. The cost is that whoever reads
+      that email can sign in first, and a forwarded invitation now opens the
+      account. What bounds it: the password must be replaced at first
+      sign-in and stops working then, it is only included while that is still
+      pending, and it is sealed with `FIELD_ENCRYPTION_KEY` while it sits in
+      the Celery queue so the broker's on-disk log never holds it in plain
+      text. Password resets and super-admin-created owners are still not
+      emailed.
 
 ### 2.6 Admin portal (found by an end-to-end pass over the live portal)
 

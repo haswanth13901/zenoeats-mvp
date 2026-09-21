@@ -363,12 +363,24 @@ def send_order_confirmation(self, restaurant_id: str, order_id: str):
     bind=True, max_retries=6, default_retry_delay=60,
     name="app.workers.tasks.send_staff_invitation",
 )
-def send_staff_invitation(self, restaurant_id: str, membership_id: str):
-    """Email someone that a restaurant has invited them to its team."""
+def send_staff_invitation(
+    self, restaurant_id: str, membership_id: str, sealed_password: str | None = None
+):
+    """Email someone that a restaurant has invited them to its team.
+
+    `sealed_password` is the temporary password the invitation issued,
+    encrypted with the field key for its time in the queue. Absent for an
+    existing login, for an owner invitation, and for any task queued before
+    invitations carried one -- which is why it defaults.
+    """
+    from app.core import crypto
     from app.services import email, notifications
 
+    temporary_password = crypto.decrypt_field(sealed_password) if sealed_password else None
     try:
-        return notifications.send_staff_invitation(UUID(restaurant_id), UUID(membership_id))
+        return notifications.send_staff_invitation(
+            UUID(restaurant_id), UUID(membership_id), temporary_password
+        )
     except email.RetryableEmailError as exc:
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
 

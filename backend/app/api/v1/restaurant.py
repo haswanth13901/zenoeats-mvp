@@ -20,7 +20,7 @@ from app.api.deps import (
     current_staff_user_ready, require_staff, resolve_tenant_staff,
 )
 from app.config import settings
-from app.core import errors, staff_auth
+from app.core import crypto, errors, staff_auth
 from app.core.logsafe import email_for_log
 from app.core import ratelimit
 from app.core.ratelimit import per_ip, per_staff_user
@@ -3587,7 +3587,7 @@ def invite_staff(
         existing.revoked_at = None
         existing.accepted_at = None
         db.flush()
-        background.add_task(_queue_staff_invitation, restaurant.id, existing.id)
+        background.add_task(_queue_staff_invitation, restaurant.id, existing.id, temp_password)
         return StaffInviteOut(
             id=existing.id, email=email, status=existing.status,
             temporary_password=temp_password, email_configured=email_service.configured(),
@@ -3603,24 +3603,32 @@ def invite_staff(
     )
     db.add(invite)
     db.flush()
-    background.add_task(_queue_staff_invitation, restaurant.id, invite.id)
+    background.add_task(_queue_staff_invitation, restaurant.id, invite.id, temp_password)
     return StaffInviteOut(
         id=invite.id, email=email, status=invite.status, temporary_password=temp_password,
         email_configured=email_service.configured(),
     )
 
 
-def _queue_staff_invitation(restaurant_id, membership_id) -> None:
+def _queue_staff_invitation(restaurant_id, membership_id, temporary_password=None) -> None:
     """Hand the invitation email to the worker, after the response is sent --
     by which point the membership row has committed and the task can read it.
+
+    The temporary password, when this invitation issued one, goes with it so
+    the email can carry it. It exists in plain text only here: the database
+    keeps its argon2 hash, so the worker cannot look it up. It is sealed with
+    the field key before it is queued, because the broker persists what it
+    holds to disk (redis-broker runs with AOF) and a password there would
+    outlive the invitation by as long as the file does.
 
     Best effort: the invitation itself already exists, and the admin has the
     sign-in details on screen. A broker outage costs the email, not the invite.
     """
     from app.workers.tasks import send_staff_invitation
 
+    sealed = crypto.encrypt_field(temporary_password) if temporary_password else None
     try:
-        send_staff_invitation.delay(str(restaurant_id), str(membership_id))
+        send_staff_invitation.delay(str(restaurant_id), str(membership_id), sealed)
     except Exception:
         log.warning("could not queue the staff invitation email", exc_info=True)
 
