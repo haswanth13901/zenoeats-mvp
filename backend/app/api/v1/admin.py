@@ -37,6 +37,7 @@ from app.schemas.api import (
     UpdateRestaurantIn,
 )
 from app.services import images, restaurant_profile, stripe_service, stripe_tax
+from app.services import email as email_service
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["super-admin"])
@@ -703,7 +704,8 @@ def create_restaurant_owner(
         background.add_task(_queue_owner_invitation, restaurant_id, membership_id)
 
     return CreateOwnerOut(
-        user_id=user_id, email=email, temporary_password=temp_password, status=status
+        user_id=user_id, email=email, temporary_password=temp_password, status=status,
+        email_configured=email_service.configured(),
     )
 
 
@@ -775,7 +777,7 @@ def reset_owner_password(
 
     return CreateOwnerOut(
         user_id=user_id, email=email, temporary_password=temp_password,
-        status=membership_status,
+        status=membership_status, email_configured=email_service.configured(),
     )
 
 

@@ -18,8 +18,16 @@ def test_a_blocked_loop_is_logged_with_its_stack(caplog):
         try:
             await asyncio.sleep(stall_watch.TICK_SECONDS * 2)
             _block_the_loop_on_purpose()
-            # Give the watcher a couple of ticks to see the loop running again.
-            await asyncio.sleep(stall_watch.TICK_SECONDS * 3)
+            # Wait for the watcher to see the loop running again, rather than
+            # for a fixed number of ticks. Its thread is scheduled by the OS,
+            # and on a machine short of memory three ticks came and went
+            # before it looked -- the test failed on a slow host, which is
+            # the one situation this code exists for.
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not any(
+                r.getMessage().startswith("event loop running again") for r in caplog.records
+            ):
+                await asyncio.sleep(stall_watch.TICK_SECONDS)
         finally:
             stop.set()
 

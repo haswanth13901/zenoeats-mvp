@@ -78,6 +78,9 @@ export type IssuedCredential = {
   temporary_password: string | null;
   /** ACTIVE, or INVITED when they must sign in and accept first. */
   status: "ACTIVE" | "INVITED";
+  /** Whether an invitation email is on its way. False when no email
+   *  provider is configured: nothing is sent. */
+  email_configured: boolean;
 };
 
 export type StripeSync = {

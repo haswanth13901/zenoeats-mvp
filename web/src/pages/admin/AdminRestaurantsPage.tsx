@@ -45,6 +45,7 @@ export function AdminRestaurantsPage() {
     email: string;
     password: string | null;
     status: "ACTIVE" | "INVITED";
+    emailConfigured: boolean;
     restaurant: Restaurant;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,6 +158,7 @@ export function AdminRestaurantsPage() {
             email={issued.email}
             password={issued.password}
             status={issued.status}
+            emailConfigured={issued.emailConfigured}
             restaurant={issued.restaurant}
             onDismiss={() => setIssued(null)}
           />
@@ -187,6 +189,7 @@ export function AdminRestaurantsPage() {
                   email: res.email,
                   password: res.temporary_password,
                   status: res.status,
+                  emailConfigured: res.email_configured,
                   restaurant: ownerFor,
                 });
                 setOwnerFor(null);
@@ -201,6 +204,7 @@ export function AdminRestaurantsPage() {
                   email: res.email,
                   password: res.temporary_password,
                   status: res.status,
+                  emailConfigured: res.email_configured,
                   restaurant: ownerFor,
                 });
                 setOwnerFor(null);

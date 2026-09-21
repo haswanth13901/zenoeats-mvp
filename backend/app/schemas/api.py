@@ -536,6 +536,10 @@ class StaffInviteOut(BaseModel):
     # restaurant admin to pass on, like an owner's; never retrievable again.
     # Null means the address already has a staff login, which they keep using.
     temporary_password: str | None = None
+    # Whether an invitation email is on its way. False when no email provider
+    # is configured, so the portal can say so and the admin passes the
+    # sign-in link on themselves, instead of being told it was emailed.
+    email_configured: bool = False
 
 
 class CreateOwnerIn(BaseModel):
@@ -554,6 +558,10 @@ class CreateOwnerOut(BaseModel):
     temporary_password: str | None
     # ACTIVE, or INVITED for an existing login that has to accept first.
     status: str = "ACTIVE"
+    # Whether an invitation email is on its way, for an existing login that
+    # was invited rather than issued a password. False when no email provider
+    # is configured, so the portal does not claim one was sent.
+    email_configured: bool = False
 
 
 class UpdateRestaurantIn(BaseModel):
