@@ -17,6 +17,7 @@ pointing at pictures that are gone.
 """
 
 import io
+import pathlib
 import uuid
 from types import SimpleNamespace
 
@@ -438,3 +439,63 @@ def test_an_options_picture_follows_the_same_rules(released):
             option.id, ModifierOptionUpdateIn(image_path=stored()),  # an item's picture
             restaurant=RESTAURANT_ROW, db=FakeDb(option),
         )
+
+
+# ----------------------------------------------------------- serving ---
+
+@pytest.mark.integration
+def test_a_served_image_may_be_kept_for_a_year():
+    """The header, not the ETag, is what stops the asking.
+
+    Without a Cache-Control the answer still carried an ETag, so a browser
+    asked about every photograph on every view and was told 304 each time. A
+    menu with thirty pictures paid thirty round trips to learn nothing had
+    changed. These files are immutable by construction -- a random key per
+    upload, written once -- so there is nothing to revalidate.
+
+    Writes into the folder the mounted app is actually serving rather than
+    the fixture's temporary one. The mount reads IMAGES_DIR once, when
+    app.main is first imported, which in a full run is long before this test
+    patches it.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.main import IMAGE_CACHE_CONTROL, app
+
+    served = next(
+        route.app.directory for route in app.routes
+        if getattr(route, "name", None) == "images"
+    )
+    path = pathlib.Path(served) / images.new_key(RESTAURANT, ImageKind.ITEMS)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(images.process(encoded()))
+    url = "/images/" + path.relative_to(served).as_posix()
+
+    try:
+        with TestClient(app) as client:
+            first = client.get(url)
+            assert first.status_code == 200, first.text
+            assert first.headers["content-type"] == "image/webp"
+            assert first.headers["cache-control"] == IMAGE_CACHE_CONTROL
+
+            # And a conditional request still says so, rather than dropping
+            # the instruction on the way through the 304.
+            again = client.get(url, headers={"If-None-Match": first.headers["etag"]})
+            assert again.status_code == 304
+            assert again.headers["cache-control"] == IMAGE_CACHE_CONTROL
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@pytest.mark.integration
+def test_a_missing_image_is_not_cached_as_one():
+    """A 404 must not be kept for a year: an image uploaded a moment later
+    would be invisible until the cache expired."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        missing = client.get(f"/images/{images.new_key(RESTAURANT, ImageKind.ITEMS)}")
+        assert missing.status_code == 404
+        assert "cache-control" not in missing.headers

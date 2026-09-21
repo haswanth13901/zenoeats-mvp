@@ -247,9 +247,37 @@ except OSError:
         "could not create the images directory at %s", settings.IMAGES_DIR, exc_info=True
     )
 
+
+# How long a browser, and anything caching in front of us, may keep an image
+# without asking again. A year, and "immutable" on top of it, because these
+# files genuinely are: services/images mints a random key per upload and
+# writes it once, and a key is released only when no row refers to it any
+# more. The bytes at a key never change, so there is nothing to revalidate.
+#
+# Without this the answer carried an ETag and no Cache-Control, which is the
+# weakest useful form of caching: the browser still asks every time and is
+# told 304. A menu with thirty photographs therefore cost thirty round trips
+# on every view -- from a phone, on restaurant wifi -- to be told nothing had
+# changed, and a CDN in front had no instruction to answer them instead.
+IMAGE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+
+class ImmutableImages(StaticFiles):
+    """StaticFiles that says how long its files keep.
+
+    Starlette's NotModifiedResponse carries cache-control through, so setting
+    it here covers the 304 as well as the 200.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = IMAGE_CACHE_CONTROL
+        return response
+
+
 app.mount(
     "/images",
-    StaticFiles(directory=settings.IMAGES_DIR, check_dir=False),
+    ImmutableImages(directory=settings.IMAGES_DIR, check_dir=False),
     name="images",
 )
 

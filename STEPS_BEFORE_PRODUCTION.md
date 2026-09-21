@@ -390,10 +390,50 @@ provider page in Clerk shows the **redirect URI** to paste into the provider.
       checkouts every 5 minutes).
 - [ ] **[BLOCKER] Secrets**: keep the production `.env` / secret files outside
       images and outside git; restrict who can read them.
-- [ ] **[LAUNCH] Menu images**: stored on the API host's disk (`IMAGES_DIR`).
-      Put that directory on persistent storage that is backed up, or move to
-      object storage (set `IMAGES_PUBLIC_BASE` to the bucket's public domain).
-      Past one API host, local disk no longer works.
+### Menu images
+
+**Decided: launch on the API host's disk.** Not because object storage is
+wrong, but because moving is cheap *later* and expensive to justify now.
+Rows store keys and never URLs, `IMAGES_PUBLIC_BASE` already accepts an
+absolute URL, and the whole of storage is one class with five methods — so
+the move is "copy the directory into a bucket, change one setting", with no
+database change and no cutover logic. Adding a provider, credentials and a
+new failure mode before the first real customer buys nothing.
+
+What that decision costs, and therefore what is not optional:
+
+- [ ] **[BLOCKER] `IMAGES_DIR` on persistent storage that is backed up.**
+      Losing the disk loses every menu photograph irrecoverably, and the rows
+      keep their keys — so every storefront renders broken images rather than
+      degrading. A container filesystem is not persistent storage.
+- [ ] **[BLOCKER] The restore drill (§5) covers the images directory too,**
+      restored to the same point in time as the database. A database restored
+      newer than the image folder points at files that do not exist.
+- [ ] **[LAUNCH] Accept one API machine.** `API_WORKERS` still uses every
+      core on that host, so this is a limit on machines, not on processes.
+      Images written on one host are invisible to another.
+
+**Move to object storage when either happens** — whichever comes first, and
+the second is the easier one to ignore:
+
+1. You need a second API host.
+2. The backup and restore-consistency discipline above starts slipping.
+
+Cloudflare R2 is worth preferring over S3 here: image serving is egress, and
+R2 does not charge for it. Whatever the provider, disable bucket listing —
+keys are unguessable, which is the whole of the protection — and check
+`delete_restaurant` still purges properly, since it becomes a list-and-delete
+rather than a directory removal.
+
+- [x] **[LAUNCH] Images are cacheable.** *(code)* They are served with
+      `Cache-Control: public, max-age=31536000, immutable`, which they had
+      none of. An ETag alone is the weakest useful caching: the browser still
+      asked about every photograph on every view and was told 304, so a menu
+      with thirty pictures cost thirty round trips from a phone on restaurant
+      wifi, and a CDN in front had no instruction to answer them instead. The
+      files are immutable by construction — a random key per upload, written
+      once, released only when no row refers to it. `app/main.py`,
+      `tests/test_images.py`.
 
 ---
 
