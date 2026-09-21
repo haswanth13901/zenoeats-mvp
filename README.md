@@ -516,6 +516,58 @@ Agreement is asked for in three places and recorded in one:
 Bump `CURRENT_VERSION` in `app/services/terms.py` when the wording changes
 materially; every customer re-agrees on their next order.
 
+## Email
+
+Two senders, for two different kinds of email:
+
+| Email | Sent by | Set up in |
+|---|---|---|
+| Customer verification and password-reset codes | Clerk | Clerk's dashboard (templates, branding) |
+| Staff and owner invitations | Zenoeats, through Resend | `.env` |
+| Order confirmations | Zenoeats, through Resend | `.env` |
+
+Clerk cannot send the last two: staff are not Clerk users — they sign in
+with passwords the platform issues — and Clerk sends no business email.
+
+Resend is optional. With `RESEND_API_KEY` empty nothing is sent: the worker
+logs each skipped email, and the portal says no invitation went out so the
+admin passes the sign-in link on by hand. What is lost without it is a
+branded order confirmation and, for a guest, the private link in it that
+reopens their order and pickup PIN on another device. Stripe can still email
+a payment receipt — the app already gives it the customer's address — once
+"email customers for successful payments" is on in each restaurant's Stripe
+settings.
+
+**Turning it on.** Put a key from resend.com › API Keys in `.env`, then
+recreate the two containers that read it — a running container keeps the
+environment it started with:
+
+```
+docker compose --profile app up -d --force-recreate api worker
+```
+
+Until a domain of yours is verified in Resend › Domains, the only sender
+Resend allows is `onboarding@resend.dev`, and it delivers only to the address
+the Resend account is registered with; any other recipient is refused, and the
+worker logs the refusal. That is enough to see an invitation arrive in your
+own inbox. For real staff and customers, verify the domain and set:
+
+```
+EMAIL_FROM=Zenoeats <orders@yourdomain.com>
+EMAIL_REPLY_TO=an-inbox-you-read@yourdomain.com
+STOREFRONT_URL_TEMPLATE=https://{slug}.{root_domain}
+```
+
+`STOREFRONT_URL_TEMPLATE` is where links inside emails point. Development is
+`http://{slug}.{root_domain}:8080`, through nginx; getting it wrong sends
+people a sign-in link that goes nowhere.
+
+**Checking it.** Each attempt is in the worker's log, sent or not:
+
+```
+docker compose --profile app logs worker | Select-String "invitation|confirmation|RESEND"
+```
+
 ## Development without Clerk
 
 For backend work you can skip Clerk entirely:
