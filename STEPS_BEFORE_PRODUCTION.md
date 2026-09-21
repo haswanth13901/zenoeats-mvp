@@ -476,19 +476,48 @@ Every setting the backend reads, with what it must be in production.
 
 ## 9. Legal and business
 
-- [ ] **[BLOCKER]** **Privacy policy** and **Terms of service** published at
-      stable URLs (Google, Facebook and Apple sign-in all require them).
-- [ ] **[BLOCKER]** **Data deletion instructions** page (required by Facebook
-      Login), and a real process behind it: delete in Clerk → `user.deleted`
-      webhook soft-deletes the customer; decide what happens to their orders.
-- [ ] **[LAUNCH]** **Refund and cancellation policy** shown at checkout, and
-      restaurants told that refunds are issued from their own Stripe
-      Dashboard.
+The pages now exist and are wired up *(code)*: `/legal/privacy`,
+`/legal/terms`, `/legal/refunds` and `/legal/data-deletion`, served as files
+by nginx on every host including the root domain, with no JavaScript needed —
+which is what an OAuth reviewer and a crawler both fetch. They are linked from
+the sign-up consent checkbox, from above the checkout button, and from a
+footer on every customer page. **Every one of them carries a visible “draft,
+not reviewed” banner and a list of what a lawyer must confirm, and those stay
+until the review below happens.**
+
+- [ ] **[BLOCKER]** **Legal review** of all four pages. Each one ends with the
+      specific questions for its own text; the common ones are the legal
+      entity name, trading address and contact address (`PLACEHOLDER` in the
+      files today), the governing law, and which privacy regime applies —
+      no GDPR lawful-basis section and no CCPA notice are present.
+      Then delete the banner and the “Before this page goes live” paragraph
+      from each page.
+- [ ] **[BLOCKER]** **Publish them on the root domain** and give Google,
+      Facebook and Apple the `https://<root domain>/legal/...` URLs, not a
+      restaurant subdomain. §3.2 needs these before any provider is approved.
+- [ ] **[BLOCKER]** **A process behind data deletion.** The page commits to
+      response windows and a monitored mailbox. Note there is **no
+      self-service account deletion** in the software: the only route is a
+      Clerk-side delete, whose `user.deleted` webhook soft-deletes the
+      customer and keeps their paid orders. Everything else is manual.
 - [ ] **[LAUNCH]** **Restaurant agreement**: fees, merchant-of-record duties,
-      disputes, tax responsibility, data processing.
-- [ ] **[LAUNCH]** **Cookie notice** where required (Clerk and Stripe set
-      cookies needed for sign-in and payment).
-- [ ] **[LAUNCH]** **Allergen / food disclaimer** on storefronts.
+      disputes, tax responsibility, data processing. It must agree with
+      `/legal/refunds` about who bears a refund and a chargeback, and must
+      tell restaurants refunds are issued from their own Stripe Dashboard —
+      the software has no refund button.
+- [ ] **[LAUNCH]** **Cookie notice** where required. The privacy policy lists
+      the cookies and says all are necessary; whether a consent banner is
+      needed where you operate is part of the review above.
+- [x] **[LAUNCH]** **Allergen / food disclaimer.** *(code)* In the footer of
+      every customer page, and in the terms: kitchens handle allergens,
+      cross-contact cannot be ruled out, contact the restaurant.
+- [x] **[SOON]** **Proof of agreement.** *(code)* The checkbox blocks sign-up,
+      and migration 0033 records `terms_accepted_at` and `terms_version` on
+      the customer when an order is placed — the moment the checkout page says
+      continuing means agreeing. Guests included, since a guest never signs
+      up. Bump `CURRENT_VERSION` in `app/services/terms.py` when the wording
+      changes materially; everyone re-agrees on their next order.
+      `tests/test_terms_acceptance.py`.
 - [ ] **[LAUNCH]** **PCI**: Stripe Elements keeps card data off your servers
       (SAQ A), but the annual self-assessment still has to be completed in
       Stripe.

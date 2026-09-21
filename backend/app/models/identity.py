@@ -2,7 +2,9 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import (
+    Boolean, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -68,6 +70,14 @@ class User(Base, TimestampMixin):
     """
 
     __tablename__ = "users"
+    __table_args__ = (
+        # An agreement is a moment and a wording together. Either both are
+        # recorded or neither is; a half of one is not evidence.
+        CheckConstraint(
+            "(terms_accepted_at IS NULL) = (terms_version IS NULL)",
+            name="ck_users_terms_recorded_together",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -99,6 +109,20 @@ class User(Base, TimestampMixin):
     sessions_valid_after: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When this customer agreed to the terms, and to which version of them.
+    #
+    # The checkbox on the sign-up page is what a customer sees; this is the
+    # part that can still be answered a year later, when the question is not
+    # "does the form have a checkbox" but "did this person agree, and to
+    # what". The version is stored rather than derived, because the wording
+    # changes and the old agreement was to the old wording.
+    #
+    # Null for staff and platform admins, who agree to nothing here, and for
+    # customers who predate this column.
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    terms_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     def session_revoked(self, issued_at: float) -> bool:
         """Whether a token issued at `issued_at` (epoch seconds) predates the

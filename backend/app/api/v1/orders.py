@@ -38,7 +38,8 @@ from app.schemas.api import (
     QuoteIn, QuoteOut, TrackingOut, TrackingStepOut,
 )
 from app.services import (
-    clerk_customers, customer_profile, delivery, guest_customers, stripe_service, tracking,
+    clerk_customers, customer_profile, delivery, guest_customers, stripe_service, terms,
+    tracking,
 )
 from app.services.orders import DeliveryDetails, create_pending_order
 from app.services.pricing import price_cart
@@ -315,6 +316,12 @@ def create_order(
     # An order-specific address must not overwrite a registered profile.
     if user.kind == UserKind.GUEST.value:
         customer_profile.save_contact(user.id, body.contact)
+
+    # The checkout page says, above the button, that continuing means agreeing
+    # to the terms. This is what remains of that afterwards. Here rather than
+    # at sign-up because a guest never signs up, and it does nothing at all
+    # once the customer's record is already current.
+    terms.record(user)
 
     payment = db.execute(select(Payment).where(Payment.order_id == order.id)).scalar_one()
     response = _serialize(order, payment, include_pin=False)
