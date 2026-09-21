@@ -25,6 +25,11 @@ from test_combo_pricing import (  # the fakes already stand in for this shape
     FakeRestaurant,
     FakeSession,
 )
+from tests.test_admin_restaurants import (  # noqa: F401  (fixtures)
+    _create,
+    admin_user,
+    cleanup,
+)
 
 
 class ItemOnlySession(FakeSession):
@@ -192,23 +197,25 @@ def test_including_nothing_prices_exactly_as_before():
 
 
 @pytest.mark.integration
-def test_a_new_item_can_offer_a_group_and_come_with_its_options_in_one_request():
+def test_a_new_item_can_offer_a_group_and_come_with_its_options_in_one_request(
+    admin_user, cleanup
+):
     """The regression: ticking Veggies and its lettuce on a new item was
     refused with "Lettuce belongs to a group this item does not offer", about
-    the group ticked seconds earlier in the same request."""
-    from sqlalchemy import text
+    the group ticked seconds earlier in the same request.
 
+    Builds its own restaurant, which arrives with the starter item types this
+    needs. It used to read the seeded demo one, so it passed on a developer's
+    machine and failed anywhere the database had only been migrated.
+    """
     from app.api.v1.restaurant import (
         ItemIn, ModifierGroupIn, OptionIn, create_item, create_modifier_group,
         list_item_types, list_items,
     )
-    from app.db.session import system_session, tenant_session
+    from app.db.session import tenant_session
     from app.models import Restaurant
 
-    with system_session() as session:
-        rid = session.execute(
-            text("SELECT id FROM restaurants WHERE slug = 'spicehouse'")
-        ).scalar_one()
+    rid = _create(admin_user, cleanup).id
 
     with tenant_session(rid) as session:
         restaurant = session.get(Restaurant, rid)

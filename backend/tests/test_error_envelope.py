@@ -66,8 +66,42 @@ def test_no_errors_at_all_is_never_an_empty_message():
     assert request_validation_message([]) == "The request was not valid."
 
 
+@pytest.fixture
+def orderable_slug():
+    """A restaurant a customer may quote against, removed afterwards.
+
+    Its own rather than the seeded demo one. A test that borrows `spicehouse`
+    passes on a developer's machine and fails on a fresh database, which is
+    what CI has: it migrates and runs, and nothing ever seeds. The slug is
+    random for a second reason -- tenant resolution caches misses for a few
+    seconds, so a name some earlier test asked about could still be a miss
+    here.
+    """
+    import uuid
+
+    from sqlalchemy import text
+
+    from app.db.session import system_session, tenant_session
+    from app.models import Restaurant, RestaurantStatus
+
+    slug = f"envelope-{uuid.uuid4().hex[:8]}"
+    with system_session() as session:
+        restaurant = Restaurant(
+            slug=slug, name="Envelope Test", status=RestaurantStatus.ACTIVE.value,
+            timezone="UTC", currency="USD",
+        )
+        session.add(restaurant)
+        session.flush()
+        rid = restaurant.id
+
+    yield slug
+
+    with tenant_session(rid) as session:
+        session.execute(text("DELETE FROM restaurants WHERE id = :r"), {"r": rid})
+
+
 @pytest.mark.integration
-def test_the_api_answers_a_bad_body_in_the_usual_envelope():
+def test_the_api_answers_a_bad_body_in_the_usual_envelope(orderable_slug):
     """End to end, because the point is the shape a client receives. Marked
     integration: resolving the tenant from the Host header opens a database
     session before the body is ever looked at."""
@@ -81,7 +115,7 @@ def test_the_api_answers_a_bad_body_in_the_usual_envelope():
         # by pricing, through the ordinary error path rather than this one.
         response = client.post(
             "/api/v1/orders/quote",
-            headers={"Host": "spicehouse.zenoeats.local"},
+            headers={"Host": f"{orderable_slug}.zenoeats.local"},
             json={"items": [{"quantity": 1}]},
         )
 
