@@ -5,7 +5,9 @@ import { minorToInput, money, priceToMinor, signedMoney } from "@/utils/format";
 import type { Meal } from "@/types";
 import { errorMessage } from "@/services/apiClient";
 import { ItemTypeManager } from "./ItemTypeManager";
-import { ImagePicker, NO_IMAGE, useUploadsInFlight, type ImageDraft } from "./ImagePicker";
+import {
+  ImagePicker, ImageSizeHint, NO_IMAGE, useUploadsInFlight, type ImageDraft,
+} from "./ImagePicker";
 import { rootIdOf, typeLabel } from "../itemTypes";
 import {
   useCreateItemMutation,
@@ -454,6 +456,7 @@ function ItemsEditor({
 
   return (
     <div className="editor animate-disclose">
+      <ImageSizeHint kind="items" className="pb-2" />
       {items.map((item) => {
         const row = draft[item.id];
         const going = !!removed[item.id];

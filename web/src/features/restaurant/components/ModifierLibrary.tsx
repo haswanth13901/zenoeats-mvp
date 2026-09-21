@@ -15,7 +15,9 @@ import {
   type ModifierGroupSummary,
 } from "../restaurantApi";
 import { topLevel } from "../itemTypes";
-import { ImagePicker, NO_IMAGE, useUploadsInFlight, type ImageDraft } from "./ImagePicker";
+import {
+  ImagePicker, ImageSizeHint, NO_IMAGE, useUploadsInFlight, type ImageDraft,
+} from "./ImagePicker";
 
 /** A row of the option editor, before it is worth sending. */
 type OptionDraft = { key: number; name: string; delta: string; image: ImageDraft };
@@ -222,6 +224,7 @@ export function ModifierLibrary({
               same whether it is being written or corrected. */}
           <fieldset>
             <legend className="mb-1 text-sm font-semibold">Options</legend>
+            <ImageSizeHint kind="options" className="mb-2" />
             <div
               aria-hidden="true"
               className={`${OPTION_GRID} hidden py-0 text-caption text-muted md:grid`}
@@ -809,6 +812,7 @@ function GroupEditor({
 
           <fieldset>
             <legend className="mb-1 text-sm font-semibold">Options</legend>
+            <ImageSizeHint kind="options" className="mb-2" />
             {group.options.map((option) => {
               const going = !!removed[option.id];
               return (
@@ -949,6 +953,7 @@ function AddOption({
   return (
     <div className="animate-fade rounded-ticket border border-ink p-4">
       <h4 className="text-[15px] font-semibold">Add option</h4>
+      <ImageSizeHint kind="options" className="mt-1" />
       <div className={OPTION_GRID}>
         <span className="pb-1">
           <ImagePicker
