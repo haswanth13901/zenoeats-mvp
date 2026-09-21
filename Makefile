@@ -40,21 +40,32 @@ infra:
 # by default, which is close enough to nginx's own idle timeout that the two
 # race and a request lands in a connection the other side just closed. The
 # edge is set to 3s, well under this.
+#
+# The API and worker are runtime processes and must not hold the schema
+# owner's credentials. .env carries DATABASE_URL_MIGRATE for `make migrate`;
+# exporting it empty here overrides the file, as docker-compose.yml does for
+# the containers.
+api worker: export DATABASE_URL_MIGRATE :=
+
 api:
+	$(PY) scripts/dev_preflight.py native
 	cd backend && ../$(PY) -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 30
 
 web:
+	$(PY) scripts/dev_preflight.py native
 	cd web && npm run dev
 
 # Only needed to test payments: an order cannot leave PENDING_PAYMENT without
 # a worker to process the Stripe webhook. --pool=solo because Celery's default
 # prefork pool silently hangs on Windows.
 worker:
+	$(PY) scripts/dev_preflight.py native
 	cd backend && ../$(PY) -m celery -A app.workers.celery_app.celery_app worker --loglevel=info --pool=solo
 
 # Everything in Docker, images included. Slow. Use to rehearse production,
 # not for day-to-day work.
 up-all:
+	$(PY) scripts/dev_preflight.py docker
 	docker compose --profile app up -d --build
 	@echo "Portal:  http://spicehouse.zenoeats.local:8080"
 
