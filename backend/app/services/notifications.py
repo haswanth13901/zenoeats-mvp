@@ -6,9 +6,12 @@ Content rules, both from how the rest of the platform treats the same data:
     counter, and it stays behind sign-in on the order page (core/crypto.py:
     "never put in a notification body"). The email links there instead.
 
-  * A staff invitation never carries the temporary password. The restaurant
-    admin passes that on separately, so a forwarded or leaked invitation
-    alone does not open the account.
+  * A staff invitation carries the temporary password it issued, so the new
+    member can sign in without the admin passing it on by hand. That was a
+    decision, not an oversight: it means whoever reads the email can sign in
+    first. What bounds it is that the password must be replaced at first
+    sign-in and stops working then -- so it is only ever sent while that is
+    still pending, and never for a login that already has its own password.
 
   * Everything a restaurant or customer typed -- item names, the restaurant's
     name, notes -- is HTML-escaped before it goes into a message.
@@ -231,12 +234,25 @@ def send_order_confirmation(restaurant_id: UUID, order_id: UUID) -> bool:
 # ------------------------------------------------------- staff invitation ---
 
 def compose_staff_invitation(
-    *, restaurant_name: str, slug: str, role_code: str, has_temporary_password: bool
+    *, restaurant_name: str, slug: str, role_code: str, has_temporary_password: bool,
+    temporary_password: str | None = None,
 ) -> tuple[str, str, str]:
     sign_in_url = storefront_url(slug, "/manage/login")
     role = ROLE_WORDS.get(role_code, role_code.lower())
     subject = f"You're invited to join {restaurant_name} on Zenoeats"
-    if has_temporary_password:
+    password_html = ""
+    if temporary_password:
+        password_line = (
+            "Sign in with the temporary password below. You'll choose your own the first time "
+            "you sign in (this one stops working then), and then accept the invitation."
+        )
+        password_html = (
+            f"<p style=\"margin:16px 0 0;color:{_MUTED};font-size:13px\">Temporary password</p>"
+            "<p style=\"margin:4px 0 0;font-family:ui-monospace,Menlo,Consolas,monospace;"
+            "font-size:20px;letter-spacing:1px\">"
+            f"{html.escape(temporary_password)}</p>"
+        )
+    elif has_temporary_password:
         password_line = (
             "Your manager will give you a temporary password. You'll choose your own the first "
             "time you sign in, then accept the invitation."
@@ -250,6 +266,7 @@ def compose_staff_invitation(
         f"<p>{html.escape(restaurant_name)} has invited you to join their team as "
         f"{html.escape(role)}.</p>"
         f"<p>{html.escape(password_line)}</p>"
+        + password_html
         + _button(sign_in_url, f"Sign in to {html.escape(restaurant_name)}")
         + f"<p style=\"color:{_MUTED};font-size:13px;margin-top:24px\">If you weren't expecting "
         "this, you can "
@@ -259,6 +276,7 @@ def compose_staff_invitation(
         f"{restaurant_name} has invited you to join their team as {role}.",
         "",
         password_line,
+        *(["", f"Temporary password: {temporary_password}"] if temporary_password else []),
         "",
         f"Sign in: {sign_in_url}",
         "",
@@ -268,7 +286,9 @@ def compose_staff_invitation(
     return subject, _layout(f"Join {restaurant_name}", body), text
 
 
-def send_staff_invitation(restaurant_id: UUID, membership_id: UUID) -> bool:
+def send_staff_invitation(
+    restaurant_id: UUID, membership_id: UUID, temporary_password: str | None = None
+) -> bool:
     with tenant_session(restaurant_id) as session:
         membership = session.get(RestaurantUser, membership_id)
         restaurant = session.get(Restaurant, restaurant_id)
@@ -286,9 +306,13 @@ def send_staff_invitation(restaurant_id: UUID, membership_id: UUID) -> bool:
             return False
         to, has_temporary_password = user.email, bool(user.must_change_password)
 
+    # Only while it still works. A retry can run long after the invitation --
+    # by then they may have signed in and chosen their own, and a stale
+    # password in an inbox is a thing to leave out, not to resend.
     subject, body_html, body_text = compose_staff_invitation(
         restaurant_name=restaurant_name, slug=slug, role_code=role_code,
         has_temporary_password=has_temporary_password,
+        temporary_password=temporary_password if has_temporary_password else None,
     )
     # Keyed on when the invitation was issued, so re-inviting someone later
     # sends a fresh email while a retried send of the same one does not.

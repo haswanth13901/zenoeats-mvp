@@ -77,17 +77,50 @@ def test_a_delivery_confirmation_promises_no_pin_and_shows_its_fee():
         assert "where your driver is" in body
 
 
-@pytest.mark.parametrize("has_temporary_password", [True, False])
-def test_the_invitation_never_carries_a_password(has_temporary_password):
+def test_the_invitation_carries_the_temporary_password_it_issued():
     subject, body_html, body_text = notifications.compose_staff_invitation(
         restaurant_name="Spice House", slug="spicehouse", role_code="KITCHEN",
-        has_temporary_password=has_temporary_password,
+        has_temporary_password=True, temporary_password="AB12-CD34-EF56",
     )
     assert subject == "You're invited to join Spice House on Zenoeats"
     assert "kitchen staff" in body_text
     assert "/manage/login" in body_html
-    expected = "temporary password" if has_temporary_password else "password you already use"
+    assert "Temporary password: AB12-CD34-EF56" in body_text
+    assert "AB12-CD34-EF56" in body_html
+    # And says it will not last, so nobody treats it as their password.
+    assert "stops working" in body_text
+
+
+def test_a_password_in_the_invitation_is_escaped():
+    """Generated passwords contain nothing HTML means, but the template
+    should not depend on that staying true."""
+    _, body_html, _ = notifications.compose_staff_invitation(
+        restaurant_name="Spice House", slug="spicehouse", role_code="KITCHEN",
+        has_temporary_password=True, temporary_password="<b>x</b>",
+    )
+    assert "<b>x</b>" not in body_html
+    assert "&lt;b&gt;x&lt;/b&gt;" in body_html
+
+
+@pytest.mark.parametrize(
+    "has_temporary_password, expected",
+    [
+        # A login still to be set up, but no password to hand -- an owner
+        # invitation, or a task queued before invitations carried one.
+        (True, "manager will give you a temporary password"),
+        # Someone who already works at another Zenoeats restaurant.
+        (False, "password you already use"),
+    ],
+)
+def test_an_invitation_with_no_password_to_give_says_where_it_comes_from(
+    has_temporary_password, expected
+):
+    _, body_html, body_text = notifications.compose_staff_invitation(
+        restaurant_name="Spice House", slug="spicehouse", role_code="KITCHEN",
+        has_temporary_password=has_temporary_password,
+    )
     assert expected in body_text
+    assert "Temporary password:" not in body_text
 
 
 # ------------------------------------------------------------- transport ---

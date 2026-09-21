@@ -183,14 +183,16 @@ export function StaffPage() {
             {!issued.email_configured && (
               <p className="mb-2 font-semibold text-warning">
                 Email isn&apos;t set up yet, so no invitation email was sent. Send them the
-                sign-in link below yourself.
+                sign-in link{issued.temporary_password ? " and temporary password" : ""} below
+                yourself.
               </p>
             )}
             <p>
-              {issued.email_configured ? "We're emailing them the sign-in link. " : ""}
               {issued.temporary_password
-                ? "Give them this temporary password yourself; it is never emailed, is shown once, and cannot be looked up again."
-                : "They already have a Zenoeats staff login and sign in with the password they have. If they've lost it and work only here, you can reset it from the team list; otherwise Zenoeats support can."}
+                ? issued.email_configured
+                  ? "We're emailing them the sign-in link and this temporary password. It's also shown here once, in case the email doesn't arrive, and can't be looked up again. They choose their own at first sign-in, and this one stops working then."
+                  : "Give them this temporary password yourself. It's shown once and can't be looked up again. They choose their own at first sign-in."
+                : `${issued.email_configured ? "We're emailing them the sign-in link. " : ""}They already have a Zenoeats staff login and sign in with the password they have. If they've lost it and work only here, you can reset it from the team list; otherwise Zenoeats support can.`}
             </p>
           </OneTimeSecret>
         )}
@@ -198,8 +200,9 @@ export function StaffPage() {
         <p className="mt-6 max-w-[78ch] text-caption text-muted">
           An invitation grants nothing on its own. The person signs in at this
           restaurant&apos;s sign-in page — we email them the link when email is set up —
-          and accepts it there before the role becomes active. Someone new also needs the temporary password shown here, which is never
-          emailed: pass it on yourself. Someone who already works at another Zenoeats
+          and accepts it there before the role becomes active. Someone new also needs the
+          temporary password shown here. It goes in the same email when email is set up;
+          otherwise pass it on yourself. Someone who already works at another Zenoeats
           restaurant signs in with the password they have.
         </p>
       </Panel>

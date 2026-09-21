@@ -3,6 +3,11 @@
 Used for the pickup PIN, which must be recoverable for display to the
 authenticated customer (so it is encrypted, not hashed). Never logged, never
 placed in a URL, never put in a notification body.
+
+Also seals a staff member's temporary password for the few seconds it spends
+in the Celery queue on its way into their invitation email. The database
+keeps only its hash; this is what stops the broker's on-disk log keeping it
+in plain text.
 """
 
 import secrets

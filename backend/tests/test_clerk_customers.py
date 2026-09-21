@@ -279,9 +279,21 @@ def test_an_invited_person_signs_in_changes_password_then_accepts(staff_restaura
                         json={"email": invitee_email, "role_code": "KITCHEN"})
     assert invite.status_code == 201, invite.text
     temp = invite.json()["temporary_password"]
-    # The invitation email is handed to the worker, for this membership.
-    assert ("send_staff_invitation", (str(invite_restaurant_id(host)), invite.json()["id"])) in queued_emails
+    # The invitation email is handed to the worker, for this membership, with
+    # the temporary password sealed -- never in plain text, because the
+    # broker writes what it holds to disk.
     assert temp
+    from app.core import crypto
+
+    handed = [
+        args for name, args in queued_emails
+        if name == "send_staff_invitation"
+        and args[:2] == (str(invite_restaurant_id(host)), invite.json()["id"])
+    ]
+    assert len(handed) == 1, queued_emails
+    sealed = handed[0][2]
+    assert temp not in sealed
+    assert crypto.decrypt_field(sealed) == temp
 
     cook = _client(host)
     login = cook.post("/api/v1/restaurant/login", json={"email": invitee_email, "password": temp})

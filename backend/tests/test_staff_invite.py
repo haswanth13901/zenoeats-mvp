@@ -196,3 +196,77 @@ def test_an_owner_invitation_says_whether_an_email_is_on_its_way(
     out, _ = _owner(admin_user, second.id, person)
     assert out.status == "INVITED"
     assert out.email_configured is expected
+
+
+# --- the temporary password in the invitation email -------------------------
+
+def _invite_new_cook(admin_user, cleanup):
+    """A restaurant, its owner, and a brand-new cook they have just invited.
+    Returns what the worker would be given, and the cook's address."""
+    restaurant = _create(admin_user, cleanup)
+    owner = _email()
+    _owner(admin_user, restaurant.id, owner)
+    _set_own_password(owner, "owner password 123")
+
+    cook = _email()
+    res = _signed_in(restaurant.slug, owner).post(
+        "/api/v1/restaurant/staff", json={"email": cook, "role_code": "KITCHEN"}
+    )
+    assert res.status_code == 201, res.text
+    out = res.json()
+    assert out["temporary_password"]
+    return restaurant.id, out["id"], out["temporary_password"], cook
+
+
+@pytest.fixture
+def outbox(monkeypatch):
+    """Every email handed to the provider, without sending any."""
+    from app.services import email
+
+    sent = []
+    monkeypatch.setattr(email, "send", lambda message: sent.append(message) or True)
+    return sent
+
+
+def test_a_new_member_is_emailed_their_temporary_password(admin_user, cleanup, outbox):
+    from uuid import UUID
+
+    from app.services import notifications
+
+    restaurant_id, membership_id, password, cook = _invite_new_cook(admin_user, cleanup)
+    assert notifications.send_staff_invitation(restaurant_id, UUID(membership_id), password)
+
+    [message] = outbox
+    assert message.to == cook
+    assert password in message.text and password in message.html
+
+
+def test_a_password_already_replaced_is_never_emailed(admin_user, cleanup, outbox):
+    """A retry can run long after the invitation. By then the person may have
+    signed in and chosen their own; the old one no longer works, and an inbox
+    is no place to leave it."""
+    from uuid import UUID
+
+    from app.services import notifications
+
+    restaurant_id, membership_id, password, cook = _invite_new_cook(admin_user, cleanup)
+    _set_own_password(cook, "their own password 456")
+
+    assert notifications.send_staff_invitation(restaurant_id, UUID(membership_id), password)
+    [message] = outbox
+    assert password not in message.text and password not in message.html
+    assert "password you already use" in message.text
+
+
+def test_the_worker_unseals_the_password_before_composing(admin_user, cleanup, outbox):
+    """The whole hand-off: sealed on the way into the queue, opened by the
+    task, and in the email -- as the real task runs it, minus the broker."""
+    from app.core import crypto
+    from app.workers import tasks
+
+    restaurant_id, membership_id, password, _ = _invite_new_cook(admin_user, cleanup)
+    tasks.send_staff_invitation.run(
+        str(restaurant_id), membership_id, crypto.encrypt_field(password)
+    )
+    [message] = outbox
+    assert password in message.text

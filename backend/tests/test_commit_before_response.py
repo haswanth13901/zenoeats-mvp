@@ -97,7 +97,7 @@ def test_a_background_task_already_sees_what_the_request_wrote(admin_user, clean
 
     seen = {}
 
-    def spy(restaurant_id, membership_id):
+    def spy(restaurant_id, membership_id, temporary_password=None):
         with tenant_session(restaurant_id) as session:
             seen["status"] = session.execute(
                 text("SELECT status FROM restaurant_users WHERE id = :i"), {"i": membership_id}
