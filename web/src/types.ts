@@ -1,3 +1,4 @@
+import type { Storefront } from "@/features/storefront/theme";
 export type Option = {
   id: string;
   name: string;
@@ -98,6 +99,7 @@ export type Meal = {
 };
 
 export type Portal = {
+  storefront?: Storefront | null;
   pickup_address?: string | null;
   restaurant_id: string;
   slug: string;

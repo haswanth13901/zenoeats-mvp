@@ -58,7 +58,7 @@ export function ImagePicker({
     setBusy(true);
     onBusyChange?.(true);
     try {
-      const photo = await shrinkForUpload(file);
+      const photo = await shrinkForUpload(file, kind === "banners" ? 2800 : undefined);
       const stored = await uploadImage(kind, photo.blob, photo.filename);
       onChange(imageDraft(stored));
       onError(null);

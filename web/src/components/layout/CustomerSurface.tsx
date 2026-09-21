@@ -1,4 +1,6 @@
 import { useLayoutEffect } from "react";
+import { usePortalQuery } from "@/features/storefront/storefrontApi";
+import { attachFont, themeVariables } from "@/features/storefront/theme";
 import { Outlet } from "react-router-dom";
 
 /**
@@ -11,6 +13,18 @@ import { Outlet } from "react-router-dom";
  * navigation is never left forest green.
  */
 export function CustomerSurface() {
+  const { data } = usePortalQuery();
+  const theme = data?.storefront?.theme ?? null;
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const vars = themeVariables(theme);
+    for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, String(value));
+    const removeFont = attachFont(theme?.font_pair ?? "default");
+    return () => {
+      for (const key of Object.keys(vars)) root.style.removeProperty(key);
+      removeFont();
+    };
+  }, [theme]);
   useLayoutEffect(() => {
     const root = document.documentElement;
     root.dataset.surface = "customer";

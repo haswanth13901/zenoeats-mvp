@@ -24,7 +24,7 @@ import { StaffIdentity, StaffSignOut } from "./StaffSignOut";
  * scrolls to it instead of drawing a second copy.
  */
 export function ManageShell({ children }: { children: ReactNode }) {
-  const { restaurantName, roleCode } = useAppSelector(selectSession);
+  const { restaurantName, roleCode, storefrontEnabled } = useAppSelector(selectSession);
   const { pathname } = useLocation();
   const [accountOpen, setAccountOpen] = useState(false);
   const onSettings = pathname === "/manage/settings";
@@ -44,7 +44,7 @@ export function ManageShell({ children }: { children: ReactNode }) {
     <Shell
       title={restaurantName ?? "Restaurant"}
       titleHref={homeFor(roleCode)}
-      nav={navFor(roleCode)}
+      nav={navFor(roleCode, storefrontEnabled)}
       identity={<StaffIdentity />}
       action={<StaffSignOut onOpenAccount={openAccount} />}
     >

@@ -8,6 +8,7 @@ export type Restaurant = {
   currency: string;
   tax_rate_bps: number;
   accepting_orders: boolean;
+  storefront_customization_enabled: boolean;
   stripe_account_id: string | null;
   charges_enabled: boolean;
   created_at: string;
@@ -98,6 +99,7 @@ export type RestaurantPatch = Partial<{
   currency: string;
   tax_rate_bps: number;
   accepting_orders: boolean;
+  storefront_customization_enabled: boolean;
   tax_mode: TaxMode;
   tax_code: string;
 } & RestaurantAddress>;

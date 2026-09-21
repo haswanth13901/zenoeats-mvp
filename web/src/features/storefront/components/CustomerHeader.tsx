@@ -21,7 +21,7 @@ export function CustomerHeader({
   links,
   showOrder = false,
 }: {
-  restaurant: Pick<Portal, "name" | "delivery_offered" | "is_orderable" | "accepting_orders">;
+  restaurant: Pick<Portal, "name" | "delivery_offered" | "is_orderable" | "accepting_orders" | "storefront">;
   /** Jump links into the page. Hidden on a phone, where the category row
    *  below does the same job. */
   links?: ReactNode;
@@ -30,7 +30,7 @@ export function CustomerHeader({
   return (
     <header className="border-b border-[#E6E5DB] bg-cream">
       <div className="mx-auto flex min-h-[72px] max-w-[1336px] items-center gap-[15px] px-[19px] sm:min-h-[78px] sm:gap-[25px] sm:px-7 lg:min-h-[88px] lg:gap-[30px] xl:gap-[50px] xl:px-10">
-        <Wordmark name={restaurant.name} />
+        {restaurant.storefront?.logo_url ? <Link to="/" aria-label={`${restaurant.name}, back to the menu`}><img src={restaurant.storefront.logo_url} alt={restaurant.name} className="max-h-14 max-w-[180px] object-contain" /></Link> : <Wordmark name={restaurant.name} />}
         {links && (
           <nav className="hidden items-center gap-5 sm:flex lg:gap-7" aria-label="On this page">
             {links}

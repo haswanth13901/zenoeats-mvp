@@ -23,7 +23,8 @@ export type SessionState = {
   portal: Portal | null;
   email: string | null;
   fullName: string | null;
-  /** Restaurant portal only: ADMIN, MANAGER, KITCHEN or CASHIER. */
+  /** Restaurant portal only: ADMIN, MANAGER, KITCHEN, CASHIER, DRIVER or
+   *  IT_SUPPORT. */
   roleCode: string | null;
   /** Restaurant portal only: the name shown in the header, so an operator can
    *  see which restaurant they are working in without reading the address. */
@@ -32,6 +33,7 @@ export type SessionState = {
    *  API refuses everything but the change-password endpoint until it is
    *  replaced, so the UI should not offer anything else either. */
   mustChangePassword: boolean;
+  storefrontEnabled: boolean;
   /** Distinguishes "not signed in" from "not asked yet", so a guard does not
    *  redirect before the first /me has answered. */
   status: "unknown" | "authenticated" | "anonymous";
@@ -44,6 +46,7 @@ const initialState: SessionState = {
   roleCode: null,
   restaurantName: null,
   mustChangePassword: false,
+  storefrontEnabled: false,
   status: "unknown",
 };
 
@@ -60,6 +63,7 @@ const sessionSlice = createSlice({
         roleCode?: string | null;
         restaurantName?: string | null;
         mustChangePassword?: boolean;
+        storefrontEnabled?: boolean;
       }>,
     ) {
       const p = action.payload;
@@ -69,6 +73,7 @@ const sessionSlice = createSlice({
       state.roleCode = p.roleCode ?? null;
       state.restaurantName = p.restaurantName ?? null;
       state.mustChangePassword = p.mustChangePassword ?? false;
+      state.storefrontEnabled = p.storefrontEnabled ?? false;
       state.status = "authenticated";
     },
 
@@ -79,6 +84,7 @@ const sessionSlice = createSlice({
       state.roleCode = null;
       state.restaurantName = null;
       state.mustChangePassword = false;
+      state.storefrontEnabled = false;
       state.status = "anonymous";
     },
   },

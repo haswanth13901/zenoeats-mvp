@@ -25,7 +25,7 @@ const JPEG_QUALITY = 0.9;
 
 export type ShrunkPhoto = { blob: Blob; filename: string };
 
-export async function shrinkForUpload(file: File): Promise<ShrunkPhoto> {
+export async function shrinkForUpload(file: File, maxEdge = MAX_EDGE): Promise<ShrunkPhoto> {
   const original = { blob: file, filename: file.name || "photo" };
 
   let bitmap: ImageBitmap;
@@ -41,9 +41,9 @@ export async function shrinkForUpload(file: File): Promise<ShrunkPhoto> {
 
   try {
     const longest = Math.max(bitmap.width, bitmap.height);
-    if (longest <= MAX_EDGE && file.size <= SEND_AS_IS_BYTES) return original;
+    if (longest <= maxEdge && file.size <= SEND_AS_IS_BYTES) return original;
 
-    const scale = Math.min(1, MAX_EDGE / longest);
+    const scale = Math.min(1, maxEdge / longest);
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
 

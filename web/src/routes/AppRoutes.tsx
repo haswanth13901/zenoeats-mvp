@@ -1,4 +1,5 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { ManageStorefrontPage } from "@/pages/manage/ManageStorefrontPage";
+import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route } from "react-router-dom";
 import { RequireAdmin, RequireCustomer, RequireStaff } from "@/components/layout/Guards";
 import { AdminRestaurantsPage } from "@/pages/admin/AdminRestaurantsPage";
 import { AdminOrdersPage } from "@/pages/admin/AdminOrdersPage";
@@ -11,9 +12,12 @@ import { StockPage } from "@/pages/manage/StockPage";
 import { DeliveriesPage } from "@/pages/manage/DeliveriesPage";
 import {
   ADMIN_ROLES,
-  ALL_STAFF_ROLES,
   DELIVERY_ROLES,
+  FLOOR_VIEW_ROLES,
   MANAGER_ROLES,
+  MENU_VIEW_ROLES,
+  SETTINGS_ROLES,
+  STOREFRONT_ROLES,
 } from "@/features/restaurant/nav";
 import { StorefrontPage } from "@/pages/storefront/StorefrontPage";
 import { CheckoutPage } from "@/pages/storefront/CheckoutPage";
@@ -38,10 +42,8 @@ import { Cloche } from "@/components/common/icons";
  * points outside React, served directly by the dev server and by nginx, so
  * they never reach this router.
  */
-export function AppRoutes() {
-  return (
-    <BrowserRouter>
-      <Routes>
+const router = createBrowserRouter(createRoutesFromElements(
+      <>
         {/* Customer surface. The storefront is deliberately public; only the
             routes that need an identity are guarded. */}
         <Route element={<CustomerSurface />}>
@@ -86,7 +88,7 @@ export function AppRoutes() {
         {/* Restaurant portal. Credentials issued by the platform. */}
         <Route
           path="/manage"
-          element={<RequireStaff roles={ALL_STAFF_ROLES}><KitchenBoardPage /></RequireStaff>}
+          element={<RequireStaff roles={FLOOR_VIEW_ROLES}><KitchenBoardPage /></RequireStaff>}
         />
         <Route
           path="/manage/deliveries"
@@ -94,11 +96,11 @@ export function AppRoutes() {
         />
         <Route
           path="/manage/stock"
-          element={<RequireStaff roles={ALL_STAFF_ROLES}><StockPage /></RequireStaff>}
+          element={<RequireStaff roles={FLOOR_VIEW_ROLES}><StockPage /></RequireStaff>}
         />
         <Route
           path="/manage/menu"
-          element={<RequireStaff roles={MANAGER_ROLES}><MenuPage /></RequireStaff>}
+          element={<RequireStaff roles={MENU_VIEW_ROLES}><MenuPage /></RequireStaff>}
         />
         <Route
           path="/manage/staff"
@@ -108,9 +110,10 @@ export function AppRoutes() {
           path="/manage/reports"
           element={<RequireStaff roles={MANAGER_ROLES}><ReportsPage /></RequireStaff>}
         />
+        <Route path="/manage/storefront" element={<RequireStaff roles={STOREFRONT_ROLES}><ManageStorefrontPage /></RequireStaff>} />
         <Route
           path="/manage/settings"
-          element={<RequireStaff roles={ADMIN_ROLES}><SettingsPage /></RequireStaff>}
+          element={<RequireStaff roles={SETTINGS_ROLES}><SettingsPage /></RequireStaff>}
         />
 
         {/* Platform portal. Credentials from ADMIN_USERS. */}
@@ -121,10 +124,10 @@ export function AppRoutes() {
         />
 
         <Route path="*" element={<NotFound />} />
-      </Routes>
-    </BrowserRouter>
-  );
-}
+      </>
+));
+
+export function AppRoutes() { return <RouterProvider router={router} />; }
 
 function NotFound() {
   return <StatePage title="Page not found" illustration={<Cloche />} />;

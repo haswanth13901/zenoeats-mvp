@@ -3,6 +3,7 @@ import { request } from "@/services/apiClient";
 import type { DiscountKind, Meal } from "@/types";
 
 export type StaffMe = {
+  storefront_customization_enabled: boolean;
   user_id: string;
   email: string;
   full_name: string | null;
@@ -339,7 +340,7 @@ export type ModifierGroupSummary = {
 
 /** What a photo is of. Part of where it is stored, and checked when it is
  *  attached: an option's thumbnail cannot be saved onto an item. */
-export type ImageKind = "items" | "options";
+export type ImageKind = "items" | "options" | "banners" | "categories" | "branding";
 
 /** A stored photo that nothing shows yet. Saving an item or option with the
  *  key is what puts it on the menu. */

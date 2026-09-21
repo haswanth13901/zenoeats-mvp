@@ -1,5 +1,6 @@
+import { SettingsCard } from "@/features/restaurant/components/SettingsCard";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ErrorNote, Loading, SettingsHeading, Spinner } from "@/components/common/Feedback";
+import { ErrorNote, Loading, Spinner } from "@/components/common/Feedback";
 import { PageTitle } from "@/components/layout/Shell";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import { OwnAccount } from "@/features/restaurant/components/OwnAccount";
@@ -407,25 +408,6 @@ export function SettingsPage() {
         </div>
       </div>
     </ManageShell>
-  );
-}
-
-function SettingsCard({
-  id,
-  title,
-  subtitle,
-  children,
-}: {
-  id: string;
-  title: string;
-  subtitle: string;
-  children: ReactNode;
-}) {
-  return (
-    <section id={id} className="card mb-6 scroll-mt-6" aria-labelledby={`${id}-heading`}>
-      <SettingsHeading id={`${id}-heading`} title={title} subtitle={subtitle} />
-      <div className="mt-6">{children}</div>
-    </section>
   );
 }
 

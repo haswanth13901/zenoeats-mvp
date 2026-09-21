@@ -74,6 +74,49 @@
  * portals are untouched. Set on <html> by CustomerSurface in the app, and in
  * the markup of the customer sign-in pages. */
 [data-surface="customer"] {
+  --ze-menu-muted: 100 114 91; /* #64725B */
+  --ze-period-text: 102 115 91; /* #66735B */
+  --ze-period-shadow: 37 63 35; /* #253F23 */
+  --ze-hours-text: 108 119 95; /* #6C775F */
+  --ze-footer-line: 221 226 212; /* #DDE2D4 */
+  --ze-footer-text: 112 124 100; /* #707C64 */
+  --ze-header-link: 52 77 59; /* #344D3B */
+  --ze-hero-eyebrow: 220 201 133; /* #DCC985 */
+  --ze-hero-title: 255 248 228; /* #FFF8E4 */
+  --ze-hero-subline: 224 228 210; /* #E0E4D2 */
+  --ze-cta-text: 29 51 38; /* #1D3326 */
+  --ze-cta-hover: 247 215 116; /* #F7D774 */
+  --ze-hero-note: 212 217 201; /* #D4D9C9 */
+  --ze-shortcut-line: 221 227 215; /* #DDE3D7 */
+  --ze-shortcut-clock: 232 235 217; /* #E8EBD9 */
+  --ze-shortcut-text: 60 79 63; /* #3C4F3F */
+  --ze-shortcut-hover: 233 239 223; /* #E9EFDF */
+  --ze-shortcut-border: 227 222 207; /* #E3DECF */
+  --ze-shortcut-ground: 238 231 217; /* #EEE7D9 */
+  --ze-meal-title: 37 72 48; /* #254830 */
+  --ze-category-title: 37 61 42; /* #253D2A */
+  --ze-card-border: 226 229 217; /* #E2E5D9 */
+  --ze-card-text: 36 61 45; /* #243D2D */
+  --ze-card-hover: 175 192 163; /* #AFC0A3 */
+  --ze-card-shadow: 37 73 36; /* #254924 */
+  --ze-card-gradient: 245 245 234; /* #F5F5EA */
+  --ze-card-paper: 255 253 248; /* #FFFDF8 */
+  --ze-photo-ground: 242 233 217; /* #F2E9D9 */
+  --ze-item-title: 39 70 48; /* #274630 */
+  --ze-item-description: 109 118 100; /* #6D7664 */
+  --ze-soldout-border: 231 207 197; /* #E7CFC5 */
+  --ze-soldout-ground: 251 238 231; /* #FBEEE7 */
+  --ze-combo-border: 229 222 194; /* #E5DEC2 */
+  --ze-combo-ground: 239 235 216; /* #EFEBD8 */
+  --ze-combo-hover-border: 185 194 160; /* #B9C2A0 */
+  --ze-combo-hover: 232 231 204; /* #E8E7CC */
+  --ze-combo-text: 40 70 46; /* #28462E */
+  --ze-combo-muted: 106 117 92; /* #6A755C */
+  --ze-saving-border: 214 200 165; /* #D6C8A5 */
+  --ze-saving-ground: 248 242 215; /* #F8F2D7 */
+  --ze-saving-text: 112 68 42; /* #70442A */
+  --ze-hero-text: 255 250 234; /* #FFFAEA */
+  --ze-hero-glow: 84 113 65; /* #547141 */
   --ze-paper: 250 248 242; /* #FAF8F2 */
   --ze-brand: 23 77 57; /* #174D39 */
   --ze-brand-hover: 16 61 44; /* #103D2C */
@@ -405,15 +448,15 @@
      --tilt-x/--tilt-y are set by a fine-pointer handler only (never touch,
      never under reduced motion), capped at 2.5 degrees. */
   .home-banner {
-    @apply relative isolate flex min-h-[530px] flex-col overflow-hidden rounded-product bg-hero text-[#FFFAEA]
+    @apply relative isolate flex min-h-[530px] flex-col overflow-hidden rounded-product bg-hero text-[rgb(var(--ze-hero-text))]
            sm:min-h-[425px] sm:flex-row sm:items-center sm:rounded-banner lg:min-h-[450px] xl:min-h-[490px];
   }
   .home-banner-plain {
     @apply min-h-[330px] sm:min-h-[380px];
-    background: radial-gradient(ellipse at 85% 100%, #547141 0, transparent 55%), rgb(var(--ze-hero));
+    background: radial-gradient(ellipse at 85% 100%, rgb(var(--ze-hero-glow)) 0, transparent 55%), rgb(var(--ze-hero));
   }
   .home-banner-media {
-    @apply absolute inset-x-0 bottom-0 -z-20 h-[280px] sm:inset-y-0 sm:left-[38%] sm:right-0 sm:h-auto;
+    @apply absolute inset-x-0 bottom-0 -z-20 h-[280px] overflow-hidden sm:inset-y-0 sm:left-[38%] sm:right-0 sm:h-auto;
     transition: transform 250ms var(--ze-ease);
   }
   @media (min-width: 640px) {
@@ -438,16 +481,16 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background: linear-gradient(180deg, #102a1d 0%, #102a1d 44%, #102a1dcc 51%, transparent 68%);
+    background: linear-gradient(180deg, rgb(var(--ze-hero)) 0%, rgb(var(--ze-hero)) 44%, rgb(var(--ze-hero) / 0.8) 51%, transparent 68%);
   }
   @media (min-width: 640px) {
     .home-banner:not(.home-banner-plain)::after {
-      background: linear-gradient(90deg, #102a1df5, #102a1dbb 35%, #102a1d20 84%);
+      background: linear-gradient(90deg, rgb(var(--ze-hero) / 0.9607843137254902), rgb(var(--ze-hero) / 0.7333333333333333) 35%, rgb(var(--ze-hero) / 0.12549019607843137) 84%);
     }
   }
   @media (min-width: 1024px) {
     .home-banner:not(.home-banner-plain)::after {
-      background: linear-gradient(90deg, #102a1df5 0%, #102a1ddd 28%, #102a1d35 59%, transparent 79%);
+      background: linear-gradient(90deg, rgb(var(--ze-hero) / 0.9607843137254902) 0%, rgb(var(--ze-hero) / 0.8666666666666667) 28%, rgb(var(--ze-hero) / 0.20784313725490197) 59%, transparent 79%);
     }
   }
 
@@ -523,4 +566,40 @@
 .pac-item-query {
   color: rgb(var(--ze-ink));
   font-size: 14px;
+}
+
+/* The outgoing picture exists only during the crossfade. Reduced motion
+   shows the selected image immediately and never starts an automatic timer. */
+.home-banner-current { animation: storefront-in 450ms ease both; }
+.home-banner-outgoing { animation: storefront-out 450ms ease both; }
+@keyframes storefront-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes storefront-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .home-banner-current, .home-banner-outgoing { animation: none; }
+  .home-banner-outgoing { display: none; }
+}
+
+/* The editor embeds the real banner in a narrow column. Its available width,
+   rather than the desktop viewport, determines the preview's text measure. */
+.storefront-preview .home-banner-content {
+  width: 100%;
+  max-width: none;
+  padding: 28px 26px 76px;
+}
+.storefront-preview .home-banner h1 {
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: -1.5px;
+}
+.storefront-preview .home-banner::after {
+  background: linear-gradient(90deg, rgb(var(--ze-hero) / .96), rgb(var(--ze-hero) / .65));
+}
+
+/* Slide copy is longer than the original tagline. Give it its own solid
+   background on phones so it cannot grow into the photograph's clear area. */
+@media (max-width: 639px) {
+  .home-banner-slide .home-banner-content {
+    background: rgb(var(--ze-hero));
+    margin-bottom: 200px;
+  }
 }

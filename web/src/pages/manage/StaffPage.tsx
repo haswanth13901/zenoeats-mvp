@@ -15,7 +15,7 @@ import {
 } from "@/features/restaurant/restaurantApi";
 import { errorMessage } from "@/services/apiClient";
 
-const ROLES = ["ADMIN", "MANAGER", "KITCHEN", "CASHIER", "DRIVER"] as const;
+const ROLES = ["ADMIN", "MANAGER", "KITCHEN", "CASHIER", "DRIVER", "IT_SUPPORT"] as const;
 type Role = (typeof ROLES)[number];
 
 const ROLE_HELP: Record<Role, string> = {
@@ -24,7 +24,19 @@ const ROLE_HELP: Record<Role, string> = {
   KITCHEN: "The order board and sold-out toggles.",
   CASHIER: "The counter: collect orders with PINs, and sold-out toggles.",
   DRIVER: "Deliveries assigned to them, and nothing else of the portal.",
+  IT_SUPPORT:
+    "Setup and presentation: the storefront, the restaurant’s details and the delivery area. " +
+    "Reads the board, stock and menu to diagnose them, and changes none of the three. " +
+    "No reports, no order actions, no staff.",
 };
+
+/** A role as it is written for a person rather than as it is stored. The
+ *  lowercase reading was already what the table and both dropdowns showed;
+ *  this only stops the one role code with an underscore in it arriving as
+ *  "it_support" beside "kitchen". */
+function roleName(code: string): string {
+  return code.replace(/_/g, " ").toLowerCase();
+}
 
 /** One row asking "are you sure", for one of the two actions that need it. */
 type Confirming = { id: string; kind: "remove" | "reset" };
@@ -138,7 +150,7 @@ export function StaffPage() {
               >
                 {ROLES.map((r) => (
                   <option key={r} value={r}>
-                    {r.toLowerCase()}
+                    {roleName(r)}
                   </option>
                 ))}
               </select>
@@ -289,7 +301,7 @@ export function StaffPage() {
                           the API refuses both, since either could leave the
                           restaurant with no admin. */}
                       {m.is_you || onlyAdmin ? (
-                        m.role_code.toLowerCase()
+                        roleName(m.role_code)
                       ) : (
                         <select
                           className="field mt-1 max-w-[200px] md:mt-0 md:w-36"
@@ -300,7 +312,7 @@ export function StaffPage() {
                         >
                           {ROLES.map((r) => (
                             <option key={r} value={r}>
-                              {r.toLowerCase()}
+                              {roleName(r)}
                             </option>
                           ))}
                         </select>

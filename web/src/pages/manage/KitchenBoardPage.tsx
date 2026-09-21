@@ -20,7 +20,7 @@ import {
   type HistoryOrder,
 } from "@/features/restaurant/restaurantApi";
 import { useNewOrderAlert } from "@/features/restaurant/newOrderAlert";
-import { canManage as roleCanManage } from "@/features/restaurant/nav";
+import { canActOnOrders, canManage as roleCanManage } from "@/features/restaurant/nav";
 import { selectSession } from "@/features/session/sessionSlice";
 import { ApiError, errorMessage } from "@/services/apiClient";
 
@@ -33,6 +33,7 @@ const HEADINGS: Record<string, { title: string; subtitle: string }> = {
   MANAGER: { title: "Service overview", subtitle: "Keep service moving, from kitchen to collection." },
   CASHIER: { title: "At the counter", subtitle: "Ready orders and PIN collection." },
   KITCHEN: { title: "On the pass", subtitle: "Clear tickets. Calm service." },
+  IT_SUPPORT: { title: "Service, as it stands", subtitle: "What the restaurant is working through. Read only." },
 };
 
 /** Past this, a collection is late and the ticket says so. */
@@ -57,6 +58,11 @@ export function KitchenBoardPage() {
   // Override and cancel are managers only. The server decides regardless;
   // this only avoids offering a button that would 403.
   const canManage = roleCanManage(roleCode);
+  // IT support reads this board to see what the restaurant is working
+  // through, and moves nothing on it. Without this the role would be shown
+  // "Mark ready" and "Collect with PIN" on every ticket and be refused by the
+  // API on both -- the board's two buttons are the floor's, not support's.
+  const canAct = canActOnOrders(roleCode);
 
   const [error, setError] = useState<string | null>(null);
   // A failure from the form open on one ticket, shown inside that form so the
@@ -294,15 +300,19 @@ export function KitchenBoardPage() {
         >
           {actionFor(o) ?? (
             <>
-              <button
-                type="button"
-                className="btn-primary btn-touch w-full"
-                disabled={busy === o.order_id}
-                onClick={() => ready(o.order_id)}
-              >
-                {busy === o.order_id && <Spinner />}
-                {o.fulfillment_type === "DELIVERY" ? "Mark ready for the driver" : "Mark ready for pickup"}
-              </button>
+              {canAct ? (
+                <button
+                  type="button"
+                  className="btn-primary btn-touch w-full"
+                  disabled={busy === o.order_id}
+                  onClick={() => ready(o.order_id)}
+                >
+                  {busy === o.order_id && <Spinner />}
+                  {o.fulfillment_type === "DELIVERY" ? "Mark ready for the driver" : "Mark ready for pickup"}
+                </button>
+              ) : (
+                <p className="py-3 text-[15px] font-semibold">In the kitchen.</p>
+              )}
               {managerLinks(
                 <span key="d">{driverLink(o)}</span>,
                 <span key="c">{cancelLink(o)}</span>,
@@ -409,18 +419,24 @@ export function KitchenBoardPage() {
               </form>
             ) : (
               <>
-                <button
-                  type="button"
-                  className="btn-quiet btn-touch w-full"
-                  onClick={() => {
-                    setPinFor(o.order_id);
-                    setPin("");
-                    setActing(null);
-                    clearMessages();
-                  }}
-                >
-                  Collect with PIN
-                </button>
+                {canAct ? (
+                  <button
+                    type="button"
+                    className="btn-quiet btn-touch w-full"
+                    onClick={() => {
+                      setPinFor(o.order_id);
+                      setPin("");
+                      setActing(null);
+                      clearMessages();
+                    }}
+                  >
+                    Collect with PIN
+                  </button>
+                ) : (
+                  <p className="py-3 text-[15px] font-semibold">
+                    Waiting at the counter to be collected.
+                  </p>
+                )}
                 {managerLinks(
                   <span key="d">{driverLink(o)}</span>,
                   <button

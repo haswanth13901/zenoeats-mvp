@@ -43,6 +43,7 @@ export function RestaurantEditForm({
   onCancel: () => void;
   onSave: (changes: RestaurantPatch) => void;
 }) {
+  const [storefrontEnabled, setStorefrontEnabled] = useState(restaurant.storefront_customization_enabled);
   const [name, setName] = useState(restaurant.name);
   const [tagline, setTagline] = useState(restaurant.tagline ?? "");
   const [taxPct, setTaxPct] = useState((restaurant.tax_rate_bps / 100).toString());
@@ -61,6 +62,7 @@ export function RestaurantEditForm({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const changes: RestaurantPatch = {};
+    if (storefrontEnabled !== restaurant.storefront_customization_enabled) changes.storefront_customization_enabled = storefrontEnabled;
 
     if (name !== restaurant.name) changes.name = name;
 
@@ -192,6 +194,7 @@ export function RestaurantEditForm({
         </span>
       </div>
 
+      <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" className="h-5 w-5" checked={storefrontEnabled} onChange={(e) => setStorefrontEnabled(e.target.checked)} />Storefront customisation</label>
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" className="btn-primary" disabled={busy}>
           {busy && <Spinner />}
