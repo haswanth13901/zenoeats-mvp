@@ -13,10 +13,12 @@ board.
 | Identity | Customers: Clerk (email/password, Google) behind our own `/account` pages. Staff: platform-issued passwords. Admins: `ADMIN_USERS` |
 | Customer profile | `/profile`: name, phone and address; order history at this restaurant; favourite items (accounts only), saved from a heart on the menu |
 | Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
+| Storefront | Each restaurant sets its own palette, fonts, logo, rotating banners with their own framing, category shortcuts and collections — behind a platform switch |
 | Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
 | Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
-| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports, deliveries the restaurant runs itself, self-service settings |
+| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports, deliveries the restaurant runs itself, self-service settings, storefront editor |
 | Admin | Super admin portal: onboarding, activation, platform reports, CSV |
+| Policies | Privacy, terms, refunds and data deletion as files outside React, linked from sign-up, checkout and every customer page; agreement recorded per customer |
 | Infra | Docker Compose, Nginx, two Redis instances, Celery, Alembic, GitHub Actions |
 
 ## What is deliberately not here
@@ -484,6 +486,36 @@ directly -- no Clerk component is rendered.
 The SDK is loaded from the Clerk instance at runtime (about 80 KB), not
 bundled, and only on customer pages.
 
+## Policies and consent
+
+Four documents, served as real files by nginx rather than as routes in the
+app: `/legal/privacy`, `/legal/terms`, `/legal/refunds` and
+`/legal/data-deletion`. They render with no JavaScript and answer on the root
+domain as well as every restaurant subdomain, which is what Google, Apple and
+Facebook need — a reviewer is given one canonical URL and it cannot be a
+tenant's address. Google and Apple require a reachable privacy policy before
+they will approve sign-in; Facebook requires the deletion page too.
+
+They are **drafts**. Each opens with a banner saying so and ends with the
+questions a lawyer has to answer for that page. `STEPS_BEFORE_PRODUCTION.md`
+§9 tracks what is left.
+
+Agreement is asked for in three places and recorded in one:
+
+* **Sign-up** will not submit without the checkbox, and the provider buttons
+  are held behind it too. Clerk finishes a social sign-up by itself whenever
+  the provider supplied everything, and returns nobody to a consent step — so
+  the checkbox has to be passed before the browser leaves for Google.
+* **The customer guard** shows a consent form in place of checkout for an
+  account that still has nothing on record, which covers anyone who reached
+  an account another way. Guests are not gated.
+* **Checkout** says above the button that continuing means agreeing, and
+  placing the order writes `users.terms_accepted_at` and `terms_version`.
+  Guests included, since a guest never signs up.
+
+Bump `CURRENT_VERSION` in `app/services/terms.py` when the wording changes
+materially; every customer re-agrees on their next order.
+
 ## Development without Clerk
 
 For backend work you can skip Clerk entirely:
@@ -588,27 +620,58 @@ else is `BIGINT` minor units with `CHECK >= 0`.
 
 ```
 backend/
-  app/core/         auth, tenant resolution, money, crypto, idempotency
-  app/db/           engines and the SET LOCAL tenant session
+  app/core/         auth, tenant resolution, money, crypto, idempotency,
+                    stall-watch (says which line blocked the event loop)
+  app/db/           engines and the SET LOCAL tenant session; every wait bounded
   app/models/       SQLAlchemy models, frozen enums, transition matrix
-  app/services/     pricing, orders, tax, Stripe
-  app/api/v1/       portal, orders, restaurant, admin, webhooks
+  app/services/     pricing, orders, tax, Stripe, storefront, images, terms
+  app/api/v1/       portal, orders, customer, restaurant, admin, webhooks
   app/workers/      Celery app and tasks
   alembic/          schema, RLS policies, role grants
   tests/            unit tests plus the RLS gates
 web/
+  src/routes/             the route table, and one lazy area per portal
   src/pages/storefront/   customer: menu, checkout, order tracking
-  src/pages/manage/       restaurant: kitchen, menu builder, staff, reports
+  src/pages/manage/       restaurant: kitchen, menu builder, staff, reports,
+                          storefront editor
   src/pages/admin/        platform: restaurants, onboarding, reports
   src/features/           cart and session state, one RTK Query API per portal
   src/services/           HTTP client and the RTK Query base query
   src/components/         modifier sheet, cart bar, operator shell, guards
-  login/                  the three sign-in pages, deliberately outside React
-  nginx.conf              static serving: SPA fallback, real files for /login
+  login/                  the sign-in pages, deliberately outside React
+  legal/                  privacy, terms, refunds, deletion -- files, no React
+  qa/, tests/             browser regression checks against fixtures
+  nginx.conf              static serving: SPA fallback, real files for
+                          /login and /legal
 infra/
   postgres/         role creation, runs on first boot
   nginx/            origin edge with subdomain routing
+scripts/
+  dev_preflight.py  refuses to run the app natively and in Docker at once
 ```
+
+### What a customer downloads
+
+One app, three portals, but not one bundle. The page a QR code opens is a
+menu on a phone, and it used to carry the kitchen board, the menu builder and
+the platform admin screens — a third of its weight, none of it openable by
+the person holding the phone.
+
+```
+entry      ~70 kB   the shell and the storefront
+vendor    ~330 kB   React, the router, Redux -- cached across deploys
+manage    ~150 kB   fetched when someone opens /manage
+admin      ~24 kB   fetched when someone opens /admin
+```
+
+The boundary is the import graph, not a config list: each portal owns its own
+sub-routes *and* its own guard behind one lazy import, because listing a page
+in the main route table is what drags it back into the shell. `Guards.tsx` is
+split for the same reason — the operator guards import both portal APIs and
+the manage shell, so they live behind the boundary rather than beside it.
+
+CI asserts it, since one static import undoes the whole thing and leaves no
+other trace.
 
 ## Before real money
 
@@ -663,6 +726,19 @@ and keep the driver's Deliveries page open after marking the order picked up.
 Uploaded menu images under `/images/` are served by the API. Both development
 and production nginx configurations route that prefix to the API, including
 when the frontend runs as a static Docker container.
+
+They are served `Cache-Control: public, max-age=31536000, immutable`, which
+is true rather than optimistic: `services/images` mints a random key per
+upload, writes it once, and releases it only when no row refers to it, so the
+bytes at a key never change. Without it an ETag alone meant the browser asked
+about every photograph on every view and was told 304 — thirty round trips
+for a thirty-photo menu, and nothing a CDN could answer on its own.
+
+Storage stays on the API host's disk for launch, which caps the deployment at
+one API machine and makes backing up `IMAGES_DIR` non-negotiable. Rows hold
+keys and never URLs and `IMAGES_PUBLIC_BASE` already takes an absolute URL,
+so moving to a bucket later is one class and one setting. The triggers for
+doing so are in `STEPS_BEFORE_PRODUCTION.md` §4.
 
 The local edge prefers the `api` and `web` containers directly when the app
 profile is running. Docker DNS refreshes their addresses after recreation;
