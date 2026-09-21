@@ -3505,6 +3505,12 @@ def list_staff(
             "status": r.status,
             "invited_at": r.invited_at.isoformat() if r.invited_at else None,
             "accepted_at": r.accepted_at.isoformat() if r.accepted_at else None,
+            # What became of the last invitation email; null while queued.
+            "invitation_email_status": r.invitation_email_status,
+            "invitation_email_at": (
+                r.invitation_email_at.isoformat() if r.invitation_email_at else None
+            ),
+            "invitation_email_problem": r.invitation_email_problem,
             # The caller's own row, which the portal does not offer to remove.
             "is_you": r.user_id == membership.user_id,
         }
@@ -3529,13 +3535,18 @@ def invite_staff(
     staff login gets one here: a temporary password, returned once for the
     admin to pass on, which must be replaced at first sign-in.
 
-    An address that already has a staff login is never given a password here,
-    whatever state that login is in. A restaurant cannot see the account's
-    memberships anywhere else -- RLS keeps them from it -- so it cannot know
-    whether an unused temporary password belongs to the owner of another
-    restaurant. Reissuing one used to hand that owner's account to whichever
-    restaurant typed their address first. Such a person signs in with the
+    An address that already has a staff login is not given a password here --
+    with one exception. Reissuing an unused temporary password used to hand
+    another restaurant's brand-new owner to whichever restaurant typed their
+    address first, and a restaurant cannot see that account's memberships
+    elsewhere (RLS keeps them from it). Such a person signs in with the
     password they have; a lost one is reset by the super admin.
+
+    The exception is re-inviting someone this restaurant already invited and
+    who never signed in: they get a fresh temporary password, because the one
+    they were first given is gone with the email that never reached them.
+    Only when the login is on no other team -- see
+    _reissue_temporary_password_if_safe.
 
     Customer accounts are a separate population and are never looked at: an
     email that orders lunch here is not thereby a candidate for the kitchen.
@@ -3563,6 +3574,11 @@ def invite_staff(
     if existing and existing.status == StaffStatus.ACTIVE.value:
         raise errors.ApiError(409, "ALREADY_STAFF", "That person is already on the team.")
 
+    # Someone this restaurant already invited, still pending. Checked before
+    # the row below is touched: the reissue rule counts committed live
+    # memberships, and this one is -- as INVITED -- until this request ends.
+    reinviting_pending = bool(existing and existing.status == StaffStatus.INVITED.value)
+
     temp_password = None
     if found is None:
         temp_password = staff_auth.generate_temp_password()
@@ -3580,12 +3596,18 @@ def invite_staff(
     else:
         target_user_id = found
     if existing:
+        if reinviting_pending:
+            # Invited before and never signed in: whatever password they were
+            # first given is lost with the email that should have carried it,
+            # so without a new one this re-invitation is a dead end.
+            temp_password = _reissue_temporary_password_if_safe(existing.user_id)
         existing.role_code = body.role_code.value
         existing.status = StaffStatus.INVITED.value
         existing.invited_at = utcnow()
         existing.invited_by_user_id = membership.user_id
         existing.revoked_at = None
         existing.accepted_at = None
+        _mark_invitation_email_queued(existing)
         db.flush()
         background.add_task(_queue_staff_invitation, restaurant.id, existing.id, temp_password)
         return StaffInviteOut(
@@ -3789,6 +3811,100 @@ def _login_used_elsewhere(user_id) -> bool:
             {"u": str(user_id)},
         ).scalar_one()
     return live > 1
+
+
+def _reissue_temporary_password_if_safe(user_id) -> str | None:
+    """A fresh temporary password for a pending invitee who never signed in,
+    or None where issuing one would hand over more than an invitation.
+
+    Only for a login that has never chosen its own password: nothing of
+    theirs is taken over, and nothing has yet been done under their name --
+    which is why, unlike a password reset, this is not refused for an admin.
+
+    And only for a login on no other restaurant's team. That is the takeover
+    the staff invitation once allowed: another restaurant's brand-new owner is
+    exactly a login still on its temporary password. Callers must hold this
+    restaurant's membership as a committed, live row, which the count below
+    includes -- so more than one is somewhere else.
+    """
+    with system_session() as sys_db:
+        user = sys_db.get(User, user_id)
+        if user is None or user.kind != UserKind.STAFF.value or not user.must_change_password:
+            return None
+    if _login_used_elsewhere(user_id):
+        return None
+    temp_password = staff_auth.generate_temp_password()
+    with system_session() as sys_db:
+        user = sys_db.get(User, user_id)
+        user.password_hash = staff_auth.hash_password(temp_password)
+        user.must_change_password = True
+        # The old temporary password stops working, and anyone holding a
+        # session from it is signed out with it.
+        user.sessions_valid_after = utcnow()
+    return temp_password
+
+
+def _mark_invitation_email_queued(member: RestaurantUser) -> None:
+    """Clear the last outcome: a new email is on its way, and the team list
+    should say "sending", not report the previous attempt as this one."""
+    member.invitation_email_status = None
+    member.invitation_email_at = None
+    member.invitation_email_problem = None
+
+
+@router.post(
+    "/staff/{membership_id}/resend-invite",
+    response_model=StaffInviteOut,
+    # Each one emails a real inbox; a stuck button should not become a flood.
+    dependencies=[Depends(per_staff_user("staff_resend_invite", limit=10, window_seconds=600))],
+)
+def resend_staff_invitation(
+    membership_id: UUID,
+    background: BackgroundTasks,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(STAFF_ADMIN),
+):
+    """Send a pending invitation's email again.
+
+    For the person who never received it -- a spam filter, a mistyped address, an email
+    provider that refused it, email that was not set up when they were first
+    invited. If they have never signed in, the temporary password they were
+    first given went with that email or was shown once and lost, so a new one
+    is issued, emailed and shown here; the old one stops working. Someone with
+    their own password, or on another restaurant's team, is sent the link
+    alone -- see _reissue_temporary_password_if_safe for why.
+
+    The invitation is re-dated, which is what makes this a new email rather
+    than a retry the provider would quietly drop as a duplicate.
+    """
+    target = db.execute(
+        select(RestaurantUser).where(
+            RestaurantUser.id == membership_id, RestaurantUser.revoked_at.is_(None)
+        )
+    ).scalar_one_or_none()
+    if target is None:
+        raise errors.ApiError(404, "NOT_FOUND", "No such invitation.")
+    if target.status != StaffStatus.INVITED.value:
+        raise errors.ApiError(
+            409, "NOT_PENDING",
+            "This person has already accepted. There is no invitation to resend.",
+        )
+
+    temp_password = _reissue_temporary_password_if_safe(target.user_id)
+    target.invited_at = utcnow()
+    target.invited_by_user_id = membership.user_id
+    _mark_invitation_email_queued(target)
+    db.flush()
+
+    with system_session() as sys_db:
+        email = sys_db.get(User, target.user_id).email
+    log.info("staff invitation resent to %s at %s", email_for_log(email), restaurant.slug)
+    background.add_task(_queue_staff_invitation, restaurant.id, target.id, temp_password)
+    return StaffInviteOut(
+        id=target.id, email=email, status=target.status, temporary_password=temp_password,
+        email_configured=email_service.configured(),
+    )
 
 
 @router.post("/staff/{membership_id}/reset-password", response_model=StaffPasswordResetOut)

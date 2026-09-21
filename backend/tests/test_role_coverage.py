@@ -119,6 +119,8 @@ EXPECTED = {
     ("DELETE", "/restaurant/staff/{membership_id}"): ADMIN,
     ("PATCH", "/restaurant/staff/{membership_id}"): ADMIN,
     ("POST", "/restaurant/staff/{membership_id}/reset-password"): ADMIN,
+    # Resending an invitation can issue a fresh temporary password.
+    ("POST", "/restaurant/staff/{membership_id}/resend-invite"): ADMIN,
     # The restaurant's own record, which admin shares with IT support. A
     # manager runs the service; the trading name, the address tax is sourced
     # at and the tax rate itself are the owner's to answer for, and support's
@@ -269,6 +271,7 @@ def test_it_support_cannot_reach_the_money_or_the_team():
         ("POST", "/restaurant/staff"),
         ("PATCH", "/restaurant/staff/{membership_id}"),
         ("POST", "/restaurant/staff/{membership_id}/reset-password"),
+        ("POST", "/restaurant/staff/{membership_id}/resend-invite"),
     }
     found = dict(_endpoints())
     reachable = []
