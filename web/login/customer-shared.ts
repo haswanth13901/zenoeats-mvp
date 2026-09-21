@@ -1,5 +1,6 @@
 import { request } from "@/services/apiClient";
 import { clerkErrorCode, clerkErrorMessage, getClerk } from "@/services/clerk";
+import { rememberedRestaurantName, rememberRestaurantName } from "@/utils/restaurantName";
 
 /**
  * What the customer account pages have in common.
@@ -265,8 +266,10 @@ function restaurant(): Promise<{ name: string }> {
  *  platform; on the platform root there is no restaurant and the Zenoeats
  *  wordmark in the markup stands. */
 export async function paintWordmarks(): Promise<void> {
-  try {
-    const { name } = await restaurant();
+  // The page's own title, before any restaurant name is added to it, so a
+  // repaint replaces the suffix rather than stacking a second one.
+  const baseTitle = document.title;
+  const paint = (name: string) => {
     const initial = name.trim().charAt(0).toUpperCase();
     document.querySelectorAll("[data-wordmark-name]").forEach((el) => {
       el.textContent = name;
@@ -274,8 +277,31 @@ export async function paintWordmarks(): Promise<void> {
     document.querySelectorAll("[data-wordmark-mark]").forEach((el) => {
       el.textContent = initial;
     });
+    document.title = `${baseTitle} · ${name}`;
+  };
+  // Shown only once it says the right thing: the stylesheet hides the
+  // wordmark until this attribute is set, so the platform name never flashes
+  // up first on a restaurant's page.
+  const reveal = () => document.documentElement.setAttribute("data-wordmark-ready", "");
+
+  // The name the storefront saw on the way here, if there was one. Painted
+  // straight away, before the API has been asked anything.
+  const remembered = rememberedRestaurantName();
+  if (remembered) {
+    paint(remembered);
+    reveal();
+  }
+
+  try {
+    const { name } = await restaurant();
+    rememberRestaurantName(name);
+    if (name !== remembered) paint(name);
   } catch {
-    /* keep the platform wordmark */
+    // No restaurant at this address -- the platform root -- or the API is
+    // unreachable. Keep whatever is showing: the remembered name, or the
+    // Zenoeats wordmark in the markup.
+  } finally {
+    reveal();
   }
 }
 

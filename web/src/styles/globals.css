@@ -665,3 +665,24 @@
     margin-bottom: 200px;
   }
 }
+
+/* The customer sign-in pages carry the platform's "Zenoeats" wordmark in
+   their HTML and replace it with the restaurant's own name from script, so
+   shown straight away every customer saw the wrong name first. Hidden until
+   the script marks it ready -- which it does at once when the storefront
+   left the name behind, or when /portal answers.
+
+   Outside any @layer on purpose: Tailwind prunes layered rules whose classes
+   it cannot find in the markup, and these are attribute selectors.
+
+   The animation is the safety net. If the script never ran, a name that
+   stayed hidden for good would be worse than the platform's, so after two
+   seconds whatever is there is shown regardless. */
+html:not([data-wordmark-ready]) [data-wordmark-name],
+html:not([data-wordmark-ready]) [data-wordmark-mark] {
+  visibility: hidden;
+  animation: wordmark-fallback 0s linear 2s forwards;
+}
+@keyframes wordmark-fallback {
+  to { visibility: visible; }
+}
