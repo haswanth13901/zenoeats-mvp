@@ -125,6 +125,9 @@ class ItemType(Base, TimestampMixin):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    show_in_shortcuts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
     parent: Mapped["ItemType | None"] = relationship(remote_side=[id])
 
     @property

@@ -134,7 +134,11 @@ class MealOut(BaseModel):
         return None if value is None else value.strftime("%H:%M")
 
 
+from app.schemas.storefront import StorefrontOut
+
+
 class PortalOut(BaseModel):
+    storefront: StorefrontOut | None = None
     pickup_address: str | None = None
     restaurant_id: UUID
     slug: str
@@ -494,6 +498,7 @@ class ChangePasswordIn(BaseModel):
 
 
 class StaffMeOut(BaseModel):
+    storefront_customization_enabled: bool = False
     user_id: UUID
     email: str
     full_name: str | None
@@ -563,6 +568,7 @@ class UpdateRestaurantIn(BaseModel):
     # to update", which reads like a client bug rather than a rejected field.
     model_config = ConfigDict(extra="forbid")
 
+    storefront_customization_enabled: bool = False
     name: str | None = Field(default=None, min_length=1, max_length=160)
     tagline: str | None = Field(default=None, max_length=200)
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
@@ -583,6 +589,7 @@ class UpdateRestaurantIn(BaseModel):
 
 
 class RestaurantOut(BaseModel):
+    storefront_customization_enabled: bool = False
     id: UUID
     slug: str
     name: str

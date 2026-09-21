@@ -18,7 +18,7 @@ dropping it shifts the colours of every photo from a recent phone.
 
 WHERE IT IS KEPT. Under a key shaped like
 
-    restaurants/<restaurant id>/<items|options>/<random>.webp
+    restaurants/<restaurant id>/<items|options|banners|categories|branding>/<random>.webp
 
 and nothing else. The key is generated here, never taken from the upload's
 filename, so a name cannot walk out of the images folder or land on top of
@@ -49,7 +49,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core import errors
-from app.models import Item, ModifierOption
+from app.models import Item, ItemType, ModifierOption, Restaurant, StorefrontBanner
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +60,9 @@ class ImageKind(str, Enum):
 
     ITEMS = "items"
     OPTIONS = "options"
+    BANNERS = "banners"
+    CATEGORIES = "categories"
+    BRANDING = "branding"
 
 
 # Bytes accepted off the wire. The portal shrinks photos before sending, so a
@@ -83,7 +86,7 @@ ACCEPTED_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 
 _KEY = re.compile(
     r"restaurants/(?P<restaurant>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
-    r"/(?P<kind>items|options)/[0-9a-f]{32}\.webp"
+    r"/(?P<kind>items|options|banners|categories|branding)/[0-9a-f]{32}\.webp"
 )
 
 _UNREADABLE = "That file is not a photo we can use. Upload a JPEG, PNG or WebP image."
@@ -91,7 +94,7 @@ _UNREADABLE = "That file is not a photo we can use. Upload a JPEG, PNG or WebP i
 
 # ------------------------------------------------------------ processing ---
 
-def process(data: bytes) -> bytes:
+def process(data: bytes, kind: ImageKind = ImageKind.ITEMS) -> bytes:
     """Turn an upload into the WebP that is stored, or refuse it."""
     if len(data) > MAX_UPLOAD_BYTES:
         raise errors.ApiError(
@@ -129,7 +132,8 @@ def process(data: bytes) -> bytes:
             picture.mode == "P" and "transparency" in picture.info
         )
         picture = picture.convert("RGBA" if has_alpha else "RGB")
-        picture.thumbnail((MAX_EDGE, MAX_EDGE), Image.Resampling.LANCZOS)
+        edge = 2400 if kind == ImageKind.BANNERS else MAX_EDGE
+        picture.thumbnail((edge, edge), Image.Resampling.LANCZOS)
 
         out = io.BytesIO()
         save_args: dict = {"quality": WEBP_QUALITY, "method": 4, "exif": b"", "xmp": b""}
@@ -270,8 +274,9 @@ def release(db: Session, key: str | None) -> None:
         db.execute(
             select(func.count()).select_from(model).where(model.image_path == key)
         ).scalar_one()
-        for model in (Item, ModifierOption)
+        for model in (Item, ModifierOption, ItemType, StorefrontBanner)
     )
+    held += db.execute(select(func.count()).select_from(Restaurant).where(Restaurant.logo_path == key)).scalar_one()
     if held:
         return
 

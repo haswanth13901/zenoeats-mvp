@@ -39,6 +39,7 @@ ROLE_WORDS = {
     "KITCHEN": "kitchen staff",
     "CASHIER": "a cashier",
     "DRIVER": "a driver",
+    "IT_SUPPORT": "IT support",
 }
 
 # The design tokens for transactional email (design-tokens.json, "emails").

@@ -199,7 +199,7 @@ def list_restaurants(
             text(
                 """
                 SELECT r.id, r.slug, r.name, r.status, r.currency, r.tax_rate_bps,
-                       r.accepting_orders, r.created_at, r.tagline, r.timezone,
+                       r.storefront_customization_enabled, r.accepting_orders, r.created_at, r.tagline, r.timezone,
                        r.deleted_at, r.tax_mode, r.tax_code, r.address_line1,
                        r.address_line2, r.address_city, r.address_state,
                        r.address_postal_code, r.address_country,
@@ -218,6 +218,7 @@ def list_restaurants(
             id=r["id"], slug=r["slug"], name=r["name"], status=r["status"],
             currency=r["currency"], tax_rate_bps=r["tax_rate_bps"],
             accepting_orders=r["accepting_orders"],
+            storefront_customization_enabled=r["storefront_customization_enabled"],
             stripe_account_id=r["stripe_account_id"],
             charges_enabled=bool(r["charges_enabled"]),
             created_at=r["created_at"],
@@ -249,6 +250,7 @@ def _restaurant_out(session, restaurant: Restaurant) -> RestaurantOut:
         status=restaurant.status, currency=restaurant.currency,
         tax_rate_bps=restaurant.tax_rate_bps,
         accepting_orders=restaurant.accepting_orders,
+        storefront_customization_enabled=restaurant.storefront_customization_enabled,
         stripe_account_id=account["stripe_account_id"] if account else None,
         charges_enabled=bool(account["charges_enabled"]) if account else False,
         created_at=restaurant.created_at, tagline=restaurant.tagline,
@@ -359,6 +361,9 @@ def delete_restaurant(restaurant_id: UUID, admin: User = Depends(require_platfor
 # A new tenant table missing from this list leaves orphans behind, which is
 # why the test beside it checks the list against the schema.
 _PURGE_ORDER = [
+    "storefront_collection_items",
+    "storefront_banners",
+    "storefront_collections",
     "order_item_modifiers",
     "order_items",
     # Before orders: an event names the order it happened to.

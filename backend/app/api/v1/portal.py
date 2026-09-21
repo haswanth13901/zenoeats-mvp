@@ -13,7 +13,7 @@ from app.config import settings
 from app.core.ratelimit import per_ip
 from app.models import Restaurant, RestaurantPaymentAccount
 from app.schemas.api import MenuOut, PortalOut
-from app.services import delivery
+from app.services import delivery, storefront
 from app.services.menu import load_menu
 
 router = APIRouter(tags=["portal"])
@@ -31,6 +31,7 @@ def get_portal(
 ):
     account = db.execute(select(RestaurantPaymentAccount)).scalar_one_or_none()
     return PortalOut(
+        storefront=storefront.public(db, restaurant),
         restaurant_id=restaurant.id,
         slug=restaurant.slug,
         name=restaurant.name,

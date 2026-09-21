@@ -39,7 +39,8 @@ from app.schemas.api import (
     ChangePasswordIn, MenuOut, StaffInviteOut, StaffLoginIn, StaffMeOut,
     StaffPasswordResetOut, known_timezone,
 )
-from app.services import geocoding, images, restaurant_profile, tracking
+from app.services import geocoding, images, restaurant_profile, tracking, storefront
+from app.schemas.storefront import ThemePatch, CategoryPatch, BannersIn, CollectionsIn
 from app.services.images import ImageKind
 from app.services.menu import load_item_types, load_menu
 from app.services.orders import transition
@@ -114,6 +115,7 @@ def staff_login(
         if restaurant is None:
             raise errors.tenant_scope_denied()
         restaurant_name = restaurant.name
+        storefront_enabled = restaurant.storefront_customization_enabled
 
     response.set_cookie(
         key=staff_auth.SESSION_COOKIE,
@@ -128,6 +130,7 @@ def staff_login(
         user_id=user_id, email=email, full_name=full_name,
         role_code=role_code, must_change_password=must_change,
         restaurant_name=restaurant_name, membership_status=membership_status,
+        storefront_customization_enabled=storefront_enabled,
     )
 
 
@@ -208,11 +211,13 @@ def staff_me(
         if restaurant is None:
             raise errors.tenant_scope_denied()
         restaurant_name = restaurant.name
+        storefront_enabled = restaurant.storefront_customization_enabled
 
     return StaffMeOut(
         user_id=user.id, email=user.email, full_name=user.full_name,
         role_code=role_code, must_change_password=user.must_change_password,
         restaurant_name=restaurant_name, membership_status=membership_status,
+        storefront_customization_enabled=storefront_enabled,
     )
 
 
@@ -280,6 +285,33 @@ DELIVERY = require_staff(StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.DRIVER)
 # driver have exactly as much claim to as an owner.
 OWN_ACCOUNT = require_staff()
 
+# IT support. The four lists below are the whole of what the role may do, and
+# they are split by what an entry costs rather than by which screen it is on:
+# reading the restaurant to work out what is wrong is free, and changing how
+# it is configured is recoverable, so support has both. Changing what is sold,
+# acting on a live order, reading takings and touching the team are none of
+# those, so support has none of them -- the endpoints for those keep MANAGE,
+# ANY_STAFF and STAFF_ADMIN untouched, which is what makes this role additive
+# rather than a re-cut of everyone else's.
+#
+# FLOOR_VIEW and MENU_VIEW exist as the read halves of ANY_STAFF and MANAGE.
+# The write halves stay on the originals, so the pairing is what keeps the
+# role read-only there: adding an endpoint to the wrong one of each pair is
+# exactly what tests/test_role_coverage.py refuses.
+FLOOR_VIEW = require_staff(
+    StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.KITCHEN, StaffRole.CASHIER,
+    StaffRole.IT_SUPPORT,
+)
+MENU_VIEW = require_staff(StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.IT_SUPPORT)
+# The storefront's presentation, and the image uploads it needs. An upload on
+# its own attaches nothing -- saving a row with the key is what puts a picture
+# anywhere -- so this does not become a way into the menu.
+STOREFRONT = require_staff(StaffRole.ADMIN, StaffRole.MANAGER, StaffRole.IT_SUPPORT)
+# The restaurant's own record and where it delivers. Admin's, and support's
+# because a wrong timezone, a mistyped address or a delivery ring that never
+# matches is what a restaurant calls support about.
+SETTINGS = require_staff(StaffRole.ADMIN, StaffRole.IT_SUPPORT)
+
 
 # ------------------------------------------------------------ own account ---
 
@@ -335,6 +367,7 @@ def update_own_account(
         if restaurant is None:
             raise errors.tenant_scope_denied()
         restaurant_name = restaurant.name
+        storefront_enabled = restaurant.storefront_customization_enabled
 
     return StaffMeOut(
         user_id=user.id, email=email, full_name=full_name,
@@ -503,7 +536,7 @@ def _profile_out(db: Session, restaurant: Restaurant) -> RestaurantProfileOut:
 def read_profile(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(STAFF_ADMIN),
+    _=Depends(SETTINGS),
 ):
     """This restaurant's own record.
 
@@ -518,7 +551,7 @@ def update_profile(
     body: RestaurantProfileIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    membership: RestaurantUser = Depends(STAFF_ADMIN),
+    membership: RestaurantUser = Depends(SETTINGS),
 ):
     """Change it.
 
@@ -672,7 +705,7 @@ def _delivery_out(db: Session, restaurant: Restaurant) -> DeliverySettingsOut:
 def read_delivery(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(STAFF_ADMIN),
+    _=Depends(SETTINGS),
 ):
     """What this restaurant delivers, and why it might not be delivering."""
     return _delivery_out(db, restaurant)
@@ -682,7 +715,7 @@ def read_delivery(
 def locate_restaurant(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    membership: RestaurantUser = Depends(STAFF_ADMIN),
+    membership: RestaurantUser = Depends(SETTINGS),
 ):
     """Find the restaurant's own coordinates from its pickup address.
 
@@ -731,7 +764,7 @@ def update_delivery(
     body: DeliverySettingsIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    membership: RestaurantUser = Depends(STAFF_ADMIN),
+    membership: RestaurantUser = Depends(SETTINGS),
 ):
     """Switch delivery on or off, and say whether the fee is taxed.
 
@@ -770,7 +803,7 @@ def set_zones(
     body: ZonesIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    membership: RestaurantUser = Depends(STAFF_ADMIN),
+    membership: RestaurantUser = Depends(SETTINGS),
 ):
     """Replace the whole set of rings."""
     edges = [round(zone.max_miles, 2) for zone in body.zones]
@@ -1052,7 +1085,7 @@ def upload_image(
     kind: ImageKind,
     file: UploadFile,
     restaurant: Restaurant = Depends(current_restaurant_staff),
-    _=Depends(MANAGE),
+    _=Depends(STOREFRONT),
 ):
     """Store a photo for an item or a modifier option, and say where it is.
 
@@ -1072,7 +1105,9 @@ def upload_image(
     # One byte over the limit is enough to know it is over, without reading
     # the rest of an arbitrarily large body into memory.
     data = file.file.read(images.MAX_UPLOAD_BYTES + 1)
-    picture = images.process(data)
+    if kind in (ImageKind.BANNERS, ImageKind.CATEGORIES, ImageKind.BRANDING):
+        storefront.require_enabled(restaurant)
+    picture = images.process(data, kind)
 
     key = images.new_key(restaurant.id, kind)
     images.storage().save(key, picture)
@@ -1084,7 +1119,7 @@ def upload_image(
 def staff_menu(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(MANAGE),
+    _=Depends(MENU_VIEW),
 ):
     """The menu as the builder needs to see it.
 
@@ -1503,7 +1538,7 @@ def _combo_out(combo: Combo) -> dict:
 def list_combos(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(MANAGE),
+    _=Depends(MENU_VIEW),
 ):
     """Every combo, whichever period it belongs to."""
     combos = db.execute(
@@ -1667,7 +1702,7 @@ def list_modifier_groups(
     item_type_id: UUID | None = None,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(MANAGE),
+    _=Depends(MENU_VIEW),
 ):
     """The reusable library. Filtered by item type so adding a drink surfaces
     Ice level rather than Veggies.
@@ -2062,7 +2097,7 @@ def _type_name_taken(db: Session, name: str, *, excluding: UUID | None = None) -
 def list_item_types(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(MANAGE),
+    _=Depends(MENU_VIEW),
 ):
     """The restaurant's own types, in the order its menu reads.
 
@@ -2453,7 +2488,7 @@ def _set_meal_links(db: Session, restaurant: Restaurant, item: Item, meal_ids) -
 def list_items(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(MANAGE),
+    _=Depends(MENU_VIEW),
 ):
     """The item library: everything the restaurant sells, served or not.
 
@@ -2657,7 +2692,7 @@ def delete_item(
 def stock(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(ANY_STAFF),
+    _=Depends(FLOOR_VIEW),
 ):
     """What is in stock, for the people who run out of it.
 
@@ -2722,7 +2757,7 @@ def set_item_availability(
 def order_board(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(ANY_STAFF),
+    _=Depends(FLOOR_VIEW),
 ):
     """The live board. Polled every few seconds by the kitchen screen.
 
@@ -2818,7 +2853,7 @@ HISTORY_LIMIT = 200
 def order_history(
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
-    _=Depends(ANY_STAFF),
+    _=Depends(FLOOR_VIEW),
 ):
     """Today's orders that have left the board, newest first.
 
@@ -4037,3 +4072,30 @@ def _zone(name: str | None) -> ZoneInfo:
     except (ZoneInfoNotFoundError, ValueError):
         log.warning("restaurant timezone %r is not a timezone; reporting in UTC", name)
         return ZoneInfo("UTC")
+
+
+# ------------------------------------------------------------ storefront ---
+
+@router.get("/storefront")
+def get_storefront(restaurant: Restaurant = Depends(current_restaurant_staff), db: Session = StaffDb, _=Depends(STOREFRONT)):
+    return storefront.management(db, restaurant)
+
+
+@router.patch("/storefront/theme")
+def patch_storefront_theme(body: ThemePatch, restaurant: Restaurant = Depends(current_restaurant_staff), db: Session = StaffDb, _=Depends(STOREFRONT)):
+    return storefront.save_theme(db, restaurant, body)
+
+
+@router.put("/storefront/banners")
+def put_storefront_banners(body: BannersIn, restaurant: Restaurant = Depends(current_restaurant_staff), db: Session = StaffDb, _=Depends(STOREFRONT)):
+    return storefront.save_banners(db, restaurant, body)
+
+
+@router.patch("/item-types/{type_id}/storefront")
+def patch_category_storefront(type_id: UUID, body: CategoryPatch, restaurant: Restaurant = Depends(current_restaurant_staff), db: Session = StaffDb, _=Depends(STOREFRONT)):
+    return storefront.save_category(db, restaurant, type_id, body)
+
+
+@router.put("/storefront/collections")
+def put_storefront_collections(body: CollectionsIn, restaurant: Restaurant = Depends(current_restaurant_staff), db: Session = StaffDb, _=Depends(STOREFRONT)):
+    return storefront.save_collections(db, restaurant, body)

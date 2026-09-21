@@ -68,6 +68,7 @@ def main() -> None:
             currency="USD",
             tax_rate_bps=825,  # 8.25% flat. Replace with Stripe Tax for real.
             tagline="Wood-fired burgers and cold drinks",
+            storefront_customization_enabled=True,
         )
         session.add(restaurant)
         session.flush()
@@ -292,6 +293,8 @@ def main() -> None:
                 session.add(ComboSlotItem(restaurant_id=rid, slot_id=slot.id,
                                           item_id=item.id, sort_order=index))
 
+        seed_storefront(session, rid, [smash.id, crispy.id, fries.id])
+
     print(f"Seeded '{SLUG}' ({rid})")
     print("  Portal:  http://spicehouse.zenoeats.local:8080")
     print("  Customer sign-in:  create an account (through Clerk) at")
@@ -303,6 +306,52 @@ def main() -> None:
     print()
     print("  Next: replace acct_REPLACE_WITH_TEST_ACCOUNT with a real Stripe")
     print("  test-mode connected account before attempting a payment.")
+
+
+
+def seed_storefront(session, restaurant_id, item_ids):
+    """Offline demo illustrations, passed through the same image service.
+
+    No remote photograph is needed to seed a fresh database. These simple
+    food illustrations make the three slides and category images visible;
+    the restaurant replaces them with its own photography in the editor.
+    An existing demo is left alone by main(), including its saved branding.
+    """
+    import io
+    from PIL import Image, ImageDraw
+    from sqlalchemy import select
+    from app.models import StorefrontBanner, StorefrontCollection, StorefrontCollectionItem
+    from app.services import images
+    from app.services.images import ImageKind
+
+    def picture(index, kind):
+        canvas = Image.new("RGB", (2400, 1100), ["#DED7B7", "#DCE4CC", "#E6CEB1"][index % 3])
+        draw = ImageDraw.Draw(canvas)
+        draw.ellipse((1300, 160, 2220, 1050), fill="#FFF8E4")
+        if index % 3 == 0:
+            draw.rounded_rectangle((1400, 460, 2080, 800), radius=160, fill="#BD702F")
+            draw.rectangle((1410, 590, 2070, 650), fill="#466136")
+            draw.rectangle((1410, 660, 2070, 720), fill="#623522")
+        elif index % 3 == 1:
+            draw.rounded_rectangle((1550, 340, 1980, 900), radius=65, fill="#AC5D2E")
+            draw.rectangle((1660, 160, 1690, 590), fill="#FAF8F2")
+        else:
+            for x in range(1480, 2020, 80):
+                draw.rounded_rectangle((x, 340, x + 50, 800), radius=15, fill="#E6AF42")
+            draw.polygon([(1450, 600), (2070, 600), (2000, 920), (1520, 920)], fill="#8B3826")
+        output = io.BytesIO(); canvas.save(output, "PNG")
+        key = images.new_key(restaurant_id, kind)
+        images.storage().save(key, images.process(output.getvalue(), kind))
+        return images.accept(key, restaurant_id, kind)
+
+    for n, headline in enumerate(("Fresh from our kitchen", "Something refreshing", "Make it a meal")):
+        session.add(StorefrontBanner(restaurant_id=restaurant_id, image_path=picture(n, ImageKind.BANNERS), headline=headline, subline="Made to order, ready to enjoy.", cta_label="Explore the menu", cta_target_kind="menu", sort_order=n))
+    for n, category in enumerate(session.scalars(select(ItemType).order_by(ItemType.sort_order, ItemType.id))):
+        category.image_path = picture(n, ImageKind.CATEGORIES)
+    collection = StorefrontCollection(restaurant_id=restaurant_id, title="House favourites", sort_order=0)
+    session.add(collection); session.flush()
+    for n, ident in enumerate(item_ids):
+        session.add(StorefrontCollectionItem(restaurant_id=restaurant_id, collection_id=collection.id, item_id=ident, sort_order=n))
 
 
 if __name__ == "__main__":

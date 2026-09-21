@@ -8,7 +8,7 @@ from sqlalchemy import (
     BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer,
     String, UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, uuid_pk
@@ -62,6 +62,13 @@ class Restaurant(Base, TimestampMixin):
     address_state: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address_postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     address_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+
+    # Presentation is dormant until the platform enables it. Null theme keeps
+    # the original customer palette, including its distinct gold action.
+    storefront_customization_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    theme: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    logo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    banner_interval_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=5000, server_default="5000")
 
     # Branding
     tagline: Mapped[str | None] = mapped_column(String(200), nullable=True)

@@ -17,6 +17,16 @@ class StaffRole(str, enum.Enum):
     # Runs deliveries. Sees the orders assigned to them and nothing else --
     # not the board, the menu, stock, reports or the team.
     DRIVER = "DRIVER"
+    # Keeps the restaurant's setup working. Reads the board, stock and the
+    # menu to diagnose what a customer is seeing, and owns the technical
+    # configuration: the storefront's presentation, the restaurant's record
+    # and its delivery area.
+    #
+    # Deliberately cannot change what is sold or who is paid. No menu or
+    # price edit, no action on a live order, no reports and no staff
+    # management -- the three places where a support login would become a
+    # way to move money or take over the team.
+    IT_SUPPORT = "IT_SUPPORT"
 
 
 class StaffStatus(str, enum.Enum):
