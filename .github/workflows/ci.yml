@@ -56,6 +56,25 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
+      # Before the tests, on the empty schema they are about to fill, because
+      # what this proves is that the chain of migrations is internally
+      # consistent -- every upgrade has a downgrade that undoes it.
+      #
+      # It deliberately does not prove that a downgrade is safe over real
+      # data, and it cannot: 0002 is what lets a user exist without a Clerk
+      # id, so undoing it deletes every staff member and platform admin, and
+      # seven foreign keys point at users. A rollback of a live database is a
+      # decision made against that database, not something a pipeline can
+      # sign off (see STEPS_BEFORE_PRODUCTION.md, "Backups and recovery").
+      #
+      # Run after the suite instead and it fails on the rows the suite left
+      # behind, which says nothing about the migrations.
+      - name: Migration is reversible
+        working-directory: backend
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
       # These four gates are the reason this pipeline exists. A green build
       # without them is not evidence of tenant isolation.
       - name: Tenant isolation and privilege gates
@@ -65,12 +84,6 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: pytest tests/ -v --ignore=tests/test_rls_isolation.py
-
-      - name: Migration is reversible
-        working-directory: backend
-        run: |
-          alembic downgrade base
-          alembic upgrade head
 
   frontend:
     runs-on: ubuntu-latest
