@@ -107,28 +107,38 @@ Zenoeats is a multi-tenant, pickup-only restaurant ordering platform. Each resta
 | KITCHEN | ✓ | — | ✓ | — | — | — | — |
 | CASHIER | ✓ | — | ✓ | — | — | — | — |
 | DRIVER | — | ✓ | — | — | — | — | — |
+| IT_SUPPORT | read | — | read | read | — | — | ✓ |
 
 ⚠ A driver is not floor staff with one extra screen: **Deliveries is their whole portal**, it shows only the orders assigned to them, and they land on it at sign-in. Everything else answers "not part of your role" (B4), and the API refuses it.
 
+⚠ IT support is the other role that is not floor staff, and the only one whose screens differ by more than which tabs are there. **Three of its four tabs open read-only**: the kitchen board keeps its tickets and loses "Mark ready" and "Collect with PIN", Stock lists what is sold out as a pill instead of a toggle, and the menu builder shows its Preview tab alone with the four editing tabs gone (the tab row hides itself, since one tab is not a choice). Settings and Storefront are the two it may actually change, and both audit the change to whoever made it. Design read-only states for B5, B6 and B7 accordingly; they are not disabled buttons.
+
 **What each role may do** (the API enforces all of it; the UI only offers what will work)
 
-| Action | ADMIN | MANAGER | KITCHEN | CASHIER | DRIVER |
-|---|---|---|---|---|---|
-| See the board, mark ready, collect with PIN | ✓ | ✓ | ✓ | ✓ | — |
-| Mark items sold out or back in stock | ✓ | ✓ | ✓ | ✓ | — |
-| Hand over without the PIN | ✓ | ✓ | — | — | — |
-| Cancel a paid order (with a reason) | ✓ | ✓ | — | — | — |
-| Assign a driver, change driver, back to collection | ✓ | ✓ | — | — | — |
-| Mark picked up / delivered | ✓ | ✓ | — | — | ✓ own orders only |
-| Edit the menu, read reports | ✓ | ✓ | — | — | — |
-| Invite, remove, change roles, reset passwords | ✓ | — | — | — | — |
-| Edit the restaurant, its address, timezone and tax | ✓ | — | — | — | — |
-| Set the delivery area, its fees and their tax | ✓ | — | — | — | — |
-| Change your own name and sign-in address | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Action | ADMIN | MANAGER | KITCHEN | CASHIER | DRIVER | IT_SUPPORT |
+|---|---|---|---|---|---|---|
+| See the board and today's history | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| See what is sold out | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Read the menu | ✓ | ✓ | — | — | — | ✓ |
+| Mark ready, collect with PIN | ✓ | ✓ | ✓ | ✓ | — | — |
+| Mark items sold out or back in stock | ✓ | ✓ | ✓ | ✓ | — | — |
+| Hand over without the PIN | ✓ | ✓ | — | — | — | — |
+| Cancel a paid order (with a reason) | ✓ | ✓ | — | — | — | — |
+| Assign a driver, change driver, back to collection | ✓ | ✓ | — | — | — | — |
+| Mark picked up / delivered | ✓ | ✓ | — | — | ✓ own orders only | — |
+| Edit the menu | ✓ | ✓ | — | — | — | — |
+| Read reports | ✓ | ✓ | — | — | — | — |
+| Edit storefront presentation (when enabled) | ✓ | ✓ | — | — | — | ✓ |
+| Invite, remove, change roles, reset passwords | ✓ | — | — | — | — | — |
+| Edit the restaurant, its address, timezone and tax | ✓ | — | — | — | — | ✓ |
+| Set the delivery area, its fees and their tax | ✓ | — | — | — | — | ✓ |
+| Change your own name and sign-in address | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ⚠ That last row is not a mistake. Your own name and login belong to you whatever you do at the restaurant, so a driver may change theirs exactly as an owner may. Only B11 offers it today, and B11 is admin-only — if the redesign wants a "Your account" screen for the whole team, the API is already open to it.
 
-Help text shown for each role on the Staff page: ADMIN "Everything, including the team: invitations, roles and password resets." · MANAGER "Orders, menu, reports, and handing over or cancelling orders. No staff changes." · KITCHEN "The order board and sold-out toggles." · CASHIER "The counter: collect orders with PINs, and sold-out toggles." · DRIVER "Deliveries assigned to them, and nothing else of the portal."
+Help text shown for each role on the Staff page: ADMIN "Everything, including the team: invitations, roles and password resets." · MANAGER "Orders, menu, reports, and handing over or cancelling orders. No staff changes." · KITCHEN "The order board and sold-out toggles." · CASHIER "The counter: collect orders with PINs, and sold-out toggles." · DRIVER "Deliveries assigned to them, and nothing else of the portal." · IT_SUPPORT "Setup and presentation: the storefront, the restaurant's details and the delivery area. Reads the board, stock and menu to diagnose them, and changes none of the three. No reports, no order actions, no staff."
+
+Role codes are shown to people with the underscore removed and lowercased — "it support", not "IT_SUPPORT" — in both Staff dropdowns and the team table, which is what the other five already read as.
 
 **Order status** (customer-facing title / detail):
 
@@ -1268,9 +1278,14 @@ Plain, precise, reassuring, sentence case, explains consequences ("Cancel and no
 9. **Real-time is polling, not sockets:** kitchen board 5 s; order tracking 2 s/8 s; stock 30 s; admin reports 30 s; restaurant reports 60 s.
 10. **Accessibility already present, which must be kept or improved:** `role="dialog"` + `aria-modal` on sheets, `aria-label` on icon buttons and steppers, `aria-pressed` on toggles, radios and checkboxes scoped per slot, focus-visible outlines, autocomplete attributes (`one-time-code`, `new-password`, `username`), `inputmode="numeric"` on code and PIN fields, reduced-motion support.
 
+**Storefront module amendment:** The new platform-gated Storefront module supersedes
+the earlier prohibitions on per-restaurant theming and Google Fonts. Custom
+CSS/HTML, arbitrary font URLs and separate sign-in page theming remain excluded.
+The super-admin restaurant PATCH accepts `storefront_customization_enabled`.
+
 ### 5.4 API endpoints the frontend calls (data contract; do not invent others without flagging)
 **Customer (tenant from Host; order calls carry the Clerk token *or* the `zenoeats_guest_session` httpOnly cookie, which the browser sends itself):**
-- `GET /portal`: restaurant header, open/closed (A1, A9, A10, A5 heading)
+- `GET /portal`: restaurant header, optional gated `storefront` (theme, logo, scheduled banners, category shortcuts and collection item IDs), open/closed (A1, A9, A10, A5 heading)
 - `GET /menu`: storefront menu (A1)
 - `GET /orders/session`: who is ordering — `{email, full_name, is_guest}`, or **401 for nobody** (A1 account row, A9/A10/A11 guard). ⚠ 401 is the ordinary answer on A1 and is not an error state
 - `POST /orders/guest-session`: order without an account — `{email, full_name?}` in, the session cookie back (A5). Refused on an address with no restaurant
@@ -1289,11 +1304,12 @@ Plain, precise, reassuring, sentence case, explains consequences ("Cancel and no
 - Menu: `GET menu`
 - Item types: `GET` / `POST item-types`, `PATCH` / `DELETE item-types/{id}`
 - Items: `GET` / `POST items`, `PATCH` / `DELETE items/{id}`
-- Photos: `POST images?kind=items|options` (multipart)
+- Photos: `POST images?kind=items|options|banners|categories|branding` (multipart; new kinds require Storefront enabled)
 - Meal periods: `POST meals`, `PATCH` / `DELETE meals/{id}`, `POST meals/{id}/items`, `DELETE meals/{id}/items/{itemId}`
 - Combos: `GET` / `POST combos`, `PATCH` / `DELETE combos/{id}`
 - Modifiers: `GET` / `POST modifier-groups`, `PATCH` / `DELETE modifier-groups/{id}`, `POST modifier-groups/{id}/options`, `PATCH` / `DELETE modifier-options/{id}`
 - Staff: `GET` / `POST staff`, `POST staff/accept`, `PATCH staff/{id}` {role_code}, `POST staff/{id}/reset-password`, `DELETE staff/{id}`
+- Storefront (Admin/Manager, platform gate required): `GET storefront`, `PATCH storefront/theme` {theme?, logo_path?, banner_interval_ms?}, `PUT storefront/banners` {banners}, `PATCH item-types/{id}/storefront` {image_path?, show_in_shortcuts?}, `PUT storefront/collections` {collections}. PUT replaces the ordered set. `GET me` exposes `storefront_customization_enabled`.
 - Reports: `GET reports?from=&to=` (restaurant-local dates, both inclusive; defaults to today there)
 - The restaurant itself: `GET` / `PATCH profile`
 - Delivery area: `GET delivery`, `PATCH delivery` {delivery_enabled?, delivery_fee_taxable?}, `POST delivery/locate`, `PUT delivery/zones` {zones: [{max_miles, fee_minor}]}

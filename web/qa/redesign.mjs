@@ -340,7 +340,8 @@ await check("A13-save-failure-retains-draft-and-verified-email", { cart:true }, 
 });
 const roleLinks = { ADMIN: ["/manage","/manage/deliveries","/manage/stock","/manage/menu","/manage/staff","/manage/reports","/manage/settings"],
   MANAGER:["/manage","/manage/deliveries","/manage/stock","/manage/menu","/manage/reports"],
-  KITCHEN:["/manage","/manage/stock"], CASHIER:["/manage","/manage/stock"], DRIVER:["/manage/deliveries"] };
+  KITCHEN:["/manage","/manage/stock"], CASHIER:["/manage","/manage/stock"], DRIVER:["/manage/deliveries"],
+  IT_SUPPORT:["/manage","/manage/stock","/manage/menu","/manage/settings"] };
 for (const [role,links] of Object.entries(roleLinks)) {
   await check("B0-role-"+role,{role,width:1024},async({page})=>{
     await page.goto(origin+(role==="DRIVER"?"/manage/deliveries":"/manage"));

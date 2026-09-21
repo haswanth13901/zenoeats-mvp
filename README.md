@@ -139,6 +139,13 @@ system read surface.
   role, or leave the restaurant without an active admin. Resets are refused
   for another admin, and for a login that also works at another Zenoeats
   restaurant; Zenoeats support resets those.
+- **Storefront** is available to admins and managers when the platform enables
+  Storefront customisation. At `/manage/storefront`, save banners, category
+  shortcut photos and visibility, featured collections, and brand settings
+  independently. Uploads are drafts until saved; the live preview shows unsaved
+  choices. Category order stays on Menu. Collections reference existing items
+  and always use today's menu prices and availability. Turning the module off
+  restores the original customer appearance without discarding saved settings.
 - **Settings** is the admin's own screen, in six parts. *Your account* is
   your display name and the address you sign in with -- the name saves on its
   own, the address asks for your password, since it is a credential and a name
@@ -176,40 +183,64 @@ system read surface.
 
 ### Staff roles
 
-Every member of a restaurant's team has one of five roles. The same person
+Every member of a restaurant's team has one of six roles. The same person
 can hold a different role at another restaurant.
 
-| Role | Kitchen | Deliveries | Stock | Menu | Staff | Reports | Settings |
-|---|---|---|---|---|---|---|---|
-| Admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Manager | ✓ | ✓ | ✓ | ✓ | | ✓ | |
-| Kitchen | ✓ | | ✓ | | | | |
-| Cashier | ✓ | | ✓ | | | | |
-| Driver | | ✓ | | | | | |
+| Role | Kitchen | Deliveries | Stock | Menu | Staff | Reports | Storefront* | Settings |
+|---|---|---|---|---|---|---|---|---|
+| Admin | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Manager | ✓ | ✓ | ✓ | ✓ | | ✓ | ✓ | |
+| Kitchen | ✓ | | ✓ | | | | | |
+| Cashier | ✓ | | ✓ | | | | | |
+| Driver | | ✓ | | | | | | |
+| IT support | read | | read | read | | | ✓ | ✓ |
+
+*Storefront requires the platform's per-restaurant switch. Only a super admin
+can change that switch, from the restaurant edit form; the change is audited.
 
 A driver is not floor staff with an extra screen. Deliveries is the whole
 portal to them, and it shows only the orders assigned to them.
 
+IT support is the other role that is not floor staff: it works on the
+restaurant rather than in it. Three of its screens open read-only, and the
+portal shows them that way -- the board loses its two buttons, the stock list
+its toggles, and the menu builder keeps only its preview tab. What the role
+does own is the setup a restaurant rings support about: the storefront's
+presentation, the trading name and address, the timezone, the tax rate and
+the delivery rings. Every one of those changes is audited to the person who
+made it.
+
+What it deliberately cannot do is change what is sold, act on a live order,
+read the takings or touch the team. Those are the four ways a support login
+would become a way to move money or take over the restaurant, and not having
+them is what makes the role safe to give to someone outside it.
+
 The actions split further:
 
-| Action | Admin | Manager | Kitchen | Cashier | Driver |
-|---|---|---|---|---|---|
-| See the board, mark ready, collect with PIN | ✓ | ✓ | ✓ | ✓ | |
-| Mark items sold out or back in stock | ✓ | ✓ | ✓ | ✓ | |
-| Hand over without the PIN | ✓ | ✓ | | | |
-| Cancel a paid order | ✓ | ✓ | | | |
-| Edit the menu, read reports | ✓ | ✓ | | | |
-| Send an order out with a driver | ✓ | ✓ | | | |
-| Pick up and deliver | ✓ | ✓ | | | ✓ |
-| Invite and remove staff, change roles, reset passwords | ✓ | | | | |
-| Edit the restaurant's name, address, timezone and tax | ✓ | | | | |
-| Set the delivery area, its fees and whether they are taxed | ✓ | | | | |
-| Change your own display name and sign-in address | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Action | Admin | Manager | Kitchen | Cashier | Driver | IT support |
+|---|---|---|---|---|---|---|
+| See the board and today's history | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| See what is sold out | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| Read the menu | ✓ | ✓ | | | | ✓ |
+| Mark ready, collect with PIN | ✓ | ✓ | ✓ | ✓ | | |
+| Mark items sold out or back in stock | ✓ | ✓ | ✓ | ✓ | | |
+| Hand over without the PIN | ✓ | ✓ | | | | |
+| Cancel a paid order | ✓ | ✓ | | | | |
+| Edit storefront presentation (when enabled) | ✓ | ✓ | | | | ✓ |
+| Edit the menu | ✓ | ✓ | | | | |
+| Read reports | ✓ | ✓ | | | | |
+| Send an order out with a driver | ✓ | ✓ | | | | |
+| Pick up and deliver | ✓ | ✓ | | | ✓ | |
+| Invite and remove staff, change roles, reset passwords | ✓ | | | | | |
+| Edit the restaurant's name, address, timezone and tax | ✓ | | | | | ✓ |
+| Set the delivery area, its fees and whether they are taxed | ✓ | | | | | ✓ |
+| Change your own display name and sign-in address | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 The last row is not an oversight. Your own name and your own login belong to
 you whatever you do at the restaurant, so a driver may change theirs exactly as
-an owner may. Only the Settings screen offers it today, which is admin-only, so
-a screen for the rest of the team is a route away rather than a rewrite.
+an owner may. Only the Settings screen offers it today, which admins and IT
+support can open, so a screen for the rest of the team is a route away rather
+than a rewrite.
 
 ### How roles are enforced
 
@@ -234,7 +265,12 @@ these checks in order, and any one of them refuses the request:
    four who work the floor, deliberately not Driver), `STAFF_ADMIN` (Admin
    alone), `DELIVERY` (Admin, Manager, Driver) and `OWN_ACCOUNT` (everyone,
    for the two endpoints that are about you rather than about the
-   restaurant).
+   restaurant). IT support adds four more, each one of those plus
+   `IT_SUPPORT`: `FLOOR_VIEW` and `MENU_VIEW` are the read halves of
+   `ANY_STAFF` and `MANAGE`, with every write beside them left on the
+   original, while `STOREFRONT` and `SETTINGS` are read and write both.
+   Keeping the reads and the writes on separate lists is what makes the role
+   read-only where it is meant to be, rather than a promise in a comment.
 4. **Row-level security.** The query itself runs with
    `app.current_tenant` set, so even a wrong role check could not read or
    write another restaurant's rows.
@@ -251,7 +287,11 @@ what people see, not what they can do.
 fails if an endpoint is added without a role check, or if an endpoint's roles
 change without the map changing with it. So adding an endpoint, or widening
 one, means editing that table on purpose. When you do, update the tables above
-and `nav.ts` to match.
+and `nav.ts` to match. Two further tests in that file are about IT support
+alone: one fails if the role gains a write outside its own configuration, and
+one names the endpoints it must never reach -- cancel, override, item edits,
+reports and the whole staff screen -- so a widening that reaches one of them
+is caught even if the map was edited to allow it.
 
 ### Super admin screen
 
@@ -645,8 +685,16 @@ Uvicorn, Vite and Celery terminals first. To switch back to native development,
 run `docker compose --profile app stop api web worker beat` before starting
 those terminals; leave PostgreSQL, Redis and nginx running. Duplicate app
 stacks waste memory, can compete for published ports, and run extra task
-consumers. On an 8 GB laptop, avoid concurrent frontend builds while serving
+consumers. `make up-all`, `make api`, `make web` and `make worker` now refuse
+to start while the other mode is running (`scripts/dev_preflight.py`).
+On an 8 GB laptop, avoid concurrent frontend builds while serving
 the app: memory pressure can cause API worker restarts and request timeouts.
+When Windows runs short of memory it pages Docker's VM out to disk, and an API
+that has sat idle is paged out first: its next request then hangs for a minute
+or more, which the browser shows as "Can't reach the server". The API log says
+which kind of silence it was: `the whole API process was paused` means the
+host, not the code; `event loop blocked` is a real bug and prints the line
+responsible. The portal pages now retry and reconnect on their own either way.
 Local Compose defaults to one API worker to reduce memory usage and avoid
 multiprocess watchdog restarts on a busy laptop. Set `API_WORKERS` explicitly
 for a production host after sizing its resources and database pools.
@@ -668,3 +716,32 @@ Google's terms allow caching rather than keeping; what an order keeps is the
 distance and the fee, which are ours. A ring's id is not stored either, since
 rings are replaced as a set on every edit and the pointer would dangle, while
 "3.2 miles, $4" stays true.
+
+
+### Storefront customisation limits
+
+Eight banners total (including inactive drafts), six collections and twelve
+existing items per collection. Banner dates are stored with timezones; the
+editor labels dates in the device's timezone. Slides rotate every 2-10 seconds,
+with focus/hover pause, touch navigation and a static reduced-motion mode.
+There is no pause button: reaching the slides with a pointer or the keyboard
+stops them, and the dots move between them. Photos are uploaded through the
+existing image service, with a 2400px longest edge for banners and 1600px for
+other images.
+
+Each banner carries its own framing, because the banner is a fixed shape and
+a photograph is not: a focal point (`focal_x`, `focal_y`, percentages of the
+image) and a zoom of 100-200%. The portal's Framing control drags the photo
+or takes arrow keys, previews through the same function the storefront
+renders with, and shades where the headline sits. The defaults (50, 60, 100)
+reproduce the fixed crop every banner had before, so migration 0032 changes
+no existing storefront's appearance.
+
+The public `/portal` response includes a nullable `storefront` block. The
+module is off by default, and `/menu` keeps its existing contract. Themes use
+four colours, validated on the server for readable contrast, and a curated
+font pairing. Staff and platform screens keep their own theme.
+
+Custom domains, custom CSS or HTML, per-page layouts and object storage are
+out of scope. Applying restaurant themes to the separate `web/login/`
+customer sign-in pages remains a follow-up.
