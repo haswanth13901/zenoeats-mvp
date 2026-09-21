@@ -22,20 +22,50 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
 
+# Every wait on the database has an end, and each end comes before the
+# browser's own 15-second request timeout. Without these a request could hang
+# with nothing in any log: libpq waits on a connect forever by default, a
+# pooled connection whose peer vanished (a restarted database, a dropped NAT
+# entry, a VM that stalled) looks idle rather than dead until the kernel's
+# retransmission timer gives up minutes later, and a checkout from an
+# exhausted pool queued for thirty seconds. Failing in bounded time turns each
+# of those into a logged 500 with a reference -- and a pre-ping that fails
+# fast is simply replaced by a fresh connection, invisibly.
+_CONNECT_ARGS = {
+    "connect_timeout": 5,
+    # Probe an idle connection after 30s and call it dead after three
+    # unanswered probes, so the pool learns about a vanished peer on its own.
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+    # And bound the wait on data already sent -- the pre-ping itself, or a
+    # query -- which keepalives do not cover. Milliseconds.
+    "tcp_user_timeout": 10_000,
+}
+
+_ENGINE_OPTIONS = dict(
+    pool_pre_ping=True,
+    pool_timeout=10,
+    # Recycle long-lived connections before anything between here and the
+    # database (a proxy, a load balancer, PgBouncer) quietly drops them.
+    pool_recycle=1800,
+    connect_args=_CONNECT_ARGS,
+    future=True,
+)
+
 _app_engine = create_engine(
     settings.DATABASE_URL_APP,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_pre_ping=True,
-    future=True,
+    **_ENGINE_OPTIONS,
 )
 
 _system_engine = create_engine(
     settings.DATABASE_URL_SYSTEM,
     pool_size=5,
     max_overflow=5,
-    pool_pre_ping=True,
-    future=True,
+    **_ENGINE_OPTIONS,
 )
 
 AppSessionLocal = sessionmaker(bind=_app_engine, autoflush=False, future=True)

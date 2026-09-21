@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import mimetypes
 import time
@@ -13,7 +14,7 @@ from sqlalchemy import text
 
 from app.api.v1.router import api_router
 from app.config import settings
-from app.core import errors, observability, startup_checks
+from app.core import errors, observability, stall_watch, startup_checks
 from app.db.session import app_engine, system_engine
 
 logging.basicConfig(
@@ -63,7 +64,11 @@ def _warm() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     _warm()
-    yield
+    watching = stall_watch.start(asyncio.get_running_loop())
+    try:
+        yield
+    finally:
+        watching.set()
 
 
 app = FastAPI(
