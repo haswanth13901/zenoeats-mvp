@@ -40,6 +40,7 @@ from app.schemas.api import (
     StaffPasswordResetOut, known_timezone,
 )
 from app.services import geocoding, images, restaurant_profile, tracking, storefront
+from app.services import email as email_service
 from app.schemas.storefront import ThemePatch, CategoryPatch, BannersIn, CollectionsIn
 from app.services.images import ImageKind
 from app.services.menu import load_item_types, load_menu
@@ -3589,7 +3590,7 @@ def invite_staff(
         background.add_task(_queue_staff_invitation, restaurant.id, existing.id)
         return StaffInviteOut(
             id=existing.id, email=email, status=existing.status,
-            temporary_password=temp_password,
+            temporary_password=temp_password, email_configured=email_service.configured(),
         )
 
     invite = RestaurantUser(
@@ -3605,6 +3606,7 @@ def invite_staff(
     background.add_task(_queue_staff_invitation, restaurant.id, invite.id)
     return StaffInviteOut(
         id=invite.id, email=email, status=invite.status, temporary_password=temp_password,
+        email_configured=email_service.configured(),
     )
 
 

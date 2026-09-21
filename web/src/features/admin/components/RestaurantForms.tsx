@@ -137,8 +137,8 @@ export function OwnerForm({
       <p className="mt-2 max-w-prose text-caption text-muted">
         Makes this person the restaurant&apos;s owner (ADMIN). A new address gets a
         temporary password they replace at first sign-in. Someone who already runs
-        another Zenoeats restaurant keeps their own password: they&apos;re emailed an
-        invitation and accept it after signing in here. Use Reset password for an
+        another Zenoeats restaurant keeps their own password: they&apos;re invited
+        (and emailed, when email is set up) and accept it after signing in here. Use Reset password for an
         owner who has forgotten theirs.
       </p>
 
@@ -194,12 +194,14 @@ export function IssuedCredentialPanel({
   email,
   password,
   status,
+  emailConfigured,
   restaurant,
   onDismiss,
 }: {
   email: string;
   password: string | null;
   status: "ACTIVE" | "INVITED";
+  emailConfigured: boolean;
   restaurant: Restaurant;
   onDismiss: () => void;
 }) {
@@ -216,8 +218,11 @@ export function IssuedCredentialPanel({
       >
         <p>
           {email} already has a Zenoeats staff login, so no password was issued and theirs
-          is unchanged. They&apos;ve been emailed an invitation to own {restaurant.name}: they
-          sign in to its portal with their existing password and accept it.
+          is unchanged.{" "}
+          {emailConfigured
+            ? `We're emailing them an invitation to own ${restaurant.name}.`
+            : "Email isn't set up yet, so no invitation email was sent: tell them yourself."}{" "}
+          They sign in to its portal with their existing password and accept it.
         </p>
       </OneTimeSecret>
     );

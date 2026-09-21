@@ -151,3 +151,48 @@ def test_the_super_admin_can_give_a_passwordless_invitee_a_login(admin_user, cle
     )
     assert login.status_code == 200
     assert login.json()["membership_status"] == "INVITED"
+
+
+# --- whether an invitation email is claimed --------------------------------
+#
+# The portal used to say "We've emailed them the sign-in link" after every
+# invitation. With no email provider configured nothing is sent -- the worker
+# logs "RESEND_API_KEY is not set; not sending" and moves on -- so restaurants
+# waited on invitations that never arrived and nothing told them why.
+
+@pytest.mark.parametrize("key, expected", [("", False), ("re_test_key", True)])
+def test_an_invitation_says_whether_an_email_is_on_its_way(
+    admin_user, cleanup, monkeypatch, key, expected
+):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "RESEND_API_KEY", key)
+    restaurant = _create(admin_user, cleanup)
+    owner = _email()
+    _owner(admin_user, restaurant.id, owner)
+    _set_own_password(owner, "owner password 123")
+
+    invite = _signed_in(restaurant.slug, owner).post(
+        "/api/v1/restaurant/staff", json={"email": _email(), "role_code": "KITCHEN"}
+    )
+    assert invite.status_code == 201, invite.text
+    assert invite.json()["email_configured"] is expected
+
+
+@pytest.mark.parametrize("key, expected", [("", False), ("re_test_key", True)])
+def test_an_owner_invitation_says_whether_an_email_is_on_its_way(
+    admin_user, cleanup, monkeypatch, key, expected
+):
+    """The super admin's side of the same claim: an existing staff login made
+    owner of a second restaurant is invited rather than given a password."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "RESEND_API_KEY", key)
+    first, second = _create(admin_user, cleanup), _create(admin_user, cleanup)
+    person = _email()
+    _owner(admin_user, first.id, person)
+    _set_own_password(person, "owner password 123")
+
+    out, _ = _owner(admin_user, second.id, person)
+    assert out.status == "INVITED"
+    assert out.email_configured is expected

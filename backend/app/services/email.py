@@ -40,9 +40,21 @@ class Email:
     idempotency_key: str
 
 
+def configured() -> bool:
+    """Whether anything will actually be sent.
+
+    For a caller that has to tell a person whether an email is on its way.
+    The send itself happens later, on the worker, so this cannot promise
+    delivery -- but "no provider is configured" is certain, and saying an
+    email went when none can is how a restaurant ended up waiting on
+    invitations that were never sent.
+    """
+    return bool(settings.RESEND_API_KEY)
+
+
 def send(email: Email) -> bool:
     """Deliver one message. True when the provider accepted it."""
-    if not settings.RESEND_API_KEY:
+    if not configured():
         log.info(
             "RESEND_API_KEY is not set; not sending %r to %s",
             email.subject, email_for_log(email.to),

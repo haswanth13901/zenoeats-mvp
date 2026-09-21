@@ -95,6 +95,9 @@ export type StaffInvite = {
   /** Present only when the invitation created the person's login. Shown once;
    *  the API keeps only its hash. */
   temporary_password: string | null;
+  /** Whether an invitation email is on its way. False when no email provider
+   *  is configured: nothing is sent, and the admin must pass the link on. */
+  email_configured: boolean;
 };
 
 export type BoardOrder = {
