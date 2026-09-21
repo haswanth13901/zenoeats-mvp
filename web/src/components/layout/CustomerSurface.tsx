@@ -1,5 +1,6 @@
 import { useLayoutEffect } from "react";
 import { usePortalQuery } from "@/features/storefront/storefrontApi";
+import { CustomerFooter } from "@/features/storefront/components/CustomerFooter";
 import { attachFont, themeVariables } from "@/features/storefront/theme";
 import { Outlet } from "react-router-dom";
 
@@ -33,5 +34,10 @@ export function CustomerSurface() {
     };
   }, []);
 
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <CustomerFooter />
+    </>
+  );
 }

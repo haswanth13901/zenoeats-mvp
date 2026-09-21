@@ -1,5 +1,6 @@
 import {
-  activateAndContinue, clerkErrorMessage, el, loadClerk, minPasswordLength, namesEnabled,
+  activateAndContinue, clerkErrorMessage, el, legalConsentEnabled, loadClerk, minPasswordLength,
+  namesEnabled,
   nextPath, paintWordmarks, params, readCode, showMessage, wireSocialButtons, wirePasswordPair,
   withNext,
   type ClerkInstance,
@@ -30,6 +31,7 @@ const emailInput = el<HTMLInputElement>("email");
 const passwordInput = el<HTMLInputElement>("password");
 const confirmInput = el<HTMLInputElement>("confirm");
 const errorBox = el<HTMLParagraphElement>("error");
+const legalInput = el<HTMLInputElement>("legal");
 const submitButton = el<HTMLButtonElement>("submit");
 const continueForm = el<HTMLFormElement>("continue-form");
 const continueEmail = el<HTMLInputElement>("continue-email");
@@ -127,11 +129,16 @@ function start(clerk: ClerkInstance): void {
   const collectNames = namesEnabled(clerk);
   el("name-field").hidden = !collectNames;
 
+  const wantsLegal = legalConsentEnabled(clerk);
+
   let passwordsValid = false;
   const refresh = () => {
-    submitButton.disabled = !(passwordsValid && emailInput.value.includes("@"));
+    submitButton.disabled = !(
+      passwordsValid && emailInput.value.includes("@") && legalInput.checked
+    );
   };
   emailInput.addEventListener("input", refresh);
+  legalInput.addEventListener("change", refresh);
   wirePasswordPair(
     minPasswordLength(clerk), passwordInput, confirmInput, el("length-hint"), el("match-hint"),
     (valid) => {
@@ -151,6 +158,10 @@ function start(clerk: ClerkInstance): void {
         emailAddress: emailInput.value.trim(),
         password: passwordInput.value,
         ...(collectNames ? splitName(nameInput.value) : {}),
+        // Only where the instance collects it. Sending it to one that does
+        // not is an error, and the checkbox above was still required, so the
+        // agreement stands either way.
+        ...(wantsLegal ? { legalAccepted: true } : {}),
       });
       await advance(created);
     } catch (e) {

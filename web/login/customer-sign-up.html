@@ -62,6 +62,20 @@
               <span id="match-hint" class="mt-2 block text-caption text-danger" hidden>These do not match.</span>
             </label>
 
+            <!-- Agreement, asked for here rather than implied by the button.
+                 The continue step below asks the same thing of someone who
+                 arrived through Google, Apple or Facebook, so every route to
+                 an account passes through one of the two. -->
+            <label id="legal-field" class="flex min-h-[40px] items-start gap-2.5 text-sm">
+              <input id="legal" class="mt-0.5 h-5 w-5 shrink-0" type="checkbox" required />
+              <span
+                >I agree to the
+                <a href="/legal/terms" target="_blank" rel="noopener" class="underline">Terms of Service</a>
+                and
+                <a href="/legal/privacy" target="_blank" rel="noopener" class="underline">Privacy Policy</a>.</span
+              >
+            </label>
+
             <!-- Clerk's bot protection renders its challenge here when it decides
                  one is needed. Custom sign-up flows must provide this element. -->
             <div id="clerk-captcha"></div>
@@ -96,7 +110,12 @@
 
             <label id="continue-legal-field" class="flex min-h-[40px] items-start gap-2.5 text-sm" hidden>
               <input id="continue-legal" class="mt-0.5 h-5 w-5 shrink-0" type="checkbox" />
-              <span>I agree to the Terms of Service and Privacy Policy.</span>
+              <span
+                >I agree to the
+                <a href="/legal/terms" target="_blank" rel="noopener" class="underline">Terms of Service</a>
+                and
+                <a href="/legal/privacy" target="_blank" rel="noopener" class="underline">Privacy Policy</a>.</span
+              >
             </label>
 
             <button id="continue-submit" class="btn-primary w-full" type="submit">Continue</button>

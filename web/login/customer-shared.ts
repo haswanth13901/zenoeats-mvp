@@ -79,6 +79,22 @@ export function namesEnabled(clerk: ClerkInstance): boolean {
   return Boolean(attributes?.first_name?.enabled);
 }
 
+/** Whether the instance records agreement to the terms itself.
+ *
+ *  The checkbox is shown either way -- agreement is ours to ask for, not
+ *  Clerk's -- but `legalAccepted` may only be sent to an instance that has
+ *  the setting switched on, where it is an error rather than a no-op. When it
+ *  is off, the agreement is recorded on our own side at first sign-in. */
+export function legalConsentEnabled(clerk: ClerkInstance): boolean {
+  // Not in Clerk's published Attributes type, though the instance sends it.
+  // Read through an index rather than added to their type: this is their
+  // configuration object, and asserting a shape onto it is how a page breaks
+  // when the shape moves.
+  const attributes: Record<string, { enabled?: boolean } | undefined> =
+    userSettings(clerk)?.attributes ?? {};
+  return Boolean(attributes["legal_accepted"]?.enabled);
+}
+
 /** Build a same-origin account-page URL that keeps ?next= and adds more. */
 export function accountUrl(path: string, extra: Record<string, string> = {}): string {
   const query = new URLSearchParams(extra);

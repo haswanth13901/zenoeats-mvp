@@ -731,6 +731,18 @@ export function CheckoutPage() {
               )}
             </button>
             <p className="field-hint">Line prices are previews. Your total is confirmed before payment.</p>
+            {/* Shown where the order is actually placed, not only in a policy
+                nobody opens. A paid order is generally too late to cancel --
+                the kitchen starts on it -- and the restaurant, not Zenoeats,
+                issues any refund, so both belong in front of the button. */}
+            <p className="field-hint mt-3">
+              By continuing you agree to our{" "}
+              <a href="/legal/terms" target="_blank" rel="noopener" className="underline">terms</a>{" "}
+              and{" "}
+              <a href="/legal/refunds" target="_blank" rel="noopener" className="underline">refund policy</a>.
+              Once the kitchen starts your order it usually cannot be cancelled, and
+              refunds are issued by {restaurant.name}.
+            </p>
           </aside>
         </div>
       </main>
