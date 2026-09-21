@@ -1,32 +1,10 @@
-import { ManageStorefrontPage } from "@/pages/manage/ManageStorefrontPage";
+import { lazy, Suspense, type ComponentType } from "react";
 import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route } from "react-router-dom";
-import { RequireAdmin, RequireCustomer, RequireStaff } from "@/components/layout/Guards";
-import { AdminRestaurantsPage } from "@/pages/admin/AdminRestaurantsPage";
-import { AdminOrdersPage } from "@/pages/admin/AdminOrdersPage";
-import { KitchenBoardPage } from "@/pages/manage/KitchenBoardPage";
-import { MenuPage } from "@/pages/manage/MenuPage";
-import { StaffPage } from "@/pages/manage/StaffPage";
-import { ReportsPage } from "@/pages/manage/ReportsPage";
-import { SettingsPage } from "@/pages/manage/SettingsPage";
-import { StockPage } from "@/pages/manage/StockPage";
-import { DeliveriesPage } from "@/pages/manage/DeliveriesPage";
-import {
-  ADMIN_ROLES,
-  DELIVERY_ROLES,
-  FLOOR_VIEW_ROLES,
-  MANAGER_ROLES,
-  MENU_VIEW_ROLES,
-  SETTINGS_ROLES,
-  STOREFRONT_ROLES,
-} from "@/features/restaurant/nav";
+import { RequireCustomer } from "@/components/layout/Guards";
 import { StorefrontPage } from "@/pages/storefront/StorefrontPage";
-import { CheckoutPage } from "@/pages/storefront/CheckoutPage";
-import { PaymentPage } from "@/pages/storefront/PaymentPage";
-import { OrderPage } from "@/pages/storefront/OrderPage";
-import { ProfilePage } from "@/pages/storefront/ProfilePage";
 import { CustomerSurface } from "@/components/layout/CustomerSurface";
-import { StatePage } from "@/components/common/Feedback";
-import { Cloche } from "@/components/common/icons";
+import { Booting } from "@/components/layout/guardParts";
+import { NotFound } from "@/routes/NotFound";
 
 /**
  * Route table.
@@ -41,7 +19,56 @@ import { Cloche } from "@/components/common/icons";
  * customer sign-in pages are absent on purpose. They are separate HTML entry
  * points outside React, served directly by the dev server and by nginx, so
  * they never reach this router.
+ *
+ * WHAT IS LOADED WHEN, and why it is worth the machinery.
+ *
+ * One bundle used to carry all three portals, so the page a QR code opens --
+ * a menu, on a phone, on restaurant wifi -- spent a third of its download on
+ * the kitchen board, the menu builder and the platform admin screens, none of
+ * which that person can open. Both operator portals are now fetched only when
+ * someone navigates into them, and the customer pages past the menu are
+ * fetched when the customer moves towards paying.
+ *
+ * The storefront itself stays eager. It is the first thing rendered on the
+ * busiest route in the product, and splitting it would buy a spinner.
+ *
+ * The boundary is the import graph, not this file: an area's chunk is
+ * whatever it imports. That is why each portal owns its own sub-routes and
+ * its own guard, rather than listing them here -- listing them here is what
+ * would pull them back into the shell.
  */
+
+/**
+ * A route fetched on first visit, behind the loading state the guards use.
+ *
+ * Called at module scope so React.lazy is created once, not per render: a
+ * lazy component rebuilt on every render remounts its subtree and refetches
+ * every query under it.
+ */
+function lazyRoute(load: () => Promise<{ default: ComponentType }>) {
+  const Loaded = lazy(load);
+  return (
+    <Suspense fallback={<Booting />}>
+      <Loaded />
+    </Suspense>
+  );
+}
+
+const CheckoutRoute = lazyRoute(() =>
+  import("@/pages/storefront/CheckoutPage").then((m) => ({ default: m.CheckoutPage })),
+);
+const PaymentRoute = lazyRoute(() =>
+  import("@/pages/storefront/PaymentPage").then((m) => ({ default: m.PaymentPage })),
+);
+const OrderRoute = lazyRoute(() =>
+  import("@/pages/storefront/OrderPage").then((m) => ({ default: m.OrderPage })),
+);
+const ProfileRoute = lazyRoute(() =>
+  import("@/pages/storefront/ProfilePage").then((m) => ({ default: m.ProfilePage })),
+);
+const ManageRoute = lazyRoute(() => import("@/routes/ManageArea"));
+const AdminRoute = lazyRoute(() => import("@/routes/AdminArea"));
+
 const router = createBrowserRouter(createRoutesFromElements(
       <>
         {/* Customer surface. The storefront is deliberately public; only the
@@ -52,7 +79,7 @@ const router = createBrowserRouter(createRoutesFromElements(
             path="/checkout"
             element={
               <RequireCustomer>
-                <CheckoutPage />
+                {CheckoutRoute}
               </RequireCustomer>
             }
           />
@@ -60,7 +87,7 @@ const router = createBrowserRouter(createRoutesFromElements(
             path="/checkout/pay/:orderId"
             element={
               <RequireCustomer>
-                <PaymentPage />
+                {PaymentRoute}
               </RequireCustomer>
             }
           />
@@ -68,70 +95,41 @@ const router = createBrowserRouter(createRoutesFromElements(
             path="/orders/:orderId"
             element={
               <RequireCustomer allowOrderToken>
-                <OrderPage />
+                {OrderRoute}
               </RequireCustomer>
             }
           />
 
-          <Route path="/account/profile" element={<RequireCustomer><ProfilePage /></RequireCustomer>} />
+          <Route
+            path="/account/profile"
+            element={
+              <RequireCustomer>
+                {ProfileRoute}
+              </RequireCustomer>
+            }
+          />
           {/* Keep the existing profile URL for bookmarks and current links. */}
           <Route
             path="/profile"
             element={
               <RequireCustomer>
-                <ProfilePage />
+                {ProfileRoute}
               </RequireCustomer>
             }
           />
         </Route>
 
         {/* Restaurant portal. Credentials issued by the platform. */}
-        <Route
-          path="/manage"
-          element={<RequireStaff roles={FLOOR_VIEW_ROLES}><KitchenBoardPage /></RequireStaff>}
-        />
-        <Route
-          path="/manage/deliveries"
-          element={<RequireStaff roles={DELIVERY_ROLES}><DeliveriesPage /></RequireStaff>}
-        />
-        <Route
-          path="/manage/stock"
-          element={<RequireStaff roles={FLOOR_VIEW_ROLES}><StockPage /></RequireStaff>}
-        />
-        <Route
-          path="/manage/menu"
-          element={<RequireStaff roles={MENU_VIEW_ROLES}><MenuPage /></RequireStaff>}
-        />
-        <Route
-          path="/manage/staff"
-          element={<RequireStaff roles={ADMIN_ROLES}><StaffPage /></RequireStaff>}
-        />
-        <Route
-          path="/manage/reports"
-          element={<RequireStaff roles={MANAGER_ROLES}><ReportsPage /></RequireStaff>}
-        />
-        <Route path="/manage/storefront" element={<RequireStaff roles={STOREFRONT_ROLES}><ManageStorefrontPage /></RequireStaff>} />
-        <Route
-          path="/manage/settings"
-          element={<RequireStaff roles={SETTINGS_ROLES}><SettingsPage /></RequireStaff>}
-        />
+        <Route path="/manage/*" element={ManageRoute} />
 
         {/* Platform portal. Credentials from ADMIN_USERS. */}
-        <Route path="/admin" element={<RequireAdmin><AdminRestaurantsPage /></RequireAdmin>} />
-        <Route
-          path="/admin/restaurants/:id/orders"
-          element={<RequireAdmin><AdminOrdersPage /></RequireAdmin>}
-        />
+        <Route path="/admin/*" element={AdminRoute} />
 
         <Route path="*" element={<NotFound />} />
       </>
 ));
 
 export function AppRoutes() { return <RouterProvider router={router} />; }
-
-function NotFound() {
-  return <StatePage title="Page not found" illustration={<Cloche />} />;
-}
 
 /**
  * Root.

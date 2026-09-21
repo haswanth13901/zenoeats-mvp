@@ -177,6 +177,29 @@ jobs:
           grep -rq "Waiting for the payment confirmation" dist/assets/
           grep -rq "Zenoeats platform" dist/
 
+      # The page a QR code opens must not carry the two operator portals.
+      #
+      # Nothing about this is visible in review. One static import from the
+      # shell -- a guard, a shared component, a helper that looked harmless --
+      # merges them back into the first load, the build still succeeds, and
+      # the only symptom is a customer on restaurant wifi waiting longer.
+      - name: The customer's first load stays small
+        run: |
+          set -euo pipefail
+          # Both portals exist, and as chunks of their own.
+          ls dist/assets/ManageArea-*.js >/dev/null
+          ls dist/assets/AdminArea-*.js >/dev/null
+          # And the entry does not reach for either of them.
+          if grep -qE 'ManageArea|AdminArea' dist/index.html; then
+            echo "index.html pulls in an operator portal; the split has regressed" >&2
+            exit 1
+          fi
+          # A budget on the entry chunk, generous enough never to nag: it sits
+          # near 70 kB, and merging a portal back in would put it past 350.
+          bytes=$(stat -c%s dist/assets/app-*.js)
+          echo "entry chunk: $((bytes / 1024)) kB"
+          test "$bytes" -lt 204800
+
   # Build once, tag by commit, promote the SAME image from staging to
   # production. Never rebuild between environments (rule 12).
   #

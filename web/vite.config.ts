@@ -98,6 +98,19 @@ export default defineConfig({
           new URL("./legal/data-deletion.html", import.meta.url),
         ),
       },
+      output: {
+        // React, the router and Redux change when we upgrade them, a few
+        // times a year. Our own code changes every deploy. Kept in one chunk
+        // they are invalidated together, so every deploy makes returning
+        // customers re-download 300 kB of libraries that did not move.
+        //
+        // Only the app entry pulls these in; the sign-in and policy pages
+        // import nothing from node_modules, so they are unaffected.
+        manualChunks(id) {
+          if (id.includes("node_modules")) return "vendor";
+          return undefined;
+        },
+      },
     },
   },
 
