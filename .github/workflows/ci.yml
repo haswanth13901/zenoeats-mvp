@@ -3,6 +3,9 @@ name: CI
 on:
   push:
     branches: [main, dev]
+    # A release is cut by tagging. Without this the tag would build nothing
+    # and there would be no image to deploy from it.
+    tags: ["v*"]
   pull_request:
 
 jobs:
@@ -167,14 +170,79 @@ jobs:
           grep -rq "Waiting for the payment confirmation" dist/assets/
           grep -rq "Zenoeats platform" dist/
 
+  # Build once, tag by commit, promote the SAME image from staging to
+  # production. Never rebuild between environments (rule 12).
+  #
+  # A pull request builds and throws the result away: that proves the
+  # Dockerfiles still work without publishing an image from code nobody has
+  # merged. A push to main, or a version tag, publishes to GHCR.
   docker:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
+    permissions:
+      contents: read
+      # What lets GITHUB_TOKEN write to ghcr.io. No registry secret to store,
+      # rotate or leak -- the token is minted per run and dies with it.
+      packages: write
     steps:
       - uses: actions/checkout@v4
-      # Build once, tag by commit, promote the SAME image from staging to
-      # production. Never rebuild between environments (rule 12).
+
+      # ghcr.io rejects an uppercase path, and a GitHub owner may contain
+      # capitals, so the name is lowered here rather than assumed.
+      - name: Work out the image names
+        run: |
+          echo "IMAGE_BASE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       - name: Build images
         run: |
-          docker build -t ghcr.io/${{ github.repository }}/api:${{ github.sha }} ./backend
-          docker build -t ghcr.io/${{ github.repository }}/web:${{ github.sha }} ./web
+          docker build -t "$IMAGE_BASE/api:${{ github.sha }}" ./backend
+          docker build -t "$IMAGE_BASE/web:${{ github.sha }}" ./web
+
+      # Everything below is skipped on a pull request, where GITHUB_TOKEN is
+      # read-only anyway and a push would fail rather than be refused.
+      - name: Sign in to the registry
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        run: echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      # The commit sha is the tag that matters: it is the one a deployment
+      # names, and it never moves. `main` is a convenience for "what is on
+      # main right now", and a version tag is what a release is cut from.
+      #
+      # Deliberately no `latest`. A moving tag is how staging and production
+      # end up on different images while both claim to be up to date, which is
+      # the whole thing rule 12 exists to prevent.
+      - name: Publish images
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        run: |
+          set -euo pipefail
+          for image in api web; do
+            docker push "$IMAGE_BASE/$image:${{ github.sha }}"
+            if [ '${{ github.ref }}' = 'refs/heads/main' ]; then
+              docker tag  "$IMAGE_BASE/$image:${{ github.sha }}" "$IMAGE_BASE/$image:main"
+              docker push "$IMAGE_BASE/$image:main"
+            else
+              version='${{ github.ref_name }}'
+              docker tag  "$IMAGE_BASE/$image:${{ github.sha }}" "$IMAGE_BASE/$image:$version"
+              docker push "$IMAGE_BASE/$image:$version"
+            fi
+          done
+
+      # So the release step in a deploy can be copied from here rather than
+      # reconstructed from memory under pressure.
+      - name: Say what was published
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        run: |
+          {
+            echo "### Images published"
+            echo
+            echo '```'
+            echo "$IMAGE_BASE/api:${{ github.sha }}"
+            echo "$IMAGE_BASE/web:${{ github.sha }}"
+            echo '```'
+            echo
+            echo "Migrate with the same api image before rolling out:"
+            echo
+            echo '```'
+            echo "docker run --rm --env-file <prod.env> $IMAGE_BASE/api:${{ github.sha }} alembic upgrade head"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
