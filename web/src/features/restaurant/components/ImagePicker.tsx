@@ -15,6 +15,67 @@ export function imageDraft(uploaded: UploadedImage | null): ImageDraft {
 }
 
 /**
+ * What to upload for each kind of photo, from how the storefront shows it.
+ *
+ * Every one is cropped to a frame -- `object-cover` -- except the logo, so
+ * the useful advice is the shape of the frame and where the crop falls, not
+ * a pixel count on its own. The sizes are twice the largest place each photo
+ * is drawn, for sharp high-density screens:
+ *
+ *   items       the menu card (a third of the card, portrait on a phone,
+ *               near square on a laptop) and the item page (200px tall,
+ *               full width -- wide). Square survives both crops.
+ *   options     a 40px tile beside the choice.
+ *   categories  a 58px circle among the shortcuts. The corners are lost.
+ *   banners     1.25:1 under the text on a phone, about 1.6:1 beside it on
+ *               a laptop, 3:2 in the framing editor. The server keeps 2400px.
+ *   branding    at most 180 x 56 in the header, never cropped. Small, so a
+ *               transparent PNG goes up untouched -- utils/image flattens
+ *               anything over 2000px or 1.5 MB onto white, which would be a
+ *               white box on the cream header.
+ *
+ * Change these if those layouts change.
+ *
+ * The spaces inside each dimension ("1200 × 1200 px") are non-breaking, so
+ * a narrow caption never splits a size across two lines. They look like
+ * ordinary spaces here; keep them when editing.
+ */
+export const IMAGE_GUIDE: Record<ImageKind, { size: string; tip: string }> = {
+  items: {
+    size: "Square, 1200 × 1200 px or larger",
+    tip: "Keep the dish in the centre — the menu and the item page crop the edges differently.",
+  },
+  options: {
+    size: "Square, 400 × 400 px or larger",
+    tip: "Shown as a small tile, so a close-up reads best.",
+  },
+  categories: {
+    size: "Square, 400 × 400 px or larger",
+    tip: "Shown in a circle, so keep the subject in the middle.",
+  },
+  banners: {
+    size: "Landscape 3:2, 2400 × 1600 px or larger",
+    tip: "Then drag the preview to choose what stays in view.",
+  },
+  branding: {
+    size: "PNG with a transparent background, about 540 × 170 px",
+    tip: "Shown up to 180 × 56 px in the header and never cropped.",
+  },
+};
+
+/** The same advice as a line of its own, for a list of compact pickers that
+ *  has no room for it beside each thumbnail. Placed once, above the rows. */
+export function ImageSizeHint({ kind, className = "" }: { kind: ImageKind; className?: string }) {
+  const guide = IMAGE_GUIDE[kind];
+  return (
+    <p className={`field-hint ${className}`}>
+      <span className="font-semibold text-ink">Photos:</span> {guide.size}. {guide.tip} JPEG, PNG
+      or WebP.
+    </p>
+  );
+}
+
+/**
  * Choose, replace or remove the photo of an item or an option.
  *
  * Choosing uploads straight away and hands the new key to the form; it does
@@ -94,7 +155,9 @@ export function ImagePicker({
       disabled={off}
       onClick={() => input.current?.click()}
       aria-label={image.url ? `Change the photo of ${label}` : `Add a photo of ${label}`}
-      title={image.url ? "Change photo" : "Add photo"}
+      // The compact picker has no room for the size advice, so it rides on
+      // the tooltip here; lists of them also carry an ImageSizeHint above.
+      title={`${image.url ? "Change photo" : "Add photo"} — ${IMAGE_GUIDE[kind].size}`}
       className={`${box} relative flex shrink-0 items-center justify-center overflow-hidden border border-hairline bg-paper text-muted transition-colors duration-color hover:border-ink disabled:hover:border-hairline`}
     >
       {image.url ? (
@@ -155,7 +218,12 @@ export function ImagePicker({
             remove photo
           </button>
         )}
-        <span className="text-caption text-muted">JPEG, PNG or WebP.</span>
+        {/* Before choosing, not after: the point is to pick a photo that
+            fits, and once it is uploaded the crop has already happened. */}
+        <span className="max-w-[40ch] text-caption text-ink">{IMAGE_GUIDE[kind].size}</span>
+        <span className="max-w-[40ch] text-caption text-muted">
+          {IMAGE_GUIDE[kind].tip} JPEG, PNG or WebP.
+        </span>
       </div>
       {fileInput}
     </div>
