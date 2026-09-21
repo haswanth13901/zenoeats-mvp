@@ -22,5 +22,6 @@ dist/
 # Redesign reference package (handoff docs, component library). Design material, not app code.
 /design/Zenoeats-Design-Package/
 
-# Local screenshots and verification evidence
-/artifacts/redesign/
+# Local screenshots, run logs and verification evidence. Everything under
+# artifacts/ is produced by a local run, so none of it is source.
+/artifacts/
