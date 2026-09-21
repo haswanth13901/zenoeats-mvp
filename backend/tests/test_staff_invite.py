@@ -224,7 +224,12 @@ def outbox(monkeypatch):
     from app.services import email
 
     sent = []
-    monkeypatch.setattr(email, "send", lambda message: sent.append(message) or True)
+
+    def deliver(message):
+        sent.append(message)
+        return email.Outcome("SENT")
+
+    monkeypatch.setattr(email, "deliver", deliver)
     return sent
 
 

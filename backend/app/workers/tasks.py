@@ -382,6 +382,14 @@ def send_staff_invitation(
             UUID(restaurant_id), UUID(membership_id), temporary_password
         )
     except email.RetryableEmailError as exc:
+        if self.request.retries >= self.max_retries:
+            # Out of retries: say so on the team list rather than leaving the
+            # invitation looking as if it were still on its way.
+            notifications.record_invitation_outcome(
+                UUID(restaurant_id), UUID(membership_id),
+                email.Outcome("FAILED", "Not delivered: the email provider could not be reached."),
+            )
+            return False
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
 
 

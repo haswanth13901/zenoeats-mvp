@@ -144,7 +144,14 @@ class RestaurantUser(Base, TimestampMixin):
     """
 
     __tablename__ = "restaurant_users"
-    __table_args__ = (UniqueConstraint("restaurant_id", "user_id", name="uq_restaurant_user"),)
+    __table_args__ = (
+        UniqueConstraint("restaurant_id", "user_id", name="uq_restaurant_user"),
+        CheckConstraint(
+            "invitation_email_status IS NULL OR "
+            "invitation_email_status IN ('SENT', 'FAILED', 'NOT_CONFIGURED')",
+            name="ck_restaurant_users_invitation_email_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     restaurant_id: Mapped[uuid.UUID] = mapped_column(
@@ -161,3 +168,14 @@ class RestaurantUser(Base, TimestampMixin):
     invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # What happened to the last invitation email, written back by the worker:
+    # SENT, FAILED or NOT_CONFIGURED; null while one is still queued. Sending
+    # is asynchronous, so without this the portal could only ever say "we're
+    # emailing them" -- including for emails the provider went on to refuse.
+    invitation_email_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    invitation_email_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Written for the restaurant admin, never the provider's raw reply: that
+    # can name the platform's own accounts. The raw reply is in the worker log.
+    invitation_email_problem: Mapped[str | None] = mapped_column(String(200), nullable=True)

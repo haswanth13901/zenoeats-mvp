@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Empty, ErrorNote, Loading, Panel, Spinner } from "@/components/common/Feedback";
 import { OneTimeSecret } from "@/components/common/Secret";
 import { PageTitle } from "@/components/layout/Shell";
@@ -6,6 +6,7 @@ import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import {
   useChangeStaffRoleMutation,
   useInviteStaffMutation,
+  useResendStaffInviteMutation,
   useResetStaffPasswordMutation,
   useRevokeStaffMutation,
   useStaffQuery,
@@ -41,12 +42,34 @@ function roleName(code: string): string {
 /** One row asking "are you sure", for one of the two actions that need it. */
 type Confirming = { id: string; kind: "remove" | "reset" };
 
+/** How long after an invitation is queued the page keeps asking the worker's
+ *  answer. Longer than the worker ever takes; a row that has not heard by
+ *  then is shown without a status rather than as "sending" for ever. */
+const SENDING_WINDOW_MS = 2 * 60_000;
+
+/** Still waiting to hear what became of this row's invitation email. */
+function stillSending(m: StaffMember): boolean {
+  if (m.status === "ACTIVE" || m.invitation_email_status || !m.invited_at) return false;
+  return Date.now() - new Date(m.invited_at).getTime() < SENDING_WINDOW_MS;
+}
+
 export function StaffPage() {
-  const staff = useStaffQuery();
+  // Refreshed every few seconds while an invitation email is on its way, so
+  // whether it was delivered appears in the list without a reload.
+  const [pollMs, setPollMs] = useState(0);
+  const staff = useStaffQuery(undefined, { pollingInterval: pollMs });
+  useEffect(() => {
+    setPollMs(staff.data?.some(stillSending) ? 3000 : 0);
+  }, [staff.data]);
   const [inviteStaff] = useInviteStaffMutation();
   const [revokeStaff] = useRevokeStaffMutation();
   const [changeRole] = useChangeStaffRoleMutation();
   const [resetPassword] = useResetStaffPasswordMutation();
+  const [resendInvite] = useResendStaffInviteMutation();
+  const [resending, setResending] = useState<string | null>(null);
+  // Whether the panel is showing a resend rather than a new invitation.
+  const [issuedIsResend, setIssuedIsResend] = useState(false);
+  const issuedPanel = useRef<HTMLDivElement>(null);
 
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("KITCHEN");
@@ -67,6 +90,7 @@ export function StaffPage() {
     setIssued(null);
     try {
       setIssued(await inviteStaff({ email: email.trim(), role_code: role }).unwrap());
+      setIssuedIsResend(false);
       setEmail("");
     } catch (e) {
       setError(errorMessage(e));
@@ -90,6 +114,24 @@ export function StaffPage() {
       setError(errorMessage(e));
     } finally {
       setActing(false);
+    }
+  }
+
+  async function resend(member: StaffMember) {
+    setError(null);
+    setResending(member.id);
+    try {
+      setIssued(await resendInvite(member.id).unwrap());
+      setIssuedIsResend(true);
+      // The panel is at the top of the page and the button far below it; a
+      // new temporary password nobody scrolled up to see would be lost.
+      requestAnimationFrame(() =>
+        issuedPanel.current?.scrollIntoView({ behavior: "smooth", block: "center" }),
+      );
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setResending(null);
     }
   }
 
@@ -167,11 +209,13 @@ export function StaffPage() {
           </div>
         </form>
 
+        <div ref={issuedPanel} />
         {issued && (
           <OneTimeSecret
             title={
               <span>
-                Invited <span className="[overflow-wrap:anywhere]">{issued.email}</span>.
+                {issuedIsResend ? "Invitation resent to " : "Invited "}
+                <span className="[overflow-wrap:anywhere]">{issued.email}</span>.
               </span>
             }
             secret={issued.temporary_password}
@@ -190,10 +234,17 @@ export function StaffPage() {
             <p>
               {issued.temporary_password
                 ? issued.email_configured
-                  ? "We're emailing them the sign-in link and this temporary password. It's also shown here once, in case the email doesn't arrive, and can't be looked up again. They choose their own at first sign-in, and this one stops working then."
+                  ? `We're emailing them the sign-in link and this temporary password${issuedIsResend ? " — a new one; any earlier password no longer works" : ""}. It's also shown here once, in case the email doesn't arrive, and can't be looked up again. They choose their own at first sign-in, and this one stops working then.`
                   : "Give them this temporary password yourself. It's shown once and can't be looked up again. They choose their own at first sign-in."
                 : `${issued.email_configured ? "We're emailing them the sign-in link. " : ""}They already have a Zenoeats staff login and sign in with the password they have. If they've lost it and work only here, you can reset it from the team list; otherwise Zenoeats support can.`}
             </p>
+            {issued.email_configured && (
+              // Sending happens a moment later, and can still be refused; the
+              // team list shows what actually happened.
+              <p className="mt-2 text-caption text-muted">
+                Whether it was delivered shows beside them in the team list below.
+              </p>
+            )}
           </OneTimeSecret>
         )}
 
@@ -334,7 +385,10 @@ export function StaffPage() {
                     <td className="block border-0 py-1 md:table-cell md:border-b md:py-5">
                       <span className="text-caption text-muted md:hidden">Status: </span>
                       {invited ? (
-                        <span className="pill-red">waiting to accept</span>
+                        <>
+                          <span className="pill-red">waiting to accept</span>
+                          <InvitationEmail member={m} />
+                        </>
                       ) : (
                         <span className="pill-green">active</span>
                       )}
@@ -344,6 +398,16 @@ export function StaffPage() {
                         <span className="text-caption text-muted">you</span>
                       ) : (
                         <span className="flex flex-wrap gap-x-3 md:justify-end">
+                          {invited && (
+                            <button
+                              type="button"
+                              className="link min-h-[30px] text-caption"
+                              disabled={resending === m.id}
+                              onClick={() => void resend(m)}
+                            >
+                              {resending === m.id ? "resending…" : "resend invite"}
+                            </button>
+                          )}
                           {/* An admin's password goes through Zenoeats support,
                               so one admin cannot sign in as another. */}
                           {m.role_code !== "ADMIN" && (
@@ -379,4 +443,39 @@ export function StaffPage() {
     setError(null);
     setConfirming({ id, kind });
   }
+}
+
+/**
+ * What became of a pending invitation's email, beside the person it was for.
+ *
+ * Sending happens on the worker a moment after inviting, and a provider can
+ * still refuse it -- so the invite panel can only say an email is on its way,
+ * and this is where the admin finds out whether it arrived.
+ */
+function InvitationEmail({ member }: { member: StaffMember }) {
+  const at = member.invitation_email_at
+    ? new Date(member.invitation_email_at).toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null;
+  let text: string | null;
+  let tone = "text-muted";
+  switch (member.invitation_email_status) {
+    case "SENT":
+      text = `Invitation emailed${at ? ` at ${at}` : ""}.`;
+      break;
+    case "FAILED":
+      text = `${member.invitation_email_problem ?? "The invitation email was not delivered."} Pass on the sign-in link yourself, or resend once that's fixed.`;
+      tone = "text-danger";
+      break;
+    case "NOT_CONFIGURED":
+      text = "No email sent: email isn't set up. Pass on the sign-in link yourself.";
+      tone = "text-warning";
+      break;
+    default:
+      text = stillSending(member) ? "Sending the invitation email…" : null;
+  }
+  if (!text) return null;
+  return <p className={`mt-1.5 max-w-[34ch] text-caption ${tone}`}>{text}</p>;
 }

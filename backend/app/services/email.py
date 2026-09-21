@@ -32,6 +32,38 @@ class RetryableEmailError(Exception):
 
 
 @dataclass(frozen=True)
+class Outcome:
+    """What became of one attempt, for a caller that has to tell a person.
+
+    `status` is SENT, FAILED or NOT_CONFIGURED. `problem` is written for a
+    restaurant admin -- never the provider's raw reply, which can name the
+    platform's own accounts; that goes to the log instead.
+    """
+
+    status: str
+    problem: str | None = None
+
+    @property
+    def sent(self) -> bool:
+        return self.status == "SENT"
+
+
+def _problem(status_code: int, reply: str) -> str:
+    """The provider's refusal, in words fit for the admin who sent the invite."""
+    lowered = reply.lower()
+    if "testing emails" in lowered or "verify a domain" in lowered:
+        return (
+            "Not delivered: until a sending domain is verified with the email provider, "
+            "it only delivers to the platform's own address."
+        )
+    if status_code in (401, 403) and ("api key" in lowered or "api_key" in lowered):
+        return "Not delivered: the email provider did not accept Zenoeats' credentials."
+    if status_code == 422 or ("invalid" in lowered and "email" in lowered):
+        return "Not delivered: the email provider says this address is not valid."
+    return f"Not delivered: the email provider refused it (HTTP {status_code})."
+
+
+@dataclass(frozen=True)
 class Email:
     to: str
     subject: str
@@ -54,12 +86,21 @@ def configured() -> bool:
 
 def send(email: Email) -> bool:
     """Deliver one message. True when the provider accepted it."""
+    return deliver(email).sent
+
+
+def deliver(email: Email) -> Outcome:
+    """Deliver one message, and say what happened in a form a person can read.
+
+    Raises RetryableEmailError for the cases worth trying again; everything
+    else is an answer.
+    """
     if not configured():
         log.info(
             "RESEND_API_KEY is not set; not sending %r to %s",
             email.subject, email_for_log(email.to),
         )
-        return False
+        return Outcome("NOT_CONFIGURED", "Not sent: email is not set up on this server.")
 
     body = {
         "from": settings.EMAIL_FROM,
@@ -93,7 +134,7 @@ def send(email: Email) -> bool:
             "email %r to %s rejected (%s): %s",
             email.subject, email_for_log(email.to), res.status_code, res.text[:300],
         )
-        return False
+        return Outcome("FAILED", _problem(res.status_code, res.text))
 
     log.info("sent %r to %s", email.subject, email_for_log(email.to))
-    return True
+    return Outcome("SENT")

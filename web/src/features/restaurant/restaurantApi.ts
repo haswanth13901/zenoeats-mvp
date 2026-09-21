@@ -218,6 +218,13 @@ export type StaffMember = {
   accepted_at: string | null;
   /** The signed-in admin's own row. Removing yourself is refused. */
   is_you: boolean;
+  /** What became of the last invitation email, written back by the worker.
+   *  Null while it is still being sent, and for invitations sent before this
+   *  was recorded. */
+  invitation_email_status: "SENT" | "FAILED" | "NOT_CONFIGURED" | null;
+  invitation_email_at: string | null;
+  /** Why it failed, in words for the admin. */
+  invitation_email_problem: string | null;
 };
 
 /**
@@ -907,6 +914,16 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Staff"],
     }),
 
+    /** Send a pending invitation's email again. For someone who never signed
+     *  in this also issues a fresh temporary password, returned once. */
+    resendStaffInvite: build.mutation<StaffInvite, string>({
+      query: (membershipId) => ({
+        url: `/restaurant/staff/${membershipId}/resend-invite`,
+        method: "POST",
+      }),
+      invalidatesTags: ["Staff"],
+    }),
+
     acceptInvitation: build.mutation<unknown, void>({
       query: () => ({ url: "/restaurant/staff/accept", method: "POST" }),
       // The session's membership changes from INVITED to ACTIVE, which is
@@ -997,6 +1014,7 @@ export const {
   useDeleteModifierOptionMutation,
   useStaffQuery,
   useInviteStaffMutation,
+  useResendStaffInviteMutation,
   useAcceptInvitationMutation,
   useRevokeStaffMutation,
   useChangeStaffRoleMutation,

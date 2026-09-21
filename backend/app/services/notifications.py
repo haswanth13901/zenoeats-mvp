@@ -315,9 +315,30 @@ def send_staff_invitation(
         temporary_password=temporary_password if has_temporary_password else None,
     )
     # Keyed on when the invitation was issued, so re-inviting someone later
-    # sends a fresh email while a retried send of the same one does not.
+    # -- or resending it -- sends a fresh email while a retried send of the
+    # same one does not.
     stamp = invited_at.astimezone(timezone.utc).isoformat() if invited_at else "none"
-    return email.send(email.Email(
+    outcome = email.deliver(email.Email(
         to=to, subject=subject, html=body_html, text=body_text,
         idempotency_key=f"staff-invitation/{membership_id}/{stamp}",
     ))
+    record_invitation_outcome(restaurant_id, membership_id, outcome, invited_at)
+    return outcome.sent
+
+
+def record_invitation_outcome(
+    restaurant_id: UUID, membership_id: UUID, outcome: "email.Outcome", invited_at=None,
+) -> None:
+    """Note on the membership what became of its invitation email, for the
+    team list. Only if the invitation is still the one this email was for: a
+    resend issued while this one was in flight owns the status now, and an
+    older attempt finishing late must not overwrite it."""
+    with tenant_session(restaurant_id) as session:
+        membership = session.get(RestaurantUser, membership_id)
+        if membership is None:
+            return
+        if invited_at is not None and membership.invited_at != invited_at:
+            return
+        membership.invitation_email_status = outcome.status
+        membership.invitation_email_at = utcnow()
+        membership.invitation_email_problem = outcome.problem[:200] if outcome.problem else None
