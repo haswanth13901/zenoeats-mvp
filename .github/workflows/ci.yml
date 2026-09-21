@@ -20,6 +20,25 @@ jobs:
           --health-timeout 5s --health-retries 10
         ports: ["5432:5432"]
 
+      # The driver's position on the tracking map is kept in Redis, so the
+      # tests that read it need a real one. Two instances in production, for
+      # reasons that matter there and not here (one evicts, one must never);
+      # one instance with two databases is enough to run against.
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+        ports: ["6379:6379"]
+
+    # Everything app/config.py has no usable default for. A developer gets
+    # these from the .env at the repository root, which is not committed and
+    # is not here -- so anything missing shows up as a test failure that makes
+    # no sense, like "HMAC key must not be empty" on 238 tests at once.
+    #
+    # None of these values is a secret. They exist so the code under test has
+    # something well-formed to work with, and they are deliberately worded so
+    # that a copy of one turning up anywhere real is obvious.
     env:
       PGPASSWORD: postgres_dev_pw
       DATABASE_URL_APP: postgresql+psycopg2://zenoeats_app:app_dev_pw@localhost:5432/zenoeats
@@ -27,6 +46,16 @@ jobs:
       DATABASE_URL_MIGRATE: postgresql+psycopg2://zenoeats_migrate:migrate_dev_pw@localhost:5432/zenoeats
       FIELD_ENCRYPTION_KEY: kZ0nQx3Yk8vJ9pL2mN7bR4tS6wU1cE5gH8jK0aD3fI4=
       ROOT_DOMAIN: zenoeats.local
+      # Signs staff, platform-admin and guest sessions. Without it every test
+      # that issues one fails inside PyJWT rather than anywhere informative.
+      SESSION_SECRET: ci-only-session-secret-not-used-anywhere-real-000
+      REDIS_RUNTIME_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      # The webhook tests sign an event with this and post it, so what it is
+      # does not matter -- only that both sides agree and it is not empty,
+      # which Stripe's verifier refuses outright.
+      STRIPE_CONNECT_WEBHOOK_SECRET: whsec_ci_only_not_a_real_endpoint_secret
 
     steps:
       - uses: actions/checkout@v4
