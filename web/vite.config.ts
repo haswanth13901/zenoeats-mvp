@@ -28,6 +28,14 @@ const LOGIN_URLS: Record<string, string> = {
   "/account/sign-up": "/login/customer-sign-up.html",
   "/account/forgot-password": "/login/customer-forgot-password.html",
   "/account/sso-callback": "/login/customer-sso-callback.html",
+  // The policy pages, for the same reason and by the same route. They also
+  // have to answer on the root domain, where there is no restaurant at all:
+  // an OAuth reviewer at Google or Apple is given one canonical URL, and it
+  // cannot be a tenant's subdomain.
+  "/legal/privacy": "/legal/privacy.html",
+  "/legal/terms": "/legal/terms.html",
+  "/legal/refunds": "/legal/refunds.html",
+  "/legal/data-deletion": "/legal/data-deletion.html",
 };
 
 function loginPageUrls(): Plugin {
@@ -82,6 +90,12 @@ export default defineConfig({
         ),
         customerSsoCallback: fileURLToPath(
           new URL("./login/customer-sso-callback.html", import.meta.url),
+        ),
+        legalPrivacy: fileURLToPath(new URL("./legal/privacy.html", import.meta.url)),
+        legalTerms: fileURLToPath(new URL("./legal/terms.html", import.meta.url)),
+        legalRefunds: fileURLToPath(new URL("./legal/refunds.html", import.meta.url)),
+        legalDataDeletion: fileURLToPath(
+          new URL("./legal/data-deletion.html", import.meta.url),
         ),
       },
     },

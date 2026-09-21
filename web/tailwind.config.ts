@@ -15,7 +15,16 @@ import type { Config } from "tailwindcss";
 const channel = (name: string) => `rgb(var(--ze-${name}) / <alpha-value>)`;
 
 export default {
-  content: ["./index.html", "./login/**/*.{html,ts}", "./src/**/*.{ts,tsx}"],
+  // Every file that can name a class. A path missing here does not fail the
+  // build -- the page is simply served with most of its styling purged away,
+  // which is how the policy pages first shipped with a heading style and no
+  // headings.
+  content: [
+    "./index.html",
+    "./login/**/*.{html,ts}",
+    "./legal/**/*.html",
+    "./src/**/*.{ts,tsx}",
+  ],
   theme: {
     extend: {
       // The design's breakpoints are 640 / 768 / 1024 / 1200. Tailwind's

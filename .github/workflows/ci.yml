@@ -165,6 +165,13 @@ jobs:
           test -f dist/login/customer-sign-up.html
           test -f dist/login/customer-forgot-password.html
           test -f dist/login/customer-sso-callback.html
+          # Google, Apple and Facebook will not approve sign-in while any of
+          # these 404s, and a missing Vite entry is silent -- the build still
+          # succeeds, the page is simply not in dist.
+          test -f dist/legal/privacy.html
+          test -f dist/legal/terms.html
+          test -f dist/legal/refunds.html
+          test -f dist/legal/data-deletion.html
           test -f dist/config.js
           grep -q '/config.js' dist/index.html
           grep -rq "Waiting for the payment confirmation" dist/assets/

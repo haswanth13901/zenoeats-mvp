@@ -515,6 +515,68 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  /* ------------------------------------------------------------- policies */
+  /* The privacy policy, terms, refund policy and deletion instructions.
+     Plain documents outside React and outside any session, for three readers
+     at once: a customer who wants to know what happens to their address, a
+     crawler, and the reviewer at Google or Apple who will not approve sign-in
+     until these resolve. They must therefore render with no script and no
+     tenant -- which is why they are files, like the sign-in pages, and not
+     routes in the app. */
+  .legal {
+    @apply mx-auto w-full max-w-[--legal-measure] px-6 py-10 sm:py-14;
+    --legal-measure: 720px;
+  }
+  .legal-head {
+    @apply mb-8 border-b border-hairline pb-6;
+  }
+  .legal h1 {
+    @apply font-display text-4xl leading-[1.12] tracking-[-1px] sm:text-[39px];
+  }
+  .legal h2 {
+    @apply mb-3 mt-9 font-display text-2xl leading-snug;
+  }
+  .legal h3 {
+    @apply mb-2 mt-6 text-base font-semibold;
+  }
+  .legal p,
+  .legal li {
+    @apply text-body leading-relaxed;
+  }
+  .legal p + p {
+    @apply mt-3;
+  }
+  .legal ul {
+    @apply mt-3 list-disc space-y-2 pl-5;
+  }
+  .legal dl {
+    @apply mt-3 space-y-3;
+  }
+  .legal dt {
+    @apply font-semibold;
+  }
+  .legal a {
+    @apply underline decoration-hairline underline-offset-2 hover:decoration-current;
+  }
+  .legal-meta {
+    @apply mt-3 text-caption text-muted;
+  }
+  /* Deliberately loud, and deliberately the first thing on the page. These
+     texts are accurate about what the software does; that is not the same as
+     being legally sufficient, and nobody should discover the difference by
+     assuming. Remove the banner -- and the TO CONFIRM list at the foot --
+     once a lawyer has signed the page off. */
+  .legal-draft {
+    @apply mb-8 rounded-panel border border-[#C2703F] bg-[#FDF2E7] p-4 text-sm leading-relaxed text-[#7A431C];
+  }
+  .legal-foot {
+    @apply mt-12 border-t border-hairline pt-6 text-caption text-muted;
+  }
+  /* The row of policy links the storefront and checkout carry. */
+  .legal-links {
+    @apply flex flex-wrap items-center gap-x-4 gap-y-1;
+  }
 }
 
 /* Reduced motion: every transition and animation becomes instant, and no
