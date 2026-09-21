@@ -673,6 +673,17 @@ the manage shell, so they live behind the boundary rather than beside it.
 CI asserts it, since one static import undoes the whole thing and leaves no
 other trace.
 
+## Licence
+
+MIT. See [`LICENSE`](LICENSE).
+
+That covers this source code and nothing else. The policy pages under
+`web/legal/` are unreviewed drafts written for this deployment, not legal
+advice and not reusable as such, and the MIT warranty disclaimer is not a
+substitute for taking your own advice on them. Running this software means
+handling other people's payment and contact details under whatever law
+applies to you.
+
 ## Before real money
 
 `STEPS_BEFORE_PRODUCTION.md` is the checklist: every code change, account,
