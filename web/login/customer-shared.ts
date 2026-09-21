@@ -183,6 +183,13 @@ export function wireSocialButtons(
   container: HTMLElement,
   section: HTMLElement,
   errorBox: HTMLElement,
+  /** Asked before the browser leaves for the provider, and refused if it
+   *  answers false. Sign-up passes the consent checkbox: the account is
+   *  created at the far end of this redirect, and Clerk finishes a social
+   *  sign-up by itself whenever the provider gave it everything -- so the
+   *  form's own checkbox is never reached on that path. Sign-in passes
+   *  nothing, because signing in agrees to nothing new. */
+  allowed?: () => boolean,
 ): void {
   const strategies = enabledSocialStrategies(clerk);
   if (strategies.length === 0) return;
@@ -199,6 +206,10 @@ export function wireSocialButtons(
     button.append(`${verb} with ${provider.name}`);
     button.addEventListener("click", async () => {
       showMessage(errorBox, null);
+      if (allowed && !allowed()) {
+        showMessage(errorBox, "Agree to the terms to create your account.");
+        return;
+      }
       buttons.forEach((b) => (b.disabled = true));
       try {
         await continueWithProvider(clerk, mode, provider.strategy);

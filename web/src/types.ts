@@ -132,6 +132,11 @@ export type CustomerSession = {
    *  cannot place an order until it has. */
   email_pending: boolean;
   is_guest: boolean;
+  /** Whether this customer has agreed to the terms in force. False for an
+   *  account created through Google, Apple or Facebook without passing a
+   *  consent step: Clerk finishes those itself whenever the provider gave it
+   *  everything, and never asks us. */
+  terms_accepted: boolean;
 };
 
 export type FulfillmentType = "PICKUP" | "DELIVERY";

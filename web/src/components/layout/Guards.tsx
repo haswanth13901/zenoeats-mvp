@@ -11,6 +11,7 @@ import {
 } from "@/features/restaurant/restaurantApi";
 import { ApiError, errorMessage } from "@/services/apiClient";
 import { useCustomerSessionQuery } from "@/features/storefront/storefrontApi";
+import { AgreeToTerms } from "@/features/storefront/components/AgreeToTerms";
 import { takeOrderToken } from "@/features/storefront/orderToken";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import { ErrorNote, StatePage } from "@/components/common/Feedback";
@@ -163,7 +164,19 @@ export function RequireCustomer({
   if (hasOrderToken) return <>{children}</>;
   // "Not asked yet" is not "nobody", exactly as in the portals above.
   if (isLoading) return <Booting />;
-  if (data) return <>{children}</>;
+  if (data) {
+    // An account that never passed a consent step. Clerk completes a social
+    // sign-up by itself whenever the provider gave it everything it asked
+    // for, so "sign in with Google" could create an account that had agreed
+    // to nothing -- the sign-up form's checkbox is never reached on that
+    // path. Asked here rather than at a URL of its own, so there is nothing
+    // to arrive at out of order.
+    //
+    // Guests are excluded on purpose: they are shown the same sentence above
+    // the checkout button and their agreement is recorded with the order.
+    if (!data.is_guest && !data.terms_accepted) return <AgreeToTerms email={data.email} />;
+    return <>{children}</>;
+  }
   // Nobody yet. The sign-in page offers both an account and continuing as a
   // guest, so this is the right destination even where Clerk is unconfigured
   // and an account is not on offer at all.

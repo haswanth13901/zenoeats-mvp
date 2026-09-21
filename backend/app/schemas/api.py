@@ -345,6 +345,12 @@ class CustomerSessionOut(BaseModel):
     address: str | None = None
     email_pending: bool = False
     is_guest: bool
+    # Whether this customer has agreed to the terms in force. False for an
+    # account that reached us through a social provider without passing a
+    # consent step -- Clerk finishes those itself when it has everything it
+    # needs, and asks us for nothing. The app puts the consent form in front
+    # of them rather than assuming the sign-up page was where they came from.
+    terms_accepted: bool = False
 
 
 class AmountsOut(BaseModel):

@@ -18,8 +18,13 @@ await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const results = [];
 const stamp = new Date().toISOString();
+// A returning customer, which includes having agreed to the terms. Without
+// terms_accepted the guard shows the consent form instead of the page, which
+// is correct behaviour and would fail every checkout check below for the
+// wrong reason.
 const session = { email: "customer@example.com", full_name: "Sam Regular", phone: "3125550123",
-  address: "20 Oak Avenue, Chicago", email_pending: false, is_guest: false };
+  address: "20 Oak Avenue, Chicago", email_pending: false, is_guest: false,
+  terms_accepted: true };
 const portal = { restaurant_id: "r1", slug: "qa-kitchen", name: "Spice House", tagline: "Bold flavors. Good company.",
   currency: "USD", is_orderable: true, accepting_orders: true, delivery_offered: true,
   stripe_publishable_key: "", stripe_account_id: "acct_fixture", maps_browser_key: null, maps_map_id: null };

@@ -175,6 +175,7 @@ def current_customer(user: User = Depends(get_current_user)):
         address=user.address,
         email_pending=clerk_customers.has_placeholder_email(user),
         is_guest=user.kind == UserKind.GUEST.value,
+        terms_accepted=not terms.needs_recording(user),
     )
 
 

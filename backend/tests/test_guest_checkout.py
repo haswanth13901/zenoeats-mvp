@@ -235,6 +235,10 @@ def test_the_session_endpoint_names_a_guest_as_one(active_restaurant):
         "email": "pat@example.com", "full_name": "Pat Guest", "is_guest": True,
         # Nothing saved yet: those come from the first order.
         "phone": None, "address": None, "email_pending": False,
+        # Nor has anything been agreed to. A guest is not asked to before
+        # checkout, where the line above the button says what continuing
+        # means and the order records it.
+        "terms_accepted": False,
     }
 
 

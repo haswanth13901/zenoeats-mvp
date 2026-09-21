@@ -103,6 +103,60 @@ def test_an_order_still_goes_through_when_the_record_cannot_be_written(shop, mon
     assert _customer(res.json()["order_id"])["terms_version"] is None
 
 
+def test_a_session_says_whether_the_customer_has_agreed(shop):
+    """What the consent form turns on. A guest who has not ordered has agreed
+    to nothing either, and the app is what decides that guests are not asked
+    -- the endpoint answers the same question for both."""
+    client = _guest(shop)
+    before = client.get("/api/v1/orders/session")
+    assert before.status_code == 200, before.text
+    assert before.json()["terms_accepted"] is False
+
+    assert _order(client, shop, contact=CONTACT).status_code == 201
+    assert client.get("/api/v1/orders/session").json()["terms_accepted"] is True
+
+
+def test_accepting_the_terms_records_them_without_an_order(shop):
+    """The path an account created through Google takes: Clerk finished the
+    sign-up itself, so nothing was agreed to, and the form posts here before
+    the customer ever reaches checkout."""
+    client = _guest(shop)
+    res = client.post("/api/v1/customer/accept-terms")
+    assert res.status_code == 200, res.text
+    assert res.json()["terms_accepted"] is True
+    assert client.get("/api/v1/orders/session").json()["terms_accepted"] is True
+
+
+def test_accepting_twice_is_harmless(shop):
+    client = _guest(shop)
+    first = client.post("/api/v1/customer/accept-terms")
+    assert first.status_code == 200, first.text
+    assert client.post("/api/v1/customer/accept-terms").status_code == 200
+
+
+def test_accepting_says_so_when_it_could_not_be_saved(shop, monkeypatch):
+    """It must not answer "agreed" when nothing was written. The form reads
+    the flag back and asks again rather than letting someone through on a
+    record that does not exist."""
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("the database said no")
+
+    monkeypatch.setattr(terms, "system_session", explode)
+    res = _guest(shop).post("/api/v1/customer/accept-terms")
+    assert res.status_code == 200, res.text
+    assert res.json()["terms_accepted"] is False
+
+
+def test_accepting_needs_an_identity(shop):
+    """No session, no agreement to record."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app, base_url=f"http://{shop.slug}.zenoeats.local") as anonymous:
+        assert anonymous.post("/api/v1/customer/accept-terms").status_code == 401
+
+
 def test_the_two_columns_are_written_together_or_not_at_all(shop):
     """A timestamp naming no wording is not evidence of anything, so the
     database refuses the pair half-filled however it is reached."""

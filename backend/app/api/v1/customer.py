@@ -28,7 +28,7 @@ from app.models import (
     CustomerFavourite, Item, Order, OrderStatus, Restaurant, User, UserKind,
 )
 from app.schemas.api import CustomerSessionOut, ProfileContactIn
-from app.services import clerk_customers, customer_profile
+from app.services import clerk_customers, customer_profile, terms
 
 router = APIRouter(prefix="/customer", tags=["customer"])
 
@@ -45,6 +45,7 @@ def _session_out(user: User) -> CustomerSessionOut:
         address=user.address,
         email_pending=clerk_customers.has_placeholder_email(user),
         is_guest=user.kind == UserKind.GUEST.value,
+        terms_accepted=not terms.needs_recording(user),
     )
 
 
@@ -71,6 +72,31 @@ def update_profile(
     """
     customer_profile.save_contact(user.id, body)
     user.full_name, user.phone, user.address = body.full_name, body.phone, body.address
+    return _session_out(user)
+
+
+@router.post(
+    "/accept-terms",
+    response_model=CustomerSessionOut,
+    dependencies=[Depends(per_user("customer_accept_terms", limit=20))],
+)
+def accept_terms(
+    user: User = Depends(get_current_user),
+    _restaurant: Restaurant = Depends(current_restaurant),
+):
+    """Record that this customer has agreed to the terms in force.
+
+    For the account that reached us without passing a consent step: Clerk
+    finishes a social sign-up by itself whenever the provider gave it
+    everything it asked for, and asks us for nothing on the way through. The
+    consent form the app then shows posts here.
+
+    Idempotent, and deliberately takes no body. What was agreed to is the
+    wording this deployment is serving, which the server knows and the browser
+    does not -- a version in the request would be the caller's claim about
+    what it had displayed.
+    """
+    terms.record(user)
     return _session_out(user)
 
 

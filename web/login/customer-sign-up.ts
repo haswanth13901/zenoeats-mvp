@@ -125,7 +125,14 @@ function start(clerk: ClerkInstance): void {
     showMessage(errorBox, "That sign-up has expired. Start again.");
   }
 
-  wireSocialButtons(clerk, "sign-up", el("social-buttons"), el("social-section"), errorBox);
+  // The checkbox gates the provider buttons as well as the form. Without
+  // this, "Sign up with Google" walks past the only place agreement is asked
+  // for -- Clerk completes that sign-up itself and never sends anyone back to
+  // the consent step.
+  wireSocialButtons(
+    clerk, "sign-up", el("social-buttons"), el("social-section"), errorBox,
+    () => legalInput.checked,
+  );
   const collectNames = namesEnabled(clerk);
   el("name-field").hidden = !collectNames;
 

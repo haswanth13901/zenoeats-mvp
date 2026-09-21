@@ -159,6 +159,13 @@ export const storefrontApi = api.injectEndpoints({
       invalidatesTags: ["CustomerSession"],
     }),
 
+    /** Agree to the terms in force. No body: what was agreed to is the
+     *  wording this deployment serves, which the server knows. */
+    acceptTerms: build.mutation<CustomerSession, void>({
+      query: () => ({ url: "/customer/accept-terms", method: "POST", customerAuth: true }),
+      invalidatesTags: ["CustomerSession"],
+    }),
+
     /** Paid orders at this restaurant, newest first, a page at a time.
      *  `before` is the previous page's next_before. */
     customerOrders: build.query<
@@ -228,6 +235,7 @@ export const {
   useEndGuestSessionMutation,
   useUpdateProfileMutation,
   useSyncProfileEmailMutation,
+  useAcceptTermsMutation,
   useCustomerOrdersQuery,
   useLazyCustomerOrdersQuery,
   useFavouritesQuery,
