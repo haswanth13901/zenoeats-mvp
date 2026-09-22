@@ -1,3 +1,4 @@
+import type { Brand } from "@/features/storefront/brand";
 import type { Storefront } from "@/features/storefront/theme";
 export type Option = {
   id: string;
@@ -100,6 +101,9 @@ export type Meal = {
 
 export type Portal = {
   storefront?: Storefront | null;
+  /** The logo and name lettering from Settings. Shown whether or not the
+   *  storefront is customized. */
+  brand?: Brand;
   pickup_address?: string | null;
   restaurant_id: string;
   slug: string;

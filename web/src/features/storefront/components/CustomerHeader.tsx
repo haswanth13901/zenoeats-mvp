@@ -1,16 +1,18 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAppSelector } from "@/app/hooks";
 import { Icon } from "@/components/common/icons";
 import { selectCartCount } from "@/features/cart/cartSlice";
+import { brandFontFamily, brandFrom, loadBrandFont, type Brand } from "@/features/storefront/brand";
 import type { Portal } from "@/types";
 
 /**
  * The restaurant's own header on every customer page (revision 06).
  *
- * The wordmark is the restaurant's name, set in the storefront's type with a
- * monogram of its first letter -- never a substituted logo, because there is
- * no logo field to take one from. It always leads back to the menu.
+ * The wordmark is the restaurant's mark and name, as set in Settings: its logo
+ * in place of the monogram of its first letter when it has uploaded one, and
+ * its own lettering in place of the typeset name, or the name in the font it
+ * chose. It always leads back to the menu.
  *
  * On the menu the header also carries the page's jump links and the order
  * button; through checkout, payment and tracking it is quieter and says only
@@ -21,7 +23,7 @@ export function CustomerHeader({
   links,
   showOrder = false,
 }: {
-  restaurant: Pick<Portal, "name" | "delivery_offered" | "is_orderable" | "accepting_orders" | "storefront">;
+  restaurant: Pick<Portal, "name" | "delivery_offered" | "is_orderable" | "accepting_orders" | "storefront" | "brand">;
   /** Jump links into the page. Hidden on a phone, where the category row
    *  below does the same job. */
   links?: ReactNode;
@@ -30,7 +32,7 @@ export function CustomerHeader({
   return (
     <header className="border-b border-[#E6E5DB] bg-cream">
       <div className="mx-auto flex min-h-[72px] max-w-[1336px] items-center gap-[15px] px-[19px] sm:min-h-[78px] sm:gap-[25px] sm:px-7 lg:min-h-[88px] lg:gap-[30px] xl:gap-[50px] xl:px-10">
-        {restaurant.storefront?.logo_url ? <Link to="/" aria-label={`${restaurant.name}, back to the menu`}><img src={restaurant.storefront.logo_url} alt={restaurant.name} className="max-h-14 max-w-[180px] object-contain" /></Link> : <Wordmark name={restaurant.name} />}
+        <Wordmark name={restaurant.name} brand={brandFrom(restaurant.brand)} />
         {links && (
           <nav className="hidden items-center gap-5 sm:flex lg:gap-7" aria-label="On this page">
             {links}
@@ -57,27 +59,62 @@ export function CustomerHeader({
   );
 }
 
-function Wordmark({ name }: { name: string }) {
+/** The mark and the name. Exported for the Settings preview, which shows
+ *  the unsaved brand exactly as the header will. */
+export function Wordmark({ name, brand, linked = true }: { name: string; brand: Brand; linked?: boolean }) {
   const initial = name.trim().charAt(0).toUpperCase();
+  useEffect(() => {
+    if (!brand.name_image_url) loadBrandFont(brand.name_font);
+  }, [brand.name_font, brand.name_image_url]);
+  const content = (
+    <>
+      {brand.logo_url ? (
+        // The logo's own shape, at the monogram's height: a square logo sits
+        // exactly where the initial did, a wider one takes the room it needs.
+        <img
+          src={brand.logo_url}
+          alt=""
+          aria-hidden="true"
+          className="h-[35px] w-auto max-w-[96px] shrink-0 object-contain sm:h-[43px] sm:max-w-[120px]"
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="inline-flex h-[35px] w-[33px] shrink-0 items-center justify-center rounded-[9px_9px_9px_2px] bg-brick pr-[3px] font-display text-[26px] font-bold italic leading-none text-gold sm:h-[43px] sm:w-[41px] sm:rounded-[11px_11px_11px_2px] sm:text-[31px]"
+        >
+          {initial}
+        </span>
+      )}
+      {brand.name_image_url ? (
+        <img
+          src={brand.name_image_url}
+          alt=""
+          aria-hidden="true"
+          className="h-[28px] w-auto min-w-0 max-w-[170px] object-contain object-left sm:h-[32px] sm:max-w-[220px] lg:h-[38px] lg:max-w-[260px]"
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          style={{ fontFamily: brandFontFamily(brand.name_font) }}
+          className="truncate font-display text-[23px] font-bold leading-[1.1] tracking-[-1px] sm:text-[25px] lg:text-[29px] lg:tracking-[-1.4px]"
+        >
+          {name}
+          <span className="text-accent">.</span>
+        </span>
+      )}
+    </>
+  );
+  const className = "inline-flex min-w-0 items-center gap-2 text-brick no-underline sm:gap-[11px]";
+  if (!linked) {
+    return (
+      <span className={className} role="img" aria-label={name}>
+        {content}
+      </span>
+    );
+  }
   return (
-    <Link
-      to="/"
-      className="inline-flex min-w-0 items-center gap-2 text-brick no-underline sm:gap-[11px]"
-      aria-label={`${name}, back to the menu`}
-    >
-      <span
-        aria-hidden="true"
-        className="inline-flex h-[35px] w-[33px] shrink-0 items-center justify-center rounded-[9px_9px_9px_2px] bg-brick pr-[3px] font-display text-[26px] font-bold italic leading-none text-gold sm:h-[43px] sm:w-[41px] sm:rounded-[11px_11px_11px_2px] sm:text-[31px]"
-      >
-        {initial}
-      </span>
-      <span
-        aria-hidden="true"
-        className="truncate font-display text-[23px] font-bold leading-[1.1] tracking-[-1px] sm:text-[25px] lg:text-[29px] lg:tracking-[-1.4px]"
-      >
-        {name}
-        <span className="text-accent">.</span>
-      </span>
+    <Link to="/" className={className} aria-label={`${name}, back to the menu`}>
+      {content}
     </Link>
   );
 }

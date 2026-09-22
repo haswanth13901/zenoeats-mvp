@@ -42,7 +42,6 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
   const [categories, setCategories] = useState(initial.categories);
   const [collections, setCollections] = useState(initial.collections);
   const [theme, setTheme] = useState(initial.theme);
-  const [logo, setLogo] = useState({ path: initial.logo_path, url: initial.logo_url });
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -52,7 +51,7 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
   const [saveBanners] = useSaveStorefrontBannersMutation();
   const [saveCategory] = useSaveStorefrontCategoryMutation();
   const [saveCollections] = useSaveStorefrontCollectionsMutation();
-  const dirty = !same(banners, saved.banners) || interval !== saved.banner_interval_ms || !same(categories, saved.categories) || !same(collections, saved.collections) || !same(theme, saved.theme) || logo.path !== saved.logo_path;
+  const dirty = !same(banners, saved.banners) || interval !== saved.banner_interval_ms || !same(categories, saved.categories) || !same(collections, saved.collections) || !same(theme, saved.theme);
   const blocker = useBlocker(dirty || uploads > 0);
   useEffect(() => {
     if (!dirty && !uploads) return;
@@ -77,7 +76,7 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
   const emptyShown = collections.filter((c) => c.is_active && c.item_ids.length === 0);
   const chosenTheme = theme ?? PALETTES[0]!.theme;
   const checks = contrastResults(chosenTheme);
-  const preview: Storefront = { theme, logo_url: logo.url, banner_interval_ms: interval,
+  const preview: Storefront = { theme, logo_url: initial.logo_url, banner_interval_ms: interval,
     banners: banners.filter((b) => b.is_active && b.image_url && (!b.starts_at || Date.parse(b.starts_at) <= Date.now()) && (!b.ends_at || Date.parse(b.ends_at) > Date.now())),
     categories: Object.fromEntries(categories.map((c, order) => [c.id, { image_url: c.image_url, show_in_shortcuts: c.show_in_shortcuts, sort_order: order }])), collections };
   return <div className="min-w-0">
@@ -154,15 +153,17 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
           <div className="grid grid-cols-2 gap-4">{(["brand", "hero", "accent", "paper"] as const).map((key) => <Field key={key} label={key.charAt(0).toUpperCase() + key.slice(1)}><input aria-label={`${key} colour`} className="h-11 w-full" type="color" value={chosenTheme[key]} onChange={(e) => setTheme({ ...chosenTheme, [key]: e.target.value })} /><span className="text-caption">{chosenTheme[key]}</span></Field>)}</div>
           <ul className="text-caption" aria-live="polite">{checks.map((check) => <li key={check.name} className={check.ratio < 4.5 ? "text-danger" : "text-muted"}>{check.name}: {check.ratio.toFixed(2)}:1 - {check.ratio >= 4.5 ? "Pass" : "Needs 4.5:1"}</li>)}</ul>
           <Field label="Font pairing"><select className="field" value={chosenTheme.font_pair} onChange={(e) => setTheme({ ...chosenTheme, font_pair: e.target.value as FontPair })}>{Object.entries(FONT_PAIRS).map(([value, font]) => <option key={value} value={value}>{font.label}</option>)}</select></Field>
-          <ImagePicker kind="branding" label="restaurant logo" image={logo} onChange={setLogo} onBusyChange={trackUpload} onError={setError} />
-          <Save disabled={off || (theme !== null && checks.some((c) => c.ratio < 4.5))} busy={busy === "Brand"} onClick={() => void save("Brand", async () => { const result = await saveTheme({ theme, logo_path: logo.path }).unwrap(); setSaved((s) => ({ ...s, theme: result.theme, logo_path: result.logo_path, logo_url: result.logo_url })); })} />
+          {/* The logo and the name's lettering moved to Settings, where they
+              apply whether or not the storefront is customized. Saving the
+              theme here no longer sends a logo, so it cannot undo that. */}
+          <p className="note">The logo and how your name is shown are set by an admin in <Link className="link" to="/manage/settings#settings-brand">Settings → Logo &amp; name</Link>.</p>
+          <Save disabled={off || (theme !== null && checks.some((c) => c.ratio < 4.5))} busy={busy === "Brand"} onClick={() => void save("Brand", async () => { const result = await saveTheme({ theme }).unwrap(); setSaved((s) => ({ ...s, theme: result.theme })); })} />
           </fieldset>
         </SettingsCard>
       </div>
       <aside className="min-w-0 xl:sticky xl:top-4 xl:self-start" aria-label="Live storefront preview">
         <h2 className="mb-3 text-lg font-semibold">Live preview <span className="text-caption font-normal text-muted">Unsaved changes</span></h2>
         <div data-surface="customer" style={themeVariables(theme)} className="storefront-preview min-w-0 overflow-hidden rounded-card bg-paper p-3 font-sans text-ink">
-          {logo.url && <img src={logo.url} alt={initial.name} className="mb-4 max-h-14 max-w-[180px] object-contain" />}
           <HomeBanner restaurant={{ name: initial.name, tagline: initial.tagline, delivery_offered: false }} photo={heroPhoto(initial.menu.meals)} storefront={preview} onTarget={() => {}} />
           <CategoryShortcuts meals={initial.menu.meals} severalPeriods={initial.menu.meals.length > 1} categories={preview.categories} />
           {collections.map((c) => {

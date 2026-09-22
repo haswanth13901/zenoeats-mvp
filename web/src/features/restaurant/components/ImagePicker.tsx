@@ -100,6 +100,8 @@ export function ImagePicker({
   onChange,
   onError,
   onBusyChange,
+  guide = IMAGE_GUIDE[kind],
+  fit = "cover",
 }: {
   kind: ImageKind;
   image: ImageDraft;
@@ -110,6 +112,11 @@ export function ImagePicker({
   onChange: (next: ImageDraft) => void;
   onError: (message: string | null) => void;
   onBusyChange?: (busy: boolean) => void;
+  /** Advice for this particular picture, when one kind covers several: the
+   *  square logo and the wide name lettering are both "branding". */
+  guide?: { size: string; tip: string };
+  /** `contain` for a logo, which is shown whole and never cropped. */
+  fit?: "cover" | "contain";
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -157,11 +164,15 @@ export function ImagePicker({
       aria-label={image.url ? `Change the photo of ${label}` : `Add a photo of ${label}`}
       // The compact picker has no room for the size advice, so it rides on
       // the tooltip here; lists of them also carry an ImageSizeHint above.
-      title={`${image.url ? "Change photo" : "Add photo"} — ${IMAGE_GUIDE[kind].size}`}
+      title={`${image.url ? "Change photo" : "Add photo"} — ${guide.size}`}
       className={`${box} relative flex shrink-0 items-center justify-center overflow-hidden border border-hairline bg-paper text-muted transition-colors duration-color hover:border-ink disabled:hover:border-hairline`}
     >
       {image.url ? (
-        <img src={image.url} alt="" className="h-full w-full object-cover" />
+        <img
+          src={image.url}
+          alt=""
+          className={`h-full w-full ${fit === "contain" ? "object-contain p-1" : "object-cover"}`}
+        />
       ) : (
         <PhotoIcon />
       )}
@@ -220,9 +231,9 @@ export function ImagePicker({
         )}
         {/* Before choosing, not after: the point is to pick a photo that
             fits, and once it is uploaded the crop has already happened. */}
-        <span className="max-w-[40ch] text-caption text-ink">{IMAGE_GUIDE[kind].size}</span>
+        <span className="max-w-[40ch] text-caption text-ink">{guide.size}</span>
         <span className="max-w-[40ch] text-caption text-muted">
-          {IMAGE_GUIDE[kind].tip} JPEG, PNG or WebP.
+          {guide.tip} JPEG, PNG or WebP.
         </span>
       </div>
       {fileInput}

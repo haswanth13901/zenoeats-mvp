@@ -437,6 +437,24 @@
   [data-surface="customer"] .brand-mark {
     @apply rounded-[11px_11px_11px_2px] bg-brick pr-[3px] font-bold italic text-gold;
   }
+  /* The restaurant's own logo and lettering (Settings -> Logo & name), in
+     place of the initial and the typeset name. Shown whole, at the mark's
+     height; on the dark art panel, on a cream chip so a dark logo still
+     reads. */
+  .brand-mark.has-logo,
+  [data-surface="customer"] .brand-mark.has-logo {
+    @apply h-auto w-auto rotate-0 rounded-none bg-transparent p-0;
+  }
+  .brand-mark.has-logo img {
+    @apply h-[30px] w-auto max-w-[96px] object-contain;
+  }
+  .brand-name-image {
+    @apply h-[26px] w-auto max-w-[220px] object-contain object-left;
+  }
+  [data-surface="customer"] .auth-art .brand-mark.has-logo,
+  [data-surface="customer"] .auth-art .brand-name-image {
+    @apply rounded-[8px] bg-[#FAF8F2] p-1;
+  }
   /* Pill actions, as everywhere else on the customer surface. */
   [data-surface="customer"] .btn {
     @apply rounded-full;

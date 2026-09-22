@@ -36,3 +36,30 @@ export function rememberRestaurantName(name: string | null | undefined): void {
     /* storage unavailable: the next page simply asks the API */
   }
 }
+
+/*
+ * The restaurant's logo and name lettering, remembered alongside the name for
+ * the same reason: so the sign-in pages show the restaurant's own mark first
+ * rather than its initial. Read back through brandFrom, which drops anything
+ * that is not a plain image path.
+ */
+
+const BRAND_KEY = "zenoeats.restaurant-brand";
+
+export function rememberedBrand(): unknown {
+  try {
+    const raw = window.localStorage.getItem(BRAND_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function rememberBrand(brand: object | null | undefined): void {
+  if (!brand) return;
+  try {
+    window.localStorage.setItem(BRAND_KEY, JSON.stringify(brand));
+  } catch {
+    /* storage unavailable: the next page simply asks the API */
+  }
+}

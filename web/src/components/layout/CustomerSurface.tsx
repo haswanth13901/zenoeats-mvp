@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect } from "react";
 import { usePortalQuery } from "@/features/storefront/storefrontApi";
 import { CustomerFooter } from "@/features/storefront/components/CustomerFooter";
 import { attachFont, themeVariables } from "@/features/storefront/theme";
-import { rememberRestaurantName } from "@/utils/restaurantName";
+import { rememberBrand, rememberRestaurantName } from "@/utils/restaurantName";
 import { Outlet } from "react-router-dom";
 
 /**
@@ -21,6 +21,8 @@ export function CustomerSurface() {
   // otherwise show the platform's name until they had asked for this one.
   const restaurantName = data?.name;
   useEffect(() => rememberRestaurantName(restaurantName), [restaurantName]);
+  const brand = data?.brand;
+  useEffect(() => rememberBrand(brand), [brand]);
   useLayoutEffect(() => {
     const root = document.documentElement;
     const vars = themeVariables(theme);

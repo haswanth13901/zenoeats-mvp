@@ -35,6 +35,13 @@ class Restaurant(Base, TimestampMixin):
     """Tenant root. Request-path access is scoped by id = app.current_tenant."""
 
     __tablename__ = "restaurants"
+    __table_args__ = (
+        CheckConstraint(
+            "brand_name_font IN ('default', 'lora', 'playfair', 'fraunces', "
+            "'merriweather', 'dm_sans')",
+            name="ck_restaurants_brand_name_font",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     slug: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
@@ -68,6 +75,13 @@ class Restaurant(Base, TimestampMixin):
     storefront_customization_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     theme: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     logo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # How the name beside the logo is shown on customer pages: an image of the
+    # restaurant's own lettering when there is one, otherwise text in this
+    # font. Keys are listed in services/restaurant_profile.BRAND_NAME_FONTS.
+    brand_name_image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    brand_name_font: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="default", server_default="default"
+    )
     banner_interval_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=5000, server_default="5000")
 
     # Branding

@@ -276,7 +276,12 @@ def release(db: Session, key: str | None) -> None:
         ).scalar_one()
         for model in (Item, ModifierOption, ItemType, StorefrontBanner)
     )
-    held += db.execute(select(func.count()).select_from(Restaurant).where(Restaurant.logo_path == key)).scalar_one()
+    # The two brand images live on the restaurant row itself.
+    held += db.execute(
+        select(func.count()).select_from(Restaurant).where(
+            (Restaurant.logo_path == key) | (Restaurant.brand_name_image_path == key)
+        )
+    ).scalar_one()
     if held:
         return
 
