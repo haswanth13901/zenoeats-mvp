@@ -477,5 +477,23 @@ function InvitationEmail({ member }: { member: StaffMember }) {
       text = stillSending(member) ? "Sending the invitation email…" : null;
   }
   if (!text) return null;
-  return <p className={`mt-1.5 max-w-[34ch] text-caption ${tone}`}>{text}</p>;
+  // Asked to pass the link on, the admin needs the link: after a reload the
+  // invite panel that showed it is gone, and nothing else on the page has it.
+  const handOver =
+    member.invitation_email_status === "FAILED" ||
+    member.invitation_email_status === "NOT_CONFIGURED";
+  const signIn = `${window.location.origin}/manage/login`;
+  return (
+    <>
+      <p className={`mt-1.5 max-w-[34ch] text-caption ${tone}`}>{text}</p>
+      {handOver && (
+        <p className="mt-1 max-w-[34ch] text-caption">
+          <span className="text-muted">Sign-in link: </span>
+          <a href={signIn} className="link [overflow-wrap:anywhere]">
+            {signIn}
+          </a>
+        </p>
+      )}
+    </>
+  );
 }
