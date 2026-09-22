@@ -13,7 +13,8 @@ board.
 | Identity | Customers: Clerk (email/password, Google) behind our own `/account` pages. Staff: platform-issued passwords. Admins: `ADMIN_USERS` |
 | Customer profile | `/profile`: name, phone and address; order history at this restaurant; favourite items (accounts only), saved from a heart on the menu |
 | Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
-| Storefront | Each restaurant sets its own palette, fonts, logo, rotating banners with their own framing, category shortcuts and collections — behind a platform switch |
+| Brand | Each restaurant uploads its logo and chooses how its name is shown — typed in one of six fonts, or its own lettering as an image — in Settings; shown in every customer header and on the sign-in pages, with or without storefront customization |
+| Storefront | Each restaurant sets its own palette, font pairing, rotating banners with their own framing, category shortcuts and collections — behind a platform switch |
 | Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
 | Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
 | Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports, deliveries the restaurant runs itself, self-service settings, storefront editor |

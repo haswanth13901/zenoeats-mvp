@@ -484,6 +484,19 @@ class RestaurantProfileIn(BaseModel):
     address_state: str | None = Field(default=None, max_length=100)
     address_postal_code: str | None = Field(default=None, max_length=20)
     address_country: str | None = Field(default=None, pattern=r"^[A-Za-z]{2}$")
+    # The brand customers see in the header and on the sign-in pages. Keys
+    # come from POST /restaurant/images?kind=branding; null takes one off.
+    logo_path: str | None = Field(default=None, max_length=500)
+    brand_name_image_path: str | None = Field(default=None, max_length=500)
+    brand_name_font: Literal[restaurant_profile.BRAND_NAME_FONTS] | None = None
+
+    @field_validator("brand_name_font")
+    @classmethod
+    def _font_cannot_be_cleared(cls, value):
+        # "default" is the way back to the platform's font; null is not a font.
+        if value is None:
+            raise ValueError("Choose a font.")
+        return value
 
 
 class RestaurantProfileOut(BaseModel):
@@ -506,6 +519,11 @@ class RestaurantProfileOut(BaseModel):
     address_state: str | None
     address_postal_code: str | None
     address_country: str | None
+    logo_path: str | None
+    logo_url: str | None
+    brand_name_image_path: str | None
+    brand_name_image_url: str | None
+    brand_name_font: str
     stripe_connected: bool
     charges_enabled: bool
 
@@ -528,6 +546,10 @@ def _profile_out(db: Session, restaurant: Restaurant) -> RestaurantProfileOut:
         address_city=restaurant.address_city, address_state=restaurant.address_state,
         address_postal_code=restaurant.address_postal_code,
         address_country=restaurant.address_country,
+        logo_path=restaurant.logo_path, logo_url=images.image_url(restaurant.logo_path),
+        brand_name_image_path=restaurant.brand_name_image_path,
+        brand_name_image_url=images.image_url(restaurant.brand_name_image_path),
+        brand_name_font=restaurant.brand_name_font,
         stripe_connected=bool(account and account["stripe_account_id"]),
         charges_enabled=bool(account and account["charges_enabled"]),
     )
@@ -571,6 +593,15 @@ def update_profile(
     ).scalar_one_or_none()
     restaurant_profile.guard_stripe_tax(restaurant, changes, account_id)
 
+    # Brand images must be this restaurant's own uploads. The ones they
+    # replace are released once nothing else points at them.
+    replaced = []
+    for field in ("logo_path", "brand_name_image_path"):
+        if field in changes:
+            changes[field] = images.accept(changes[field], restaurant.id, ImageKind.BRANDING)
+            if changes[field] != getattr(restaurant, field):
+                replaced.append(getattr(restaurant, field))
+
     restaurant_profile.apply_changes(restaurant, changes)
 
     restaurant_profile.audit(
@@ -578,6 +609,8 @@ def update_profile(
         {"restaurant_id": str(restaurant.id), "fields": sorted(changes)},
     )
     db.flush()
+    for key in replaced:
+        images.release(db, key)
     return _profile_out(db, restaurant)
 
 
@@ -1106,7 +1139,10 @@ def upload_image(
     # One byte over the limit is enough to know it is over, without reading
     # the rest of an arbitrarily large body into memory.
     data = file.file.read(images.MAX_UPLOAD_BYTES + 1)
-    if kind in (ImageKind.BANNERS, ImageKind.CATEGORIES, ImageKind.BRANDING):
+    # Banners and category tiles only exist on a customized storefront. The
+    # logo and name lettering do not: they are set in Settings and shown on
+    # every restaurant's header, so they upload whatever the switch says.
+    if kind in (ImageKind.BANNERS, ImageKind.CATEGORIES):
         storefront.require_enabled(restaurant)
     picture = images.process(data, kind)
 

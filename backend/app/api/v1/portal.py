@@ -12,8 +12,8 @@ from app.api.deps import TenantContext, TenantDb, current_restaurant, resolve_te
 from app.config import settings
 from app.core.ratelimit import per_ip
 from app.models import Restaurant, RestaurantPaymentAccount
-from app.schemas.api import MenuOut, PortalOut
-from app.services import delivery, storefront
+from app.schemas.api import BrandOut, MenuOut, PortalOut
+from app.services import delivery, images, storefront
 from app.services.menu import load_menu
 
 router = APIRouter(tags=["portal"])
@@ -32,6 +32,11 @@ def get_portal(
     account = db.execute(select(RestaurantPaymentAccount)).scalar_one_or_none()
     return PortalOut(
         storefront=storefront.public(db, restaurant),
+        brand=BrandOut(
+            logo_url=images.image_url(restaurant.logo_path),
+            name_image_url=images.image_url(restaurant.brand_name_image_path),
+            name_font=restaurant.brand_name_font,
+        ),
         restaurant_id=restaurant.id,
         slug=restaurant.slug,
         name=restaurant.name,

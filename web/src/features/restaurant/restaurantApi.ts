@@ -1,5 +1,6 @@
 import { api } from "@/services/api";
 import { request } from "@/services/apiClient";
+import type { BrandFont } from "@/features/storefront/brand";
 import type { DiscountKind, Meal } from "@/types";
 
 export type StaffMe = {
@@ -76,6 +77,13 @@ export type RestaurantProfile = {
   address_state: string | null;
   address_postal_code: string | null;
   address_country: string | null;
+  /** The brand customers see in the header and on the sign-in pages. Paths
+   *  are what is saved; URLs are for showing them. */
+  logo_path: string | null;
+  logo_url: string | null;
+  brand_name_image_path: string | null;
+  brand_name_image_url: string | null;
+  brand_name_font: BrandFont;
   /** Why Stripe Tax may be refused: it needs a connected account that has
    *  finished its own tax setup, as well as a full pickup address. */
   stripe_connected: boolean;
@@ -85,7 +93,16 @@ export type RestaurantProfile = {
 /** Only the fields actually sent are applied, so an edit of one field cannot
  *  overwrite another admin's edit of a different one. */
 export type RestaurantProfilePatch = Partial<
-  Omit<RestaurantProfile, "slug" | "status" | "currency" | "stripe_connected" | "charges_enabled">
+  Omit<
+    RestaurantProfile,
+    | "slug"
+    | "status"
+    | "currency"
+    | "stripe_connected"
+    | "charges_enabled"
+    | "logo_url"
+    | "brand_name_image_url"
+  >
 >;
 
 export type StaffInvite = {

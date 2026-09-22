@@ -1,6 +1,12 @@
 import { request } from "@/services/apiClient";
 import { clerkErrorCode, clerkErrorMessage, getClerk } from "@/services/clerk";
-import { rememberedRestaurantName, rememberRestaurantName } from "@/utils/restaurantName";
+import {
+  rememberBrand,
+  rememberedBrand,
+  rememberedRestaurantName,
+  rememberRestaurantName,
+} from "@/utils/restaurantName";
+import { brandFontFamily, brandFrom, loadBrandFont, type Brand } from "@/features/storefront/brand";
 
 /**
  * What the customer account pages have in common.
@@ -254,31 +260,54 @@ export async function paintRestaurantName(
 
 /** The restaurant this address belongs to, read once however many parts of
  *  the page want it. */
-let pending: Promise<{ name: string }> | null = null;
+let pending: Promise<{ name: string; brand?: unknown }> | null = null;
 
-function restaurant(): Promise<{ name: string }> {
-  pending ??= request<{ name: string }>("/portal");
+function restaurant(): Promise<{ name: string; brand?: unknown }> {
+  pending ??= request<{ name: string; brand?: unknown }>("/portal");
   return pending;
 }
 
 /** Put the restaurant's own name in the wordmarks, as the storefront header
- *  does. These pages belong to the restaurant being ordered from, not to the
- *  platform; on the platform root there is no restaurant and the Zenoeats
- *  wordmark in the markup stands. */
+ *  does -- its logo in place of the initial, and its own lettering or chosen
+ *  font for the name. These pages belong to the restaurant being ordered
+ *  from, not to the platform; on the platform root there is no restaurant
+ *  and the Zenoeats wordmark in the markup stands. */
 export async function paintWordmarks(): Promise<void> {
   // The page's own title, before any restaurant name is added to it, so a
   // repaint replaces the suffix rather than stacking a second one.
   const baseTitle = document.title;
-  const paint = (name: string) => {
+  const paint = (name: string, brand: Brand) => {
     const initial = name.trim().charAt(0).toUpperCase();
-    document.querySelectorAll("[data-wordmark-name]").forEach((el) => {
-      el.textContent = name;
+    if (!brand.name_image_url) loadBrandFont(brand.name_font);
+    document.querySelectorAll<HTMLElement>("[data-wordmark-name]").forEach((el) => {
+      if (brand.name_image_url) {
+        const img = document.createElement("img");
+        img.src = brand.name_image_url;
+        img.alt = name;
+        img.className = "brand-name-image";
+        el.replaceChildren(img);
+        el.style.fontFamily = "";
+      } else {
+        el.textContent = name;
+        el.style.fontFamily = brandFontFamily(brand.name_font) ?? "";
+      }
     });
-    document.querySelectorAll("[data-wordmark-mark]").forEach((el) => {
-      el.textContent = initial;
+    document.querySelectorAll<HTMLElement>("[data-wordmark-mark]").forEach((el) => {
+      if (brand.logo_url) {
+        const img = document.createElement("img");
+        img.src = brand.logo_url;
+        img.alt = "";
+        el.replaceChildren(img);
+        el.classList.add("has-logo");
+      } else {
+        el.textContent = initial;
+        el.classList.remove("has-logo");
+      }
     });
     document.title = `${baseTitle} · ${name}`;
   };
+  const same = (a: Brand, b: Brand) =>
+    a.logo_url === b.logo_url && a.name_image_url === b.name_image_url && a.name_font === b.name_font;
   // Shown only once it says the right thing: the stylesheet hides the
   // wordmark until this attribute is set, so the platform name never flashes
   // up first on a restaurant's page.
@@ -287,15 +316,18 @@ export async function paintWordmarks(): Promise<void> {
   // The name the storefront saw on the way here, if there was one. Painted
   // straight away, before the API has been asked anything.
   const remembered = rememberedRestaurantName();
+  const rememberedMark = brandFrom(rememberedBrand());
   if (remembered) {
-    paint(remembered);
+    paint(remembered, rememberedMark);
     reveal();
   }
 
   try {
-    const { name } = await restaurant();
-    rememberRestaurantName(name);
-    if (name !== remembered) paint(name);
+    const portal = await restaurant();
+    const brand = brandFrom(portal.brand);
+    rememberRestaurantName(portal.name);
+    rememberBrand(brand);
+    if (portal.name !== remembered || !same(brand, rememberedMark)) paint(portal.name, brand);
   } catch {
     // No restaurant at this address -- the platform root -- or the API is
     // unreachable. Keep whatever is showing: the remembered name, or the

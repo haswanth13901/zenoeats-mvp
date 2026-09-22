@@ -137,8 +137,22 @@ class MealOut(BaseModel):
 from app.schemas.storefront import StorefrontOut
 
 
+class BrandOut(BaseModel):
+    """The restaurant's mark and name as customers see them.
+
+    Set in Settings and shown whether or not storefront customization is on:
+    it is the restaurant's identity, not a theme. With no logo the header
+    falls back to the initial; with no name image, to the name in `name_font`.
+    """
+
+    logo_url: str | None = None
+    name_image_url: str | None = None
+    name_font: str = "default"
+
+
 class PortalOut(BaseModel):
     storefront: StorefrontOut | None = None
+    brand: BrandOut = BrandOut()
     pickup_address: str | None = None
     restaurant_id: UUID
     slug: str

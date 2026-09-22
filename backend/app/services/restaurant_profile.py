@@ -26,6 +26,11 @@ TAX_AND_ADDRESS_FIELDS = (
     "address_state", "address_postal_code", "address_country",
 )
 
+# The fonts a restaurant's name can be set in on customer pages, when it has
+# not uploaded its own lettering. The database holds the same list as a check
+# constraint (migration 0035); the web app maps each key to a Google font.
+BRAND_NAME_FONTS = ("default", "lora", "playfair", "fraunces", "merriweather", "dm_sans")
+
 
 def tax_fields(source) -> dict:
     """The tax and address attributes of a Restaurant or a row mapping."""

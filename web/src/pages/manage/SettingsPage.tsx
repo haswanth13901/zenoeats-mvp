@@ -5,6 +5,8 @@ import { PageTitle } from "@/components/layout/Shell";
 import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import { OwnAccount } from "@/features/restaurant/components/OwnAccount";
 import { DeliveryArea } from "@/features/restaurant/components/DeliveryArea";
+import { BrandSettings } from "@/features/restaurant/components/BrandSettings";
+import { useUploadsInFlight } from "@/features/restaurant/components/ImagePicker";
 import {
   useRestaurantProfileQuery,
   useUpdateRestaurantProfileMutation,
@@ -16,6 +18,7 @@ import { errorMessage } from "@/services/apiClient";
 const SECTIONS = [
   ["own-account", "Your account"],
   ["settings-restaurant", "The restaurant"],
+  ["settings-brand", "Logo & name"],
   ["settings-address", "Where you are"],
   ["settings-delivery", "Delivery"],
   ["settings-tax", "Tax"],
@@ -39,9 +42,10 @@ const ADDRESS_FIELDS = [
  * shown but not editable, because "you cannot change this here" is a more
  * useful answer than leaving them off the page and letting someone hunt.
  *
- * Six panels, three ways of saving, on purpose. Your account saves its name
+ * Seven panels, three ways of saving, on purpose. Your account saves its name
  * and its address separately; Delivery saves each control on the spot; the
- * restaurant, its address and its tax share the one save bar at the bottom.
+ * restaurant, its brand, its address and its tax share the one save bar at
+ * the bottom.
  * Folding those into one Save would ask for a password to fix a typo, or
  * discard half-typed delivery rings to save a tagline.
  *
@@ -57,6 +61,8 @@ export function SettingsPage() {
   const [draft, setDraft] = useState<RestaurantProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // A logo still uploading holds Save, or the save would go without it.
+  const [uploading, trackUpload] = useUploadsInFlight();
 
   // The server's answer is the starting point, and becomes it again after a
   // save: the response is the row as it was actually stored, trimmed and
@@ -178,6 +184,8 @@ export function SettingsPage() {
               </label>
             </div>
           </SettingsCard>
+
+          <BrandSettings draft={draft} edit={edit} onBusyChange={trackUpload} />
 
           <SettingsCard
             id="settings-address"
@@ -381,13 +389,15 @@ export function SettingsPage() {
                     ? "Saved."
                     : "Nothing to save."}
               </strong>
-              <p className="text-caption text-muted">Restaurant, address and tax only.</p>
+              <p className="text-caption text-muted">
+                {uploading ? "Waiting for the picture to finish uploading…" : "Restaurant, brand, address and tax only."}
+              </p>
               <ErrorNote message={error} className="mt-3" />
             </div>
             <button
               type="button"
               className="btn-primary flex-1 sm:flex-none"
-              disabled={!dirty || saving}
+              disabled={!dirty || saving || uploading > 0}
               onClick={submit}
             >
               {saving && <Spinner />}
@@ -478,6 +488,9 @@ function changedFields(original: RestaurantProfile, draft: RestaurantProfile) {
     "address_state",
     "address_postal_code",
     "address_country",
+    "logo_path",
+    "brand_name_image_path",
+    "brand_name_font",
   ] as const;
 
   for (const key of editable) {
