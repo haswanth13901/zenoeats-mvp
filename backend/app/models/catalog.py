@@ -493,6 +493,9 @@ class Combo(Base, TimestampMixin):
     discount_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # The deal's own photograph, kind "items". Null falls back to a photo of
+    # something inside it, which is what every combo showed before.
+    image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     meal: Mapped["Meal"] = relationship()

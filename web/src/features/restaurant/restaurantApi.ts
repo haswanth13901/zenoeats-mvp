@@ -301,6 +301,9 @@ export type BuilderCombo = {
   discount_kind: DiscountKind;
   discount_value: number;
   is_available: boolean;
+  /** The deal's own photo: the key that is saved, and the URL that shows it. */
+  image_path: string | null;
+  image_url: string | null;
   slots: { id: string; item_type_id: string; item_ids: string[] }[];
 };
 
@@ -809,6 +812,7 @@ export const restaurantApi = api.injectEndpoints({
         description?: string | null;
         discount_kind: DiscountKind;
         discount_value: number;
+        image_path?: string | null;
         slots: ComboSlotDraft[];
       }
     >({
@@ -830,6 +834,7 @@ export const restaurantApi = api.injectEndpoints({
           discount_kind?: DiscountKind;
           discount_value?: number;
           is_available?: boolean;
+          image_path?: string | null;
           slots?: ComboSlotDraft[];
         };
       }

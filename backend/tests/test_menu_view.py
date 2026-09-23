@@ -90,11 +90,12 @@ class FakeSlot:
 
 
 class FakeCombo:
-    def __init__(self, name, meal, slots=(), is_available=True):
+    def __init__(self, name, meal, slots=(), is_available=True, image_path=None):
         self.id = uuid.uuid4()
         self.meal_id = meal.id
         self.name = name
         self.description = None
+        self.image_path = image_path
         self.discount_kind = "PERCENT"
         self.discount_value = 1000
         self.is_available = is_available

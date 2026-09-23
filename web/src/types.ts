@@ -81,6 +81,8 @@ export type Combo = {
   description: string | null;
   discount_kind: DiscountKind;
   discount_value: number;
+  /** The deal's own photo. Null borrows one from an item inside it. */
+  image_url: string | null;
   slots: ComboSlot[];
 };
 

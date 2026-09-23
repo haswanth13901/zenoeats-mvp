@@ -325,10 +325,11 @@ function ShortcutThumb({ photo, label }: { photo: string | null; label: string }
   );
 }
 
-/** A photo for a meal deal, borrowed from one of the items it is built from:
- *  a combo has no photo of its own. */
+/** A photo for a meal deal: its own if the restaurant took one, otherwise
+ *  borrowed from one of the items it is built from. */
 export function comboPhoto(combos: Combo[]): string | null {
   for (const combo of combos) {
+    if (combo.image_url) return combo.image_url;
     for (const slot of combo.slots) {
       const photo = slot.items.find((i) => i.image_url)?.image_url;
       if (photo) return photo;
