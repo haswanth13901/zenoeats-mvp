@@ -117,6 +117,17 @@ export function ComboSheet({
       eyebrow={
         <p className="mt-3 text-[13px] font-[650] text-brick">{savingLabel(combo, currency)}</p>
       }
+      // Only the deal's own photograph. One borrowed from an item inside it
+      // would fill the header with a single dish while the customer is
+      // choosing between several.
+      hero={
+        combo.image_url ? (
+          <MenuImage
+            src={combo.image_url}
+            className="block h-[175px] w-full bg-paper object-cover sm:h-[200px]"
+          />
+        ) : undefined
+      }
       onClose={onClose}
       footer={
         <>

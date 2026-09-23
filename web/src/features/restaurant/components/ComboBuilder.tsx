@@ -4,6 +4,7 @@ import { PencilIcon } from "@/components/common/icons";
 import { deltaToMinor, minorToDeltaInput, money } from "@/utils/format";
 import type { DiscountKind, Meal } from "@/types";
 import { rootIdOf, topLevel } from "../itemTypes";
+import { ImagePicker, NO_IMAGE, type ImageDraft } from "./ImagePicker";
 import { errorMessage } from "@/services/apiClient";
 import {
   useCreateComboMutation,
@@ -112,7 +113,14 @@ export function ComboBuilder({
             ) : (
               <article key={combo.id} className="card">
                 <header className="flex items-center justify-between gap-4">
-                  <h3 className="font-display text-[26px] leading-tight tracking-[-.5px]">{combo.name}</h3>
+                  {combo.image_url && (
+                    <img
+                      src={combo.image_url}
+                      alt=""
+                      className="h-14 w-14 shrink-0 rounded-field object-cover"
+                    />
+                  )}
+                  <h3 className="mr-auto font-display text-[26px] leading-tight tracking-[-.5px]">{combo.name}</h3>
                   <button
                     type="button"
                     aria-label={`Edit ${combo.name}`}
@@ -255,6 +263,14 @@ function ComboEditor({
   );
 }
 
+/* A combo card is wide on a laptop and stacked on a phone, and the photo
+ * fills half of it either way -- so the advice is the item advice, with the
+ * tray rather than one dish in the middle of it. */
+const COMBO_GUIDE = {
+  size: "Square, 1200 × 1200 px or larger",
+  tip: "Shoot the whole tray, centred: the card crops the edges differently on a phone and a laptop.",
+};
+
 type Draft = {
   mealId: string;
   name: string;
@@ -266,6 +282,9 @@ type Draft = {
   /** Ticked items, keyed by item type id. A type with none is not part of
    *  the combo. */
   picked: Record<string, string[]>;
+  /** The deal's own photo. Uploaded as it is chosen, attached on save, so
+   *  cancelling the form leaves the menu as it was. */
+  image: ImageDraft;
 };
 
 function seed(combo: BuilderCombo | undefined, meals: Meal[]): Draft {
@@ -277,6 +296,7 @@ function seed(combo: BuilderCombo | undefined, meals: Meal[]): Draft {
     name: combo?.name ?? "",
     description: combo?.description ?? "",
     discountKind: combo?.discount_kind ?? "PERCENT",
+    image: combo?.image_path ? { path: combo.image_path, url: combo.image_url } : NO_IMAGE,
     discountInput: !combo || combo.discount_kind === "NONE"
       ? ""
       : combo.discount_kind === "PERCENT"
@@ -316,6 +336,7 @@ function ComboForm({
     description: string | null;
     discount_kind: DiscountKind;
     discount_value: number;
+    image_path: string | null;
     slots: ComboSlotDraft[];
   }) => Promise<void>;
   onCancel: () => void;
@@ -324,6 +345,9 @@ function ComboForm({
 }) {
   const [draft, setDraft] = useState<Draft>(() => seed(initial, meals));
   const [saving, setSaving] = useState(false);
+  // A photo still uploading holds Save: saving now would store the combo
+  // without the picture that was just chosen.
+  const [uploading, setUploading] = useState(0);
 
   // Only what this period serves. An item taken off the period is no longer
   // offerable in a combo on it, and the server refuses one that is.
@@ -425,6 +449,7 @@ function ComboForm({
         description: draft.description.trim() || null,
         discount_kind: draft.discountKind,
         discount_value: discountValue,
+        image_path: draft.image.path,
         slots,
       });
       onError(null);
@@ -482,6 +507,25 @@ function ComboForm({
             </span>
           )}
         </label>
+
+        <div className="block sm:col-span-2">
+          <span className="label">Photo of the deal</span>
+          <div className="mt-[7px]">
+            <ImagePicker
+              kind="items"
+              label={draft.name.trim() || "this combo"}
+              image={draft.image}
+              disabled={saving}
+              guide={COMBO_GUIDE}
+              onChange={(image) => setDraft((d) => ({ ...d, image }))}
+              onBusyChange={(busy) => setUploading((n) => Math.max(0, n + (busy ? 1 : -1)))}
+              onError={onError}
+            />
+          </div>
+          <span className="field-hint block">
+            Optional. Without one, customers see a photo of an item inside the combo.
+          </span>
+        </div>
 
         <label className="block sm:col-span-2">
           <span className="label">Description</span>
@@ -579,9 +623,9 @@ function ComboForm({
       </fieldset>
 
       <div className="flex flex-wrap items-center gap-4">
-        <button type="submit" className="btn-primary" disabled={saving}>
+        <button type="submit" className="btn-primary" disabled={saving || uploading > 0}>
           {saving && <Spinner />}
-          {saving ? "Saving…" : submitLabel}
+          {saving ? "Saving…" : uploading > 0 ? "Uploading photo…" : submitLabel}
         </button>
         <button type="button" className="link" disabled={saving} onClick={onCancel}>
           cancel

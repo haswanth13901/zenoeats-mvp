@@ -109,6 +109,9 @@ class ComboOut(BaseModel):
     description: str | None
     discount_kind: str
     discount_value: int
+    # The deal's own photograph. Null means the page borrows one from an item
+    # inside it, as every combo did before combos could carry their own.
+    image_url: str | None = None
     slots: list[ComboSlotOut]
 
 

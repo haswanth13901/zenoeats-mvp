@@ -1027,6 +1027,8 @@ class ComboIn(BaseModel):
     discount_kind: DiscountKind = DiscountKind.NONE
     discount_value: int = Field(default=0, ge=0)
     sort_order: int = 0
+    # A key returned by POST /images?kind=items: the deal's own photograph.
+    image_path: str | None = Field(default=None, max_length=500)
     slots: list[ComboSlotIn] = Field(default_factory=list)
 
 
@@ -1043,6 +1045,7 @@ class ComboUpdateIn(BaseModel):
     discount_kind: DiscountKind | None = None
     discount_value: int | None = Field(default=None, ge=0)
     is_available: bool | None = None
+    image_path: str | None = Field(default=None, max_length=500)
     slots: list[ComboSlotIn] | None = None
 
 
@@ -1560,6 +1563,8 @@ def _combo_out(combo: Combo) -> dict:
         "discount_kind": combo.discount_kind,
         "discount_value": combo.discount_value,
         "is_available": combo.is_available,
+        "image_path": combo.image_path,
+        "image_url": images.image_url(combo.image_path),
         "slots": [
             {
                 "id": str(slot.id),
@@ -1607,6 +1612,7 @@ def create_combo(
         restaurant_id=restaurant.id, meal_id=meal.id, name=name,
         description=(body.description or "").strip() or None,
         discount_kind=kind, discount_value=value, sort_order=body.sort_order,
+        image_path=images.accept(body.image_path, restaurant.id, ImageKind.ITEMS),
     )
     db.add(combo)
     db.flush()
@@ -1657,6 +1663,15 @@ def update_combo(
         if value is None:
             value = combo.discount_value
         combo.discount_kind, combo.discount_value = _combo_discount(kind, value)
+
+    # Null is how the photograph is taken off, so the field being absent and
+    # the field being null have to stay different. The file it replaces goes
+    # after the commit, and only if nothing else still shows it.
+    if "image_path" in sent:
+        previous = combo.image_path
+        combo.image_path = images.accept(sent["image_path"], restaurant.id, ImageKind.ITEMS)
+        if previous != combo.image_path:
+            images.release(db, previous)
 
     if sent.get("slots") is not None:
         _set_combo_slots(

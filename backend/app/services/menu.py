@@ -295,6 +295,7 @@ def _combos_by_meal(
                 description=combo.description,
                 discount_kind=combo.discount_kind,
                 discount_value=combo.discount_value,
+                image_url=image_url(combo.image_path),
                 slots=slots,
             )
         )
