@@ -49,7 +49,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core import errors
-from app.models import Item, ItemType, ModifierOption, Restaurant, StorefrontBanner
+from app.models import (
+    Item, ItemType, ModifierOption, Restaurant, StorefrontBanner, StorefrontShortcut,
+)
 
 log = logging.getLogger(__name__)
 
@@ -274,7 +276,7 @@ def release(db: Session, key: str | None) -> None:
         db.execute(
             select(func.count()).select_from(model).where(model.image_path == key)
         ).scalar_one()
-        for model in (Item, ModifierOption, ItemType, StorefrontBanner)
+        for model in (Item, ModifierOption, ItemType, StorefrontBanner, StorefrontShortcut)
     )
     # The two brand images live on the restaurant row itself.
     held += db.execute(

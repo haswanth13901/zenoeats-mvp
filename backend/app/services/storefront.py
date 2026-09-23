@@ -11,7 +11,10 @@ from sqlalchemy import delete, select
 
 from app.core import errors
 from app.db.base import utcnow
-from app.models import Item, ItemType, Restaurant, StorefrontBanner, StorefrontCollection, StorefrontCollectionItem
+from app.models import (
+    Item, ItemType, Restaurant, StorefrontBanner, StorefrontCollection, StorefrontCollectionItem,
+    StorefrontShortcut, StorefrontShortcutItem,
+)
 from app.schemas.storefront import StorefrontOut
 from app.services import images
 from app.services.images import ImageKind
@@ -50,6 +53,12 @@ def collection_dict(db, row):
     return {"id": row.id, "title": row.title, "is_active": row.is_active, "item_ids": ids}
 
 
+def shortcut_dict(db, row):
+    ids = list(db.scalars(select(StorefrontShortcutItem.item_id).where(StorefrontShortcutItem.shortcut_id == row.id).order_by(StorefrontShortcutItem.sort_order)))
+    return {"id": row.id, "item_type_id": row.item_type_id, "label": row.label, "is_active": row.is_active,
+            "image_path": row.image_path, "image_url": images.image_url(row.image_path), "item_ids": ids}
+
+
 def management(db, restaurant):
     require_enabled(restaurant)
     types = load_item_types(db)
@@ -66,6 +75,7 @@ def management(db, restaurant):
                         "image_path": t.image_path, "image_url": images.image_url(t.image_path), "show_in_shortcuts": t.show_in_shortcuts,
                         "items": [{"id": i.id, "name": i.name, "is_available": i.is_available} for i in items if i.item_type_id == t.id]} for t in types],
         "collections": [collection_dict(db, row) for row in ordered(db, StorefrontCollection)],
+        "shortcuts": [shortcut_dict(db, row) for row in ordered(db, StorefrontShortcut)],
         "menu": load_menu(db, include_empty=True).model_dump(),
     }
 
@@ -173,6 +183,57 @@ def save_collections(db, restaurant, body):
     return management(db, restaurant)
 
 
+def save_shortcuts(db, restaurant, body):
+    """Replace the shortcut row.
+
+    A shortcut may only show items filed under its own category, or under
+    one of that category's subcategories: "Burgers" pointing at a drink would
+    scroll a customer to a section that says one thing and holds another.
+    """
+    restaurant = lock(db, restaurant)
+    unique_ids(body.shortcuts)
+    existing = {r.id: r for r in ordered(db, StorefrontShortcut)}
+    old_keys = {r.image_path for r in existing.values()}
+    types = {t.id: t for t in load_item_types(db)}
+    for entry in body.shortcuts:
+        if entry.id and entry.id not in existing:
+            raise errors.validation_error("That shortcut could not be found. Reload the storefront.")
+        if entry.item_type_id not in types:
+            raise errors.validation_error("That category could not be found. Choose it again.")
+        images.accept(entry.image_path, restaurant.id, ImageKind.CATEGORIES)
+        if entry.is_active and not entry.item_ids:
+            raise errors.validation_error(
+                f"Choose at least one item for “{entry.label}”, or turn off Show shortcut."
+            )
+        family = {entry.item_type_id} | {t.id for t in types.values() if t.parent_id == entry.item_type_id}
+        for ident in entry.item_ids:
+            item = owned(db, Item, ident, restaurant)
+            if item.item_type_id not in family:
+                raise errors.validation_error(
+                    f"“{item.name}” is not in the category of “{entry.label}”. Choose items from that category."
+                )
+    db.execute(delete(StorefrontShortcutItem))
+    keep = set()
+    for position, entry in enumerate(body.shortcuts):
+        row = existing.get(entry.id)
+        if row is None:
+            row = StorefrontShortcut(id=uuid4(), restaurant_id=restaurant.id)
+            db.add(row)
+        row.item_type_id, row.label, row.image_path = entry.item_type_id, entry.label, entry.image_path
+        row.is_active, row.sort_order = entry.is_active, position
+        keep.add(row.id)
+        db.flush()
+        for order, ident in enumerate(entry.item_ids):
+            db.add(StorefrontShortcutItem(shortcut_id=row.id, item_id=ident, restaurant_id=restaurant.id, sort_order=order))
+    for ident, row in existing.items():
+        if ident not in keep:
+            db.delete(row)
+    db.flush()
+    for key in old_keys:
+        images.release(db, key)
+    return management(db, restaurant)
+
+
 def public(db, restaurant):
     if not restaurant.storefront_customization_enabled:
         return None
@@ -189,6 +250,16 @@ def public(db, restaurant):
             if data["item_ids"]:
                 collections.append(data)
     visible_collections = {c["id"] for c in collections}
+    type_photos = {t.id: t.image_path for t in types}
+    shortcuts = []
+    for row in ordered(db, StorefrontShortcut):
+        if not row.is_active or row.item_type_id not in type_photos:
+            continue
+        data = shortcut_dict(db, row)
+        item_ids = [ident for ident in data["item_ids"] if ident in visible_items]
+        if item_ids:
+            shortcuts.append({"id": row.id, "item_type_id": row.item_type_id, "label": row.label, "item_ids": item_ids,
+                              "image_url": images.image_url(row.image_path or type_photos[row.item_type_id])})
     now = utcnow()
     banners = []
     for row in ordered(db, StorefrontBanner):
@@ -205,4 +276,4 @@ def public(db, restaurant):
     return StorefrontOut(theme=restaurant.theme, logo_url=images.image_url(restaurant.logo_path),
         banner_interval_ms=restaurant.banner_interval_ms, banners=banners,
         categories={str(t.id): {"image_url": images.image_url(t.image_path), "show_in_shortcuts": t.show_in_shortcuts, "sort_order": n} for n, t in enumerate(types)},
-        collections=collections)
+        collections=collections, shortcuts=shortcuts)

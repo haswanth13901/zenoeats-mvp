@@ -1,4 +1,7 @@
-from app.models.storefront import StorefrontBanner, StorefrontCollection, StorefrontCollectionItem
+from app.models.storefront import (
+    StorefrontBanner, StorefrontCollection, StorefrontCollectionItem, StorefrontShortcut,
+    StorefrontShortcutItem,
+)
 from app.models.catalog import (
     Combo,
     ComboSlot,
@@ -49,6 +52,7 @@ from app.models.tenant import (
 
 __all__ = [
     "StorefrontBanner", "StorefrontCollection", "StorefrontCollectionItem",
+    "StorefrontShortcut", "StorefrontShortcutItem",
     "DeliveryZone",
     "Restaurant", "RestaurantStatus", "TaxMode", "DEFAULT_TAX_CODE",
     "User", "UserKind", "RestaurantUser", "StaffRole", "StaffStatus",

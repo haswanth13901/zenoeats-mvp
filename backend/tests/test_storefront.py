@@ -85,7 +85,7 @@ def tenants(tmp_path, monkeypatch):
     yield data
     for ident in ids:
         with tenant_session(ident) as db:
-            for table in ("storefront_collection_items", "storefront_banners", "storefront_collections", "meal_items", "menu_items", "meals", "item_types", "restaurants"):
+            for table in ("storefront_collection_items", "storefront_banners", "storefront_collections", "storefront_shortcut_items", "storefront_shortcuts", "meal_items", "menu_items", "meals", "item_types", "restaurants"):
                 column = "id" if table == "restaurants" else "restaurant_id"
                 db.execute(text(f"DELETE FROM {table} WHERE {column} = :id"), {"id": ident})
 

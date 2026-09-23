@@ -41,7 +41,7 @@ from app.schemas.api import (
 )
 from app.services import geocoding, images, restaurant_profile, tracking, storefront
 from app.services import email as email_service
-from app.schemas.storefront import ThemePatch, CategoryPatch, BannersIn, CollectionsIn
+from app.schemas.storefront import ThemePatch, CategoryPatch, BannersIn, CollectionsIn, ShortcutsIn
 from app.services.images import ImageKind
 from app.services.menu import load_item_types, load_menu
 from app.services.orders import transition
@@ -4261,3 +4261,8 @@ def patch_category_storefront(type_id: UUID, body: CategoryPatch, restaurant: Re
 @router.put("/storefront/collections")
 def put_storefront_collections(body: CollectionsIn, restaurant: Restaurant = Depends(current_restaurant_staff), db: Session = StaffDb, _=Depends(STOREFRONT)):
     return storefront.save_collections(db, restaurant, body)
+
+
+@router.put("/storefront/shortcuts")
+def put_storefront_shortcuts(body: ShortcutsIn, restaurant: Restaurant = Depends(current_restaurant_staff), db: Session = StaffDb, _=Depends(STOREFRONT)):
+    return storefront.save_shortcuts(db, restaurant, body)

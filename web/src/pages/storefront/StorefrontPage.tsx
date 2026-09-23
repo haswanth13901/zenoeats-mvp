@@ -1,4 +1,4 @@
-import { HomeBanner, CategoryShortcuts, heroPhoto, categoriesOf, comboPhoto, jumpTo } from "@/features/storefront/components/HomePresentation";
+import { HomeBanner, CategoryShortcuts, heroPhoto, categoriesOf, comboPhoto, jumpTo, shortcutTargets } from "@/features/storefront/components/HomePresentation";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "@/app/hooks";
@@ -49,6 +49,12 @@ export function StorefrontPage() {
   // the whole menu rather than to an empty page.
   const chosen = period !== FULL_MENU && meals.some((m) => m.id === period) ? period : FULL_MENU;
   const shown = chosen === FULL_MENU ? meals : meals.filter((m) => m.id === chosen);
+  // Every orderable item by id, for the collections and shortcut sections,
+  // which hold pointers into the menu rather than copies of it.
+  const lookup = useMemo(
+    () => new Map(meals.flatMap(categoriesOf).flatMap((c) => c.items.map((i) => [i.id, { item: i, path: c.path }] as const))),
+    [meals],
+  );
 
   const loadError =
     (portal.error ? errorMessage(portal.error) : null) ??
@@ -148,13 +154,24 @@ export function StorefrontPage() {
           </div>
         ) : (
           <>
-            <CategoryShortcuts meals={shown} severalPeriods={severalPeriods} categories={restaurant.storefront?.categories} />
+            <CategoryShortcuts meals={shown} severalPeriods={severalPeriods} categories={restaurant.storefront?.categories} shortcuts={restaurant.storefront?.shortcuts} />
             {restaurant.storefront?.collections.map((collection) => {
-              const lookup = new Map(meals.flatMap(categoriesOf).flatMap((c) => c.items.map((i) => [i.id, { item: i, path: c.path }] as const)));
               const items = collection.item_ids.flatMap((id) => lookup.has(id) ? [lookup.get(id)!] : []);
               if (!items.length) return null;
               return <section key={collection.id} className="mt-8" aria-labelledby={`collection-${collection.id}`}>
                 <h2 id={`collection-${collection.id}`} tabIndex={-1} className="mb-4 scroll-mt-6 font-display text-2xl font-bold text-brick">{collection.title}</h2>
+                <ul className="flex gap-4 overflow-x-auto pb-3">{items.map(({item, path}) => <li key={item.id} className="w-[min(85vw,440px)] shrink-0"><MenuCard item={item} path={path} open={open} onPick={() => setCustomizing(item)} /></li>)}</ul>
+              </section>;
+            })}
+            {/* A hand-picked shortcut's own section: the items the restaurant
+                chose from that category, under the label it gave them. One
+                holding its whole category scrolls to it on the menu instead. */}
+            {restaurant.storefront?.shortcuts?.map((shortcut) => {
+              if (!shortcutTargets(shown, [shortcut]).get(shortcut.id)!.own) return null;
+              const items = shortcut.item_ids.flatMap((id) => lookup.has(id) ? [lookup.get(id)!] : []);
+              if (!items.length) return null;
+              return <section key={shortcut.id} className="mt-8" aria-labelledby={`heading-shortcut-${shortcut.id}`}>
+                <h2 id={`heading-shortcut-${shortcut.id}`} tabIndex={-1} className="mb-4 scroll-mt-6 font-display text-2xl font-bold text-brick">{shortcut.label}</h2>
                 <ul className="flex gap-4 overflow-x-auto pb-3">{items.map(({item, path}) => <li key={item.id} className="w-[min(85vw,440px)] shrink-0"><MenuCard item={item} path={path} open={open} onPick={() => setCustomizing(item)} /></li>)}</ul>
               </section>;
             })}
