@@ -461,11 +461,15 @@ export function MenuCard({
       } ${orderable ? "" : "[&>*]:opacity-[.72]"}`}
     >
       {photo && (
-        <span className="flex w-[36%] shrink-0 overflow-hidden bg-[rgb(var(--ze-photo-ground))] lg:w-[41%]">
+        // Absolutely placed, so a tall photograph fills this column rather
+        // than stretching the card: a portrait picture used to make its card
+        // three times the height of the one beside it, and a grid row is as
+        // tall as its tallest card. The card's own min-height is the size.
+        <span className="relative w-[36%] shrink-0 overflow-hidden bg-[rgb(var(--ze-photo-ground))] lg:w-[41%]">
           <MenuImage
             src={photo}
             onFail={setFailed}
-            className="photo-zoom h-full min-h-[177px] w-full object-cover lg:min-h-[224px]"
+            className="photo-zoom absolute inset-0 h-full w-full object-cover"
           />
         </span>
       )}
@@ -554,8 +558,8 @@ function ComboCard({
         </span>
       </span>
       {photo && (
-        <span className="flex max-h-[240px] overflow-hidden bg-hero sm:max-h-none">
-          <MenuImage src={photo} onFail={setFailed} className="photo-zoom h-full w-full object-cover" />
+        <span className="relative h-[220px] overflow-hidden bg-hero sm:h-auto">
+          <MenuImage src={photo} onFail={setFailed} className="photo-zoom absolute inset-0 h-full w-full object-cover" />
         </span>
       )}
     </button>
