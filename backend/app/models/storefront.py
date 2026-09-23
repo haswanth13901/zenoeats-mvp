@@ -59,3 +59,34 @@ class StorefrontCollectionItem(Base):
     item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("menu_items.id"), primary_key=True)
     restaurant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False, index=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class StorefrontShortcut(Base, TimestampMixin):
+    """One entry in the shortcut row under the banner, built by the restaurant.
+
+    It names a category, carries the label and photo the restaurant chose,
+    and lists the items from that category it shows. Tapping it scrolls to a
+    section of exactly those items -- pointers into the menu, like a
+    collection, so the menu stays the authority on price and availability.
+    """
+
+    __tablename__ = "storefront_shortcuts"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False, index=True)
+    item_type_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("item_types.id"), nullable=False)
+    label: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Kind "categories". Null shows the category's own photo, or the first
+    # item photo in the shortcut.
+    image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class StorefrontShortcutItem(Base):
+    __tablename__ = "storefront_shortcut_items"
+
+    shortcut_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("storefront_shortcuts.id", ondelete="CASCADE"), primary_key=True)
+    item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("menu_items.id"), primary_key=True)
+    restaurant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("restaurants.id"), nullable=False, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

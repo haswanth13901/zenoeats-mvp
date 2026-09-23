@@ -8,7 +8,10 @@ export type Banner = { id: string; image_url: string; headline: string; subline:
   focal_x: number; focal_y: number; zoom: number };
 export type CategoryStyle = { image_url: string | null; show_in_shortcuts: boolean; sort_order: number };
 export type Collection = { id: string; title: string; item_ids: string[] };
-export type Storefront = { theme: StorefrontTheme | null; logo_url: string | null; banner_interval_ms: number; banners: Banner[]; categories: Record<string, CategoryStyle>; collections: Collection[] };
+/** An entry in the shortcut row, built by the restaurant: its own label, and
+ *  the items from one category that its section shows. */
+export type Shortcut = { id: string; item_type_id: string; label: string; image_url: string | null; item_ids: string[] };
+export type Storefront = { theme: StorefrontTheme | null; logo_url: string | null; banner_interval_ms: number; banners: Banner[]; categories: Record<string, CategoryStyle>; collections: Collection[]; shortcuts?: Shortcut[] };
 
 export const FONT_PAIRS: Record<FontPair, { label: string; display?: string; body?: string; query?: string }> = {
   default: { label: "Classic — system fonts" },

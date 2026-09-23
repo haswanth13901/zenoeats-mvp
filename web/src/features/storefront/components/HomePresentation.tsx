@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { Icon } from "@/components/common/icons";
 import { MenuImage } from "@/components/common/MenuImage";
 import type { Combo, Meal, Item, Portal } from "@/types";
-import type { Banner, CategoryStyle, Storefront } from "../theme";
+import type { Banner, CategoryStyle, Shortcut, Storefront } from "../theme";
 
 /**
  * One labelled group of cards: the items filed on a top-level type, or one of
@@ -200,14 +200,53 @@ function BannerFrame({
  * jumps to the first place that kind appears and focuses its heading. It
  * scrolls sideways on a phone rather than widening the page.
  */
-export function CategoryShortcuts({ meals, severalPeriods, categories = {} }: { meals: Meal[]; severalPeriods: boolean; categories?: Record<string, CategoryStyle> }) {
+/**
+ * Where each shortcut scrolls to.
+ *
+ * A shortcut holding exactly what its category already shows on the menu
+ * goes to that category's own heading; only a hand-picked one gets a section
+ * of its own (`own`). Otherwise a restaurant whose shortcuts cover its menu
+ * -- every one migrated from the old automatic row does -- would print the
+ * whole menu twice, once in shortcut sections and once below.
+ */
+export function shortcutTargets(meals: Meal[], shortcuts: Shortcut[]): Map<string, { target: string; own: boolean }> {
+  const categories = meals.flatMap(categoriesOf);
+  const targets = new Map<string, { target: string; own: boolean }>();
+  for (const s of shortcuts) {
+    const matching = categories.filter((c) => c.itemTypeId === s.item_type_id);
+    const menuIds = new Set(matching.flatMap((c) => c.items.map((i) => i.id)));
+    const chosen = new Set(s.item_ids);
+    const whole = matching.length > 0 && menuIds.size === chosen.size && [...chosen].every((id) => menuIds.has(id));
+    targets.set(s.id, whole ? { target: matching[0]!.key, own: false } : { target: `shortcut-${s.id}`, own: true });
+  }
+  return targets;
+}
+
+/**
+ * The row of round shortcuts under the banner.
+ *
+ * With `shortcuts` -- a customized storefront -- the row is exactly the ones
+ * the restaurant built, each scrolling to its own section of chosen items.
+ * Without, every category gets one, named after it, as it always did.
+ */
+export function CategoryShortcuts({ meals, severalPeriods, categories = {}, shortcuts }: { meals: Meal[]; severalPeriods: boolean; categories?: Record<string, CategoryStyle>; shortcuts?: Shortcut[] }) {
   const seen = new Map<string, { order: number; target: string; label: string; photo: string | null }>();
   let combos: { target: string; photo: string | null } | null = null;
+
+  if (shortcuts) {
+    const photos = new Map(meals.flatMap(categoriesOf).flatMap((c) => c.items.map((i) => [i.id, i.image_url] as const)));
+    const targets = shortcutTargets(meals, shortcuts);
+    shortcuts.forEach((s, order) => {
+      const photo = s.image_url ?? s.item_ids.map((id) => photos.get(id)).find(Boolean) ?? null;
+      seen.set(s.id, { order, target: targets.get(s.id)!.target, label: s.label, photo });
+    });
+  }
 
   for (const meal of meals) {
     if (meal.combos.length > 0 && !combos) {
       combos = { target: `combos-${meal.id}`, photo: comboPhoto(meal.combos) };
     }
+    if (shortcuts) continue;
     for (const category of categoriesOf(meal)) {
       if (categories[category.itemTypeId]?.show_in_shortcuts === false) continue;
       const photo = categories[category.itemTypeId]?.image_url ?? category.items.find((i) => i.image_url)?.image_url ?? null;

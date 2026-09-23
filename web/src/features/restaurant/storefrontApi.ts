@@ -5,7 +5,8 @@ import type { Banner, Collection, StorefrontTheme } from "@/features/storefront/
 export type BannerDraft = Banner & { image_path: string; is_active: boolean; starts_at: string | null; ends_at: string | null };
 export type CategoryDraft = { id: string; name: string; parent_id: string | null; sort_order: number; image_path: string | null; image_url: string | null; show_in_shortcuts: boolean; items: { id: string; name: string; is_available: boolean }[] };
 export type CollectionDraft = Collection & { is_active: boolean };
-export type StorefrontSettings = { storefront_customization_enabled: boolean; name: string; tagline: string | null; currency: string; theme: StorefrontTheme | null; logo_path: string | null; logo_url: string | null; banner_interval_ms: number; banners: BannerDraft[]; categories: CategoryDraft[]; collections: CollectionDraft[]; menu: { meals: Meal[] } };
+export type ShortcutDraft = { id: string; item_type_id: string; label: string; image_path: string | null; image_url: string | null; is_active: boolean; item_ids: string[] };
+export type StorefrontSettings = { storefront_customization_enabled: boolean; name: string; tagline: string | null; currency: string; theme: StorefrontTheme | null; logo_path: string | null; logo_url: string | null; banner_interval_ms: number; banners: BannerDraft[]; categories: CategoryDraft[]; collections: CollectionDraft[]; shortcuts: ShortcutDraft[]; menu: { meals: Meal[] } };
 export type ThemeUpdate = { theme?: StorefrontTheme | null; logo_path?: string | null; banner_interval_ms?: number };
 
 const storefrontApi = api.injectEndpoints({
@@ -15,6 +16,7 @@ const storefrontApi = api.injectEndpoints({
     saveStorefrontBanners: build.mutation<StorefrontSettings, BannerDraft[]>({ query: (banners) => ({ url: "/restaurant/storefront/banners", method: "PUT", body: { banners: banners.map(({ id, image_url: _url, ...b }) => ({ ...b, ...(id.startsWith("new-") ? {} : { id }) })) } }), invalidatesTags: ["Storefront", "Portal"] }),
     saveStorefrontCategory: build.mutation<StorefrontSettings, CategoryDraft>({ query: (c) => ({ url: `/restaurant/item-types/${c.id}/storefront`, method: "PATCH", body: { image_path: c.image_path, show_in_shortcuts: c.show_in_shortcuts } }), invalidatesTags: ["Storefront", "Portal"] }),
     saveStorefrontCollections: build.mutation<StorefrontSettings, CollectionDraft[]>({ query: (collections) => ({ url: "/restaurant/storefront/collections", method: "PUT", body: { collections: collections.map(({ id, ...c }) => ({ ...c, ...(id.startsWith("new-") ? {} : { id }) })) } }), invalidatesTags: ["Storefront", "Portal"] }),
+    saveStorefrontShortcuts: build.mutation<StorefrontSettings, ShortcutDraft[]>({ query: (shortcuts) => ({ url: "/restaurant/storefront/shortcuts", method: "PUT", body: { shortcuts: shortcuts.map(({ id, image_url: _url, ...s }) => ({ ...s, ...(id.startsWith("new-") ? {} : { id }) })) } }), invalidatesTags: ["Storefront", "Portal"] }),
   }),
 });
-export const { useStorefrontSettingsQuery, useSaveStorefrontThemeMutation, useSaveStorefrontBannersMutation, useSaveStorefrontCategoryMutation, useSaveStorefrontCollectionsMutation } = storefrontApi;
+export const { useStorefrontSettingsQuery, useSaveStorefrontThemeMutation, useSaveStorefrontBannersMutation, useSaveStorefrontCategoryMutation, useSaveStorefrontCollectionsMutation, useSaveStorefrontShortcutsMutation } = storefrontApi;

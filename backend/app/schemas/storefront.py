@@ -110,6 +110,26 @@ class CollectionsIn(StorefrontInput):
     collections: list[CollectionIn] = Field(max_length=6)
 
 
+class ShortcutIn(StorefrontInput):
+    id: UUID | None = None
+    item_type_id: UUID
+    label: str = Field(min_length=1, max_length=40)
+    image_path: str | None = Field(default=None, max_length=500)
+    is_active: bool = True
+    item_ids: list[UUID] = Field(max_length=40)
+
+    @field_validator("item_ids")
+    @classmethod
+    def unique_items(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("Choose each item only once in a shortcut.")
+        return value
+
+
+class ShortcutsIn(StorefrontInput):
+    shortcuts: list[ShortcutIn] = Field(max_length=12)
+
+
 class PublicBanner(BaseModel):
     id: UUID
     image_url: str
@@ -135,6 +155,19 @@ class PublicCollection(BaseModel):
     item_ids: list[UUID]
 
 
+class PublicShortcut(BaseModel):
+    id: UUID
+    # So the page can tell a shortcut holding its whole category -- which
+    # just scrolls to that category on the menu -- from a hand-picked one,
+    # which gets a section of its own.
+    item_type_id: UUID
+    label: str
+    # The shortcut's own photo, else its category's; null lets the page use
+    # the first item photo in it.
+    image_url: str | None
+    item_ids: list[UUID]
+
+
 class StorefrontOut(BaseModel):
     theme: Theme | None
     logo_url: str | None
@@ -142,3 +175,4 @@ class StorefrontOut(BaseModel):
     banners: list[PublicBanner]
     categories: dict[str, PublicCategory]
     collections: list[PublicCollection]
+    shortcuts: list[PublicShortcut] = []

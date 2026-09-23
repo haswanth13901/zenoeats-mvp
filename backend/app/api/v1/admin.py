@@ -365,6 +365,9 @@ _PURGE_ORDER = [
     "storefront_collection_items",
     "storefront_banners",
     "storefront_collections",
+    # Before item_types and menu_items, which a shortcut and its items name.
+    "storefront_shortcut_items",
+    "storefront_shortcuts",
     "order_item_modifiers",
     "order_items",
     # Before orders: an event names the order it happened to.
