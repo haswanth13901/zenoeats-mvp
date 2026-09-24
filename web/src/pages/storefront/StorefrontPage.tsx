@@ -20,6 +20,7 @@ import { useOpenCart } from "@/features/cart/useOpenCart";
 import { usePortalQuery, usePublicMenuQuery } from "@/features/storefront/storefrontApi";
 import { errorMessage } from "@/services/apiClient";
 import { mealHours, money } from "@/utils/format";
+import { kcal } from "@/features/cart/calories";
 import type { Combo, Item, Meal } from "@/types";
 
 /** Every meal period, rather than one of them. */
@@ -491,8 +492,16 @@ export function MenuCard({
           <span className="block max-w-[45ch] text-caption text-[rgb(var(--ze-item-description))]">{item.description}</span>
         )}
         <span className="mt-auto flex items-center justify-between gap-2 pt-[13px] lg:pt-5">
-          <span className="tnum whitespace-nowrap text-sm text-[rgb(var(--ze-item-title))] sm:text-[15px]">
-            {money(item.base_price_minor, item.currency)}
+          <span className="min-w-0 truncate text-sm text-[rgb(var(--ze-item-title))] sm:text-[15px]">
+            <span className="tnum whitespace-nowrap">{money(item.base_price_minor, item.currency)}</span>
+            {/* Only where the restaurant has stated one. No figure is not a
+                figure of zero, and a menu must not read as if it were. */}
+            {kcal(item.calories) && (
+              <span className="tnum whitespace-nowrap text-caption text-[rgb(var(--ze-menu-muted))]">
+                {" · "}
+                {kcal(item.calories)}
+              </span>
+            )}
           </span>
           {!item.is_available ? (
             <span className="rounded-[5px] border border-[rgb(var(--ze-soldout-border))] bg-[rgb(var(--ze-soldout-ground))] px-[7px] py-1 text-[11px] font-[650] text-danger">

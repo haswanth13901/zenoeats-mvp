@@ -20,6 +20,9 @@ export type ModifierGroup = {
 };
 
 export type Item = {
+  /** kcal as the restaurant states it, or null where it has not. A combo's
+   *  total is added up from the items chosen for it. */
+  calories?: number | null;
   id: string;
   name: string;
   /** Which type, by id. The name is on the section or slot above it, so a

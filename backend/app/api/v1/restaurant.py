@@ -959,6 +959,9 @@ class ItemUpdateIn(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=180)
     description: str | None = None
+    # Null takes the figure off again, so it has to be told apart from the
+    # field being left out -- like description and image_path below.
+    calories: int | None = Field(default=None, ge=0, le=20000)
     base_price_minor: int | None = Field(default=None, ge=0)
     tax_exempt: bool | None = None
     item_type_id: UUID | None = None
@@ -980,6 +983,9 @@ class ItemIn(BaseModel):
     name: str = Field(max_length=180)
     item_type_id: UUID
     description: str | None = None
+    # kcal, as the restaurant states it. Null is "not stated"; a combo adds
+    # up what its chosen items state.
+    calories: int | None = Field(default=None, ge=0, le=20000)
     base_price_minor: int = Field(ge=0)
     # Left out of the tax on every order it is part of.
     tax_exempt: bool = False
@@ -2567,6 +2573,7 @@ def list_items(
             "name": item.name,
             "item_type_id": str(item.item_type_id),
             "description": item.description,
+            "calories": item.calories,
             "base_price_minor": item.base_price_minor,
             "currency": item.currency,
             "is_available": item.is_available,
@@ -2599,6 +2606,7 @@ def create_item(
     item = Item(
         restaurant_id=restaurant.id, name=name, item_type_id=item_type.id,
         description=(body.description or "").strip() or None,
+        calories=body.calories,
         base_price_minor=body.base_price_minor, tax_exempt=body.tax_exempt,
         currency=restaurant.currency, sort_order=body.sort_order,
         image_path=images.accept(body.image_path, restaurant.id, ImageKind.ITEMS),
@@ -2657,6 +2665,9 @@ def update_item(
         description = (sent["description"] or "").strip()
         item.description = description or None
 
+    if "calories" in sent:
+        item.calories = sent["calories"]
+
     if "base_price_minor" in sent:
         item.base_price_minor = sent["base_price_minor"]
 
@@ -2699,6 +2710,7 @@ def update_item(
         "name": item.name,
         "item_type_id": str(item.item_type_id),
         "description": item.description,
+        "calories": item.calories,
         "base_price_minor": item.base_price_minor,
         "tax_exempt": item.tax_exempt,
     }

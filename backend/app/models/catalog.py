@@ -259,6 +259,9 @@ class Item(Base, TimestampMixin):
     __tablename__ = "menu_items"
     __table_args__ = (
         CheckConstraint("base_price_minor >= 0", name="ck_item_price_non_negative"),
+        CheckConstraint(
+            "calories IS NULL OR calories BETWEEN 0 AND 20000", name="ck_item_calories_sane"
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -270,6 +273,9 @@ class Item(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("item_types.id"), nullable=False, index=True
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Energy per item as the restaurant states it, kcal. Null means it has
+    # not said -- never zero, which would claim the dish has none.
+    calories: Mapped[int | None] = mapped_column(Integer, nullable=True)
     base_price_minor: Mapped[int] = mapped_column(nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

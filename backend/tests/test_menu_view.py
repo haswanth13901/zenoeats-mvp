@@ -40,11 +40,12 @@ def starter_types():
 
 
 class FakeItem:
-    def __init__(self, name, item_type=None):
+    def __init__(self, name, item_type=None, calories=None):
         self.id = uuid.uuid4()
         self.name = name
         self.item_type_id = item_type.id if item_type else None
         self.description = None
+        self.calories = calories
         self.base_price_minor = 1095
         self.currency = "USD"
         self.is_available = True

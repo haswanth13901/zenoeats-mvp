@@ -32,6 +32,7 @@ class FakeRow:
         self.name = name
         self.item_type_id = item_type.id if item_type else None
         self.description = description
+        self.calories = None
         self.base_price_minor = base_price_minor
         self.tax_exempt = False
         self.starts_at = None

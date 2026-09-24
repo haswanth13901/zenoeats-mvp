@@ -34,6 +34,9 @@ class ItemOut(BaseModel):
     # rather than needing a menu rebuild.
     item_type_id: UUID
     description: str | None
+    # kcal as the restaurant states it, or null where it has not. A combo's
+    # total is added up from the items chosen for it.
+    calories: int | None = None
     base_price_minor: int
     currency: str
     is_available: bool

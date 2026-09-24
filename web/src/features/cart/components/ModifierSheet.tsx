@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { MenuImage } from "@/components/common/MenuImage";
 import { QuantityStepper, Sheet } from "@/components/common/Sheet";
 import { money } from "@/utils/format";
+import { kcal } from "@/features/cart/calories";
 import type { Item, Option } from "@/types";
 import {
   defaultSelection,
@@ -46,6 +47,11 @@ export function ModifierSheet({
     <Sheet
       title={item.name}
       description={item.description}
+      eyebrow={
+        kcal(item.calories) ? (
+          <p className="mt-2 text-caption text-muted">{kcal(item.calories)}</p>
+        ) : undefined
+      }
       onClose={onClose}
       // Above the header rather than in it. The header sticks while the
       // choices scroll, and a photo stuck there would take half a phone

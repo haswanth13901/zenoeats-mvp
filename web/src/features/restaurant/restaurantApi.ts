@@ -257,6 +257,8 @@ export type LibraryItem = {
   name: string;
   item_type_id: string;
   description: string | null;
+  /** kcal as the restaurant states it, or null where it has not. */
+  calories: number | null;
   base_price_minor: number;
   currency: string;
   is_available: boolean;
@@ -279,6 +281,8 @@ export type ItemDraft = {
   name: string;
   item_type_id: string;
   description: string | null;
+  /** kcal, or null for "not stated". */
+  calories: number | null;
   base_price_minor: number;
   tax_exempt: boolean;
   modifier_group_ids: string[];

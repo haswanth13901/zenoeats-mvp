@@ -234,11 +234,27 @@ export function ItemLibrary({
   );
 }
 
+/**
+ * A typed calorie figure: the number, null for "not stated", or false for
+ * something that is neither -- which is a mistake to report rather than a
+ * figure to store.
+ */
+function caloriesOf(typed: string): number | null | false {
+  const text = typed.trim();
+  if (!text) return null;
+  if (!/^\d{1,5}$/.test(text)) return false;
+  const value = Number(text);
+  return value <= 20000 ? value : false;
+}
+
 /** Every editable field of one item, as it sits in the form. */
 type RowDraft = {
   name: string;
   typeId: string;
   price: string;
+  /** Typed as the manager types it, kcal. Empty is "not stated", which is a
+   *  different claim from zero and is stored as null. */
+  calories: string;
   description: string;
   taxExempt: boolean;
   mealIds: string[];
@@ -252,6 +268,7 @@ function rowOf(item: LibraryItem): RowDraft {
     name: item.name,
     typeId: item.item_type_id,
     price: minorToInput(item.base_price_minor),
+    calories: item.calories === null ? "" : String(item.calories),
     description: item.description ?? "",
     taxExempt: item.tax_exempt,
     mealIds: [...item.meal_ids],
@@ -403,6 +420,13 @@ function ItemsEditor({
       if (minor !== item.base_price_minor) changes.base_price_minor = minor;
 
       if (row.typeId !== item.item_type_id) changes.item_type_id = row.typeId;
+
+      const calories = caloriesOf(row.calories);
+      if (calories === false) {
+        onError(`Enter the calories for ${item.name} as a whole number, or leave it empty.`);
+        return;
+      }
+      if (calories !== (item.calories ?? null)) changes.calories = calories;
 
       const description = row.description.trim() || null;
       if (description !== (item.description ?? null)) changes.description = description;
@@ -574,6 +598,21 @@ function ItemsEditor({
             {open && !going && (
               <div className="mb-5 flex animate-disclose flex-col gap-[17px] rounded-button bg-paper p-4">
                 <label className="block">
+                  <span className="label">Calories</span>
+                  <input
+                    className="field tnum mt-[7px] max-w-[10rem]"
+                    inputMode="numeric"
+                    placeholder="540"
+                    value={row.calories}
+                    disabled={saving}
+                    onChange={(e) => setRow(item.id, { calories: e.target.value })}
+                  />
+                  <span className="field-hint block">
+                    Optional, kcal. Left empty, customers see no figure.
+                  </span>
+                </label>
+
+                <label className="block">
                   <span className="label">Description</span>
                   <input
                     className="field mt-[7px]"
@@ -677,6 +716,7 @@ type Draft = {
   name: string;
   typeId: string;
   price: string;
+  calories: string;
   description: string;
   taxExempt: boolean;
   mealIds: string[];
@@ -692,6 +732,7 @@ function seed(types: ItemTypeRow[]): Draft {
     // is where most restaurants put what they mostly sell.
     typeId: types[0]?.id ?? "",
     price: "",
+    calories: "",
     description: "",
     taxExempt: false,
     mealIds: [],
@@ -726,6 +767,7 @@ function ItemForm({
     name: string;
     item_type_id: string;
     description: string | null;
+    calories: number | null;
     base_price_minor: number;
     tax_exempt: boolean;
     meal_ids: string[];
@@ -802,6 +844,11 @@ function ItemForm({
       onError(`Enter the price for ${name} as a plain amount, like 10.95.`);
       return;
     }
+    const calories = caloriesOf(draft.calories);
+    if (calories === false) {
+      onError(`Enter the calories for ${name} as a whole number, or leave it empty.`);
+      return;
+    }
 
     setSaving(true);
     try {
@@ -809,6 +856,7 @@ function ItemForm({
         name,
         item_type_id: draft.typeId,
         description: draft.description.trim() || null,
+        calories: calories,
         base_price_minor: minor,
         tax_exempt: draft.taxExempt,
         meal_ids: draft.mealIds,
@@ -873,6 +921,18 @@ function ItemForm({
             disabled={saving}
             onChange={(e) => setDraft((d) => ({ ...d, price: e.target.value }))}
           />
+        </label>
+        <label className="block">
+          <span className="label">Calories</span>
+          <input
+            className="field tnum mt-[7px]"
+            inputMode="numeric"
+            placeholder="540"
+            value={draft.calories}
+            disabled={saving}
+            onChange={(e) => setDraft((d) => ({ ...d, calories: e.target.value }))}
+          />
+          <span className="field-hint block">Optional, kcal.</span>
         </label>
         <label className="block">
           <span className="label">Description</span>

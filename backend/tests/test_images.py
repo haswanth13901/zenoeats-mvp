@@ -312,6 +312,7 @@ class FakeItem:
         self.name = "Smash Burger"
         self.item_type_id = uuid.uuid4()
         self.description = None
+        self.calories = None
         self.base_price_minor = 1095
         self.tax_exempt = False
         self.image_path = image_path

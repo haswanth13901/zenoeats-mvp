@@ -339,6 +339,7 @@ def _item(item: Item) -> ItemOut:
         name=item.name,
         item_type_id=item.item_type_id,
         description=item.description,
+        calories=item.calories,
         base_price_minor=item.base_price_minor,
         currency=item.currency,
         is_available=item.is_available,
