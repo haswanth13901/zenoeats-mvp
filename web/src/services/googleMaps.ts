@@ -26,22 +26,41 @@ export interface LatLngBounds {
   contains(point: LatLngLiteral): boolean;
 }
 
-export interface AdvancedMarker {
-  position: LatLngLiteral | null;
-  map: GoogleMap | null;
-  content: HTMLElement;
+/**
+ * An ordinary marker, drawn from an icon rather than an HTML element.
+ *
+ * Not the Advanced Marker: that one requires a Map ID, and a Map ID makes
+ * Google ignore the style array the restaurant's map is coloured with
+ * (features/storefront/mapStyles.ts). One of the two had to give, and a
+ * restaurant recolouring its own map without a console is worth more than
+ * the newer marker class.
+ */
+export interface MapMarker {
+  setPosition(position: LatLngLiteral): void;
+  getPosition(): { lat(): number; lng(): number } | null | undefined;
+  setMap(map: GoogleMap | null): void;
+  setIcon(icon: MarkerIcon): void;
 }
+
+export type MarkerIcon = {
+  url: string;
+  scaledSize: unknown;
+  anchor: unknown;
+};
 
 export type MapsLibraries = {
   Map: new (el: HTMLElement, options: Record<string, unknown>) => GoogleMap;
   LatLngBounds: new () => LatLngBounds;
-  AdvancedMarkerElement: new (options: {
+  Marker: new (options: {
     map: GoogleMap;
     position: LatLngLiteral;
-    content: HTMLElement;
+    icon?: MarkerIcon;
     title?: string;
     zIndex?: number;
-  }) => AdvancedMarker;
+    optimized?: boolean;
+  }) => MapMarker;
+  Size: new (width: number, height: number) => unknown;
+  Point: new (x: number, y: number) => unknown;
 };
 
 export interface PlaceResult {
@@ -122,8 +141,10 @@ export function loadGoogleMaps(key: string): Promise<MapsLibraries> {
     ]);
     return {
       Map: map.Map,
-      AdvancedMarkerElement: marker.AdvancedMarkerElement,
+      Marker: marker.Marker,
       LatLngBounds: core.LatLngBounds,
+      Size: core.Size,
+      Point: core.Point,
     } as MapsLibraries;
   }).catch((error) => {
     mapsLoading = null;

@@ -14,6 +14,7 @@ board.
 | Customer profile | `/profile`: name, phone and address; order history at this restaurant; favourite items (accounts only), saved from a heart on the menu |
 | Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
 | Brand | Each restaurant uploads its logo and chooses how its name is shown — typed in one of six fonts, or its own lettering as an image — in Settings; shown in every customer header and on the sign-in pages, with or without storefront customization |
+| Delivery map | Each restaurant chooses how its tracking map is coloured -- Google standard, light, dark, or built from its own palette -- and whether the pins take its colours |
 | Storefront | Each restaurant sets its own palette, font pairing, rotating banners with their own framing, category shortcuts and collections — behind a platform switch |
 | Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
 | Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
@@ -355,9 +356,6 @@ GOOGLE_MAPS_API_KEY=replace_with_server_key
 
 # Public browser credential. Its website and API restrictions protect it.
 GOOGLE_MAPS_BROWSER_KEY=replace_with_browser_key
-
-# Fine for local development; use a Cloud Map ID for production styling.
-GOOGLE_MAPS_MAP_ID=DEMO_MAP_ID
 ```
 
 Configure the **server key** with API restrictions for **Geocoding API** and
@@ -777,8 +775,10 @@ at most once per `DELIVERY_ETA_REFRESH_SECONDS` per order. The browser only
 reports position while the page is open, so a native driver app is the next
 step if drivers need to lock their phones.
 
-The map also requires a non-empty `GOOGLE_MAPS_MAP_ID`: use `DEMO_MAP_ID`
-locally and a Google Cloud Map ID in production. After editing `.env` in
+The map needs no Map ID. Each restaurant picks its colours in Storefront ->
+Delivery map, from styles the storefront draws itself; Google ignores such a
+style whenever a Map ID is in use, which is why the map draws its pins as
+ordinary markers rather than Advanced Markers. After editing `.env` in
 Docker, recreate the API with `docker compose --profile app up -d --no-deps
 --no-build --force-recreate api`; restarting an existing container does not
 load changed environment values. Pickup and unpaid orders have no delivery

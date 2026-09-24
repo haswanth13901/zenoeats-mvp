@@ -75,7 +75,6 @@ def management(db, restaurant):
         # styles, and the portal offers no choice rather than a list of one.
         "map_style_key": restaurant.map_style_key,
         "map_pins_themed": restaurant.map_pins_themed,
-        "map_styles": maps.choices(),
         "banners": [{**banner_dict(row), "image_url": images.image_url(row.image_path)} for row in ordered(db, StorefrontBanner)],
         "categories": [{"id": t.id, "name": t.name, "parent_id": t.parent_id, "sort_order": t.sort_order,
                         "image_path": t.image_path, "image_url": images.image_url(t.image_path), "show_in_shortcuts": t.show_in_shortcuts,
@@ -103,15 +102,14 @@ def save_theme(db, restaurant, body):
 def save_map(db, restaurant, body):
     """The delivery map's style and pins.
 
-    A style the platform has not configured is refused rather than stored:
-    the portal only ever sends a key it was offered, so an unknown one is a
-    stale page or a hand-written request, and storing it would leave the
-    restaurant looking at a setting that does nothing.
+    A style the storefront cannot draw is refused rather than stored: the
+    portal only ever sends a key it was offered, so an unknown one is a stale
+    page or a hand-written request, and storing it would leave the restaurant
+    looking at a setting that does nothing.
     """
     restaurant = lock(db, restaurant)
     changes = body.model_dump(exclude_unset=True)
-    key = changes.get("map_style_key")
-    if key and key not in {style["key"] for style in maps.choices()}:
+    if "map_style_key" in changes and not maps.is_style(changes["map_style_key"]):
         raise errors.validation_error("That map style is not available. Reload the storefront.")
     for field, value in changes.items():
         setattr(restaurant, field, value)

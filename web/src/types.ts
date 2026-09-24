@@ -128,7 +128,8 @@ export type Portal = {
   /** For the live delivery map: a browser key restricted to this site, and
    *  the Map ID its markers need. Null when there is no map to show. */
   maps_browser_key: string | null;
-  maps_map_id: string | null;
+  /** How the delivery map colours itself, or null for Google's own look. */
+  map_style_key?: string | null;
   /** Whether the map's pins take the restaurant's palette. */
   map_pins_themed?: boolean;
 };

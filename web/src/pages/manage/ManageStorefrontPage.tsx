@@ -6,8 +6,9 @@ import { BannerFraming, DEFAULT_FRAMING } from "@/features/restaurant/components
 import { Loading, StatePage } from "@/components/common/Feedback";
 import { SettingsCard } from "@/features/restaurant/components/SettingsCard";
 import { HomeBanner, CategoryShortcuts, heroPhoto } from "@/features/storefront/components/HomePresentation";
-import { attachFont, contrastResults, FONT_PAIRS, mapPins, PALETTES, themeVariables, type FontPair, type Storefront, type StorefrontTheme } from "@/features/storefront/theme";
-import { markerElement } from "@/features/storefront/components/DeliveryTracking";
+import { attachFont, contrastResults, FONT_PAIRS, mapPins, PALETTES, themeVariables, type FontPair, type MapPins, type Storefront, type StorefrontTheme } from "@/features/storefront/theme";
+import { markerSvg } from "@/features/storefront/components/DeliveryTracking";
+import { isMapStyleKey, mapStyle, MAP_STYLES } from "@/features/storefront/mapStyles";
 import { useStorefrontSettingsQuery, useSaveStorefrontThemeMutation, useSaveStorefrontBannersMutation, useSaveStorefrontCollectionsMutation, useSaveStorefrontShortcutsMutation, useSaveStorefrontMapMutation, type StorefrontSettings, type BannerDraft, type CategoryDraft, type CollectionDraft, type ShortcutDraft } from "@/features/restaurant/storefrontApi";
 import { errorMessage } from "@/services/apiClient";
 
@@ -54,10 +55,10 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
   const [saveBanners] = useSaveStorefrontBannersMutation();
   const [saveShortcuts] = useSaveStorefrontShortcutsMutation();
   const [saveMap] = useSaveStorefrontMapMutation();
-  const [mapStyle, setMapStyle] = useState(initial.map_style_key ?? "");
+  const [mapStyle, setMapStyle] = useState(initial.map_style_key ?? "standard");
   const [mapPinsThemed, setMapPinsThemed] = useState(initial.map_pins_themed);
   const [saveCollections] = useSaveStorefrontCollectionsMutation();
-  const dirty = !same(banners, saved.banners) || interval !== saved.banner_interval_ms || !same(shortcuts, saved.shortcuts) || mapStyle !== (saved.map_style_key ?? "") || mapPinsThemed !== saved.map_pins_themed || !same(collections, saved.collections) || !same(theme, saved.theme);
+  const dirty = !same(banners, saved.banners) || interval !== saved.banner_interval_ms || !same(shortcuts, saved.shortcuts) || mapStyle !== (saved.map_style_key ?? "standard") || mapPinsThemed !== saved.map_pins_themed || !same(collections, saved.collections) || !same(theme, saved.theme);
   const blocker = useBlocker(dirty || uploads > 0);
   useEffect(() => {
     if (!dirty && !uploads) return;
@@ -199,22 +200,16 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
         </SettingsCard>
         <SettingsCard id="storefront-map" title="Delivery map" subtitle="The map a customer watches their delivery on.">
           <fieldset disabled={!!busy} className="min-w-0 space-y-4">
-            {initial.map_styles.length > 0 ? (
-              <Field label="Map style"><select className="field" value={mapStyle} onChange={(e) => setMapStyle(e.target.value)}>
-                <option value="">The platform&apos;s map</option>
-                {initial.map_styles.map((style) => <option key={style.key} value={style.key}>{style.label}</option>)}
-              </select></Field>
-            ) : (
-              /* Google applies a map style by Map ID, set up once in the Cloud
-                 console; until the platform has done that there is nothing to
-                 choose between, and a list of one would only mislead. */
-              <p className="note">The roads-and-water colours come from Zenoeats. Ask us to set up map styles if you want your own.</p>
-            )}
+            <Field label="Map style"><select className="field" value={mapStyle} onChange={(e) => setMapStyle(e.target.value)}>
+              {MAP_STYLES.map((style) => <option key={style.key} value={style.key}>{style.label}</option>)}
+            </select></Field>
+            <p className="field-hint">{MAP_STYLES.find((s) => s.key === mapStyle)?.hint}</p>
+            <MapStylePreview styleKey={mapStyle} theme={theme} pins={mapPins(theme, mapPinsThemed)} />
             <Toggle label="Use my palette for the map pins" checked={mapPinsThemed} onChange={setMapPinsThemed} />
             <p className="field-hint">Off keeps the Zenoeats pins, which is the safer choice if your brand colour is close to the colour of a road.</p>
-            <MapPinsPreview theme={theme} themed={mapPinsThemed} />
+
             <Save disabled={off} busy={busy === "Delivery map"} onClick={() => void save("Delivery map", async () => {
-              const result = await saveMap({ map_style_key: mapStyle || null, map_pins_themed: mapPinsThemed }).unwrap();
+              const result = await saveMap({ map_style_key: mapStyle, map_pins_themed: mapPinsThemed }).unwrap();
               setSaved((s) => ({ ...s, map_style_key: result.map_style_key, map_pins_themed: result.map_pins_themed }));
             })} />
           </fieldset>
@@ -252,23 +247,45 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
   </div>;
 }
 
-/** The three pins as the customer's map draws them, built by the same
- *  function the map uses so the preview cannot drift from it. */
-function MapPinsPreview({ theme, themed }: { theme: StorefrontTheme | null; themed: boolean }) {
-  const pins = mapPins(theme, themed);
+/**
+ * The map as the customer will see it: its ground, its water and a road,
+ * with the three pins standing on them.
+ *
+ * Drawn from the same style array and the same pin drawings the map itself
+ * uses, so the preview cannot promise colours the map does not keep. It is
+ * not a map -- loading one here would bill a map view for every visit to
+ * this page, and say nothing the colours do not.
+ */
+function MapStylePreview({ styleKey, theme, pins }: { styleKey: string; theme: StorefrontTheme | null; pins: MapPins }) {
+  const style = mapStyle(isMapStyleKey(styleKey) ? styleKey : null, theme);
+  const colour = (feature: string, fallback: string) => {
+    const found = style?.find((r) => r.featureType === feature && r.elementType === "geometry");
+    const stylers = (found?.stylers ?? []) as { color?: string }[];
+    return stylers.find((s) => s.color)?.color ?? fallback;
+  };
+  const ground = colour("all", "#E9EDE4");
+  const water = colour("water", "#AEDCF0");
+  const road = colour("road", "#FFFFFF");
   return (
-    <div className="flex flex-wrap items-center gap-5 rounded-field border border-hairline bg-[#EDEFE9] p-4">
-      {(["restaurant", "home", "driver"] as const).map((kind) => (
-        <span key={kind} className="flex items-center gap-2 text-caption">
-          <span
-            aria-hidden="true"
-            ref={(node) => {
-              if (node) node.replaceChildren(markerElement(kind, pins));
-            }}
-          />
-          {kind === "restaurant" ? "You" : kind === "home" ? "The customer" : "The driver"}
+    <div>
+      <span className="label mb-[7px] block">Preview</span>
+      <div className="relative h-[120px] overflow-hidden rounded-field border border-hairline" style={{ background: ground }}>
+        <span className="absolute inset-y-0 right-0 w-1/3" style={{ background: water }} aria-hidden />
+        <span className="absolute left-0 right-0 top-[46px] h-3 -rotate-2" style={{ background: road }} aria-hidden />
+        <span className="absolute inset-0 flex items-center justify-around px-6">
+          {(["restaurant", "home", "driver"] as const).map((kind) => (
+            /* The same drawing the map puts on the road, at the size it
+               draws it. */
+            <img
+              key={kind}
+              src={markerSvg(kind, pins)}
+              alt={kind === "restaurant" ? "Your pin" : kind === "home" ? "The customer's pin" : "The driver's pin"}
+              width={kind === "driver" ? 40 : 36}
+              height={kind === "driver" ? 40 : 36}
+            />
+          ))}
         </span>
-      ))}
+      </div>
     </div>
   );
 }

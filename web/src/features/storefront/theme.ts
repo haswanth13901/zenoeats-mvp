@@ -34,6 +34,14 @@ const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i +
 const rgb = (hex: string) => channels(hex).join(" ");
 const mix = (a: string, b: string, amount: number) => channels(a).map((v, i) => Math.round(v * (1 - amount) + channels(b)[i]! * amount)).join(" ");
 
+/** Two colours blended, as a hex string. The CSS variables above want the
+ *  channels on their own; a map style wants "#RRGGBB", so this is the same
+ *  arithmetic written for the other reader. */
+export function mixHex(a: string, b: string, amount: number): string {
+  const blended = channels(a).map((v, i) => Math.round(v * (1 - amount) + channels(b)[i]! * amount));
+  return "#" + blended.map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+
 /** One derivation for the customer page and the unsaved preview. Null is
  * deliberately empty: the default palette keeps every original shade. */
 export function themeVariables(theme: StorefrontTheme | null): CSSProperties {
