@@ -355,9 +355,9 @@ function MealBlock({
       {meal.combos.length > 0 && (
         <section className="mb-8">
           <CategoryHeading id={`heading-combos-${meal.id}`} label="Combos" />
-          <ul className="flex flex-col gap-[13px] sm:gap-[19px]">
+          <ul className="grid grid-cols-1 gap-[13px] sm:gap-[19px] lg:grid-cols-2">
             {meal.combos.map((combo) => (
-              <li key={combo.id}>
+              <li key={combo.id} className="min-w-0">
                 <ComboCard combo={combo} currency={currency} open={open} onPick={() => onPickCombo(combo)} />
               </li>
             ))}
@@ -454,18 +454,25 @@ export function MenuCard({
       type="button"
       disabled={!orderable}
       onClick={onPick}
-      className={`group flex w-full overflow-hidden rounded-[12px] border border-[rgb(var(--ze-card-border))] text-left text-[rgb(var(--ze-card-text))] transition-[box-shadow,border-color] duration-[180ms] ease-standard enabled:hover:border-[rgb(var(--ze-card-hover))] enabled:hover:shadow-[0_8px_25px_rgb(var(--ze-card-shadow)_/_0.050980392156862744)] disabled:cursor-not-allowed sm:rounded-product ${
+      className={`group flex w-full overflow-hidden rounded-[12px] border border-[rgb(var(--ze-card-border))] text-left text-[rgb(var(--ze-card-text))] transition-[box-shadow,border-color] duration-[180ms] ease-standard enabled:hover:border-[rgb(var(--ze-card-hover))] enabled:hover:shadow-[0_8px_25px_rgb(var(--ze-card-shadow)_/_0.050980392156862744)] disabled:cursor-not-allowed sm:rounded-product min-h-[177px] lg:min-h-[224px] ${
+        // One height for every card on the menu, so a row of cards with
+        // photographs and a row without line up. Only the background differs:
+        // a card with no photo fills the space a photo would have taken.
         photo
-          ? "min-h-[177px] bg-cream lg:min-h-[224px]"
-          : "min-h-[150px] bg-[linear-gradient(115deg,rgb(var(--ze-card-gradient)),rgb(var(--ze-card-paper)))] lg:min-h-[180px]"
+          ? "bg-cream"
+          : "bg-[linear-gradient(115deg,rgb(var(--ze-card-gradient)),rgb(var(--ze-card-paper)))]"
       } ${orderable ? "" : "[&>*]:opacity-[.72]"}`}
     >
       {photo && (
-        <span className="flex w-[36%] shrink-0 overflow-hidden bg-[rgb(var(--ze-photo-ground))] lg:w-[41%]">
+        // Absolutely placed, so a tall photograph fills this column rather
+        // than stretching the card: a portrait picture used to make its card
+        // three times the height of the one beside it, and a grid row is as
+        // tall as its tallest card. The card's own min-height is the size.
+        <span className="relative w-[36%] shrink-0 overflow-hidden bg-[rgb(var(--ze-photo-ground))] lg:w-[41%]">
           <MenuImage
             src={photo}
             onFail={setFailed}
-            className="photo-zoom h-full min-h-[177px] w-full object-cover lg:min-h-[224px]"
+            className="photo-zoom absolute inset-0 h-full w-full object-cover"
           />
         </span>
       )}
@@ -532,32 +539,48 @@ function ComboCard({
       type="button"
       disabled={!open}
       onClick={onPick}
-      className={`group grid w-full grid-cols-1 overflow-hidden rounded-[12px] border border-[rgb(var(--ze-combo-border))] bg-[rgb(var(--ze-combo-ground))] text-left transition-colors duration-[180ms] ease-standard enabled:hover:border-[rgb(var(--ze-combo-hover-border))] enabled:hover:bg-[rgb(var(--ze-combo-hover))] disabled:cursor-not-allowed disabled:opacity-[.68] sm:rounded-product ${
-        photo ? "sm:min-h-[225px] sm:grid-cols-[1.15fr_1fr]" : ""
-      }`}
+      className={`group flex w-full overflow-hidden rounded-[12px] border border-[rgb(var(--ze-combo-border))] text-left text-[rgb(var(--ze-combo-text))] transition-[box-shadow,border-color] duration-[180ms] ease-standard enabled:hover:border-[rgb(var(--ze-combo-hover-border))] enabled:hover:shadow-[0_8px_25px_rgb(var(--ze-card-shadow)_/_0.050980392156862744)] disabled:cursor-not-allowed disabled:opacity-[.68] sm:rounded-product min-h-[177px] bg-[rgb(var(--ze-combo-ground))] lg:min-h-[224px]`}
     >
-      <span className="order-1 flex flex-col items-start p-[25px] text-[rgb(var(--ze-combo-text))] sm:order-none lg:px-[34px] lg:py-[27px]">
-        <span className="eyebrow mb-[9px] text-[rgb(var(--ze-menu-muted))]">Meal deal</span>
-        <span className="mb-[9px] font-display text-[31px] font-bold leading-[1.1] tracking-[-1px] [overflow-wrap:anywhere] lg:text-[34px]">
+      {photo && (
+        <span className="relative w-[36%] shrink-0 overflow-hidden bg-[rgb(var(--ze-photo-ground))] lg:w-[41%]">
+          <MenuImage src={photo} onFail={setFailed} className="photo-zoom absolute inset-0 h-full w-full object-cover" />
+        </span>
+      )}
+      <span
+        className={`flex min-w-0 flex-1 flex-col px-[15px] py-[17px] sm:px-5 lg:px-[21px] lg:py-[22px] ${
+          photo ? "" : "sm:px-6 lg:px-[31px] lg:py-[27px]"
+        }`}
+      >
+        <span className="mb-2 block text-[9px] uppercase tracking-[1.2px] text-[rgb(var(--ze-menu-muted))] sm:text-[10px] lg:mb-2.5">
+          Meal deal
+        </span>
+        <span className="mb-[7px] block text-base font-bold leading-[1.25] tracking-[-.3px] [overflow-wrap:anywhere] sm:text-[17px] lg:mb-2.5 lg:text-lg">
           {combo.name}
         </span>
-        {combo.description && <span className="text-caption text-[rgb(var(--ze-combo-muted))]">{combo.description}</span>}
-        <span className="mt-3 text-caption text-[rgb(var(--ze-combo-muted))]">{combo.slots.map((s) => s.label).join(" · ")}</span>
-        <span className="mt-5 flex w-full flex-wrap items-center justify-between gap-2.5 sm:mt-6 sm:justify-start sm:gap-[30px]">
-          <span className="rounded-[5px] border border-[rgb(var(--ze-saving-border))] bg-[rgb(var(--ze-saving-ground))] px-[9px] py-[5px] text-[11px] font-bold text-[rgb(var(--ze-saving-text))]">
+        {combo.description && (
+          <span className="block max-w-[45ch] text-caption text-[rgb(var(--ze-combo-muted))]">{combo.description}</span>
+        )}
+        {/* What has to be chosen, in the restaurant's own words for each
+            slot: the one thing a meal deal card has to say that an item card
+            does not. */}
+        <span className="mt-1.5 block truncate text-caption text-[rgb(var(--ze-combo-muted))]">
+          {combo.slots.map((slot) => slot.label).join(" · ")}
+        </span>
+        <span className="mt-auto flex items-center justify-between gap-2 pt-[13px] lg:pt-5">
+          <span className="rounded-[5px] border border-[rgb(var(--ze-saving-border))] bg-[rgb(var(--ze-saving-ground))] px-[7px] py-1 text-[11px] font-bold text-[rgb(var(--ze-saving-text))]">
             {savingLabel(combo, currency)}
           </span>
-          <span className="inline-flex items-center gap-2.5 text-caption font-bold">
-            Build your combo
-            <Icon name="arrow" className="h-4 w-4" />
+          <span
+            aria-hidden="true"
+            className="inline-flex min-h-[32px] shrink-0 items-center gap-1.5 rounded-full px-1 text-[11px] font-[650] text-brick"
+          >
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-brickSoft transition-colors duration-color group-enabled:group-hover:bg-brick group-enabled:group-hover:text-white">
+              <Icon name="arrow" className="h-4 w-4" />
+            </span>
+            <span className="hidden sm:inline">Build</span>
           </span>
         </span>
       </span>
-      {photo && (
-        <span className="flex max-h-[240px] overflow-hidden bg-hero sm:max-h-none">
-          <MenuImage src={photo} onFail={setFailed} className="photo-zoom h-full w-full object-cover" />
-        </span>
-      )}
     </button>
   );
 }
