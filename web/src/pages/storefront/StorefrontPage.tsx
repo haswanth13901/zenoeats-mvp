@@ -454,10 +454,13 @@ export function MenuCard({
       type="button"
       disabled={!orderable}
       onClick={onPick}
-      className={`group flex w-full overflow-hidden rounded-[12px] border border-[rgb(var(--ze-card-border))] text-left text-[rgb(var(--ze-card-text))] transition-[box-shadow,border-color] duration-[180ms] ease-standard enabled:hover:border-[rgb(var(--ze-card-hover))] enabled:hover:shadow-[0_8px_25px_rgb(var(--ze-card-shadow)_/_0.050980392156862744)] disabled:cursor-not-allowed sm:rounded-product ${
+      className={`group flex w-full overflow-hidden rounded-[12px] border border-[rgb(var(--ze-card-border))] text-left text-[rgb(var(--ze-card-text))] transition-[box-shadow,border-color] duration-[180ms] ease-standard enabled:hover:border-[rgb(var(--ze-card-hover))] enabled:hover:shadow-[0_8px_25px_rgb(var(--ze-card-shadow)_/_0.050980392156862744)] disabled:cursor-not-allowed sm:rounded-product min-h-[177px] lg:min-h-[224px] ${
+        // One height for every card on the menu, so a row of cards with
+        // photographs and a row without line up. Only the background differs:
+        // a card with no photo fills the space a photo would have taken.
         photo
-          ? "min-h-[177px] bg-cream lg:min-h-[224px]"
-          : "min-h-[150px] bg-[linear-gradient(115deg,rgb(var(--ze-card-gradient)),rgb(var(--ze-card-paper)))] lg:min-h-[180px]"
+          ? "bg-cream"
+          : "bg-[linear-gradient(115deg,rgb(var(--ze-card-gradient)),rgb(var(--ze-card-paper)))]"
       } ${orderable ? "" : "[&>*]:opacity-[.72]"}`}
     >
       {photo && (
@@ -536,11 +539,7 @@ function ComboCard({
       type="button"
       disabled={!open}
       onClick={onPick}
-      className={`group flex w-full overflow-hidden rounded-[12px] border border-[rgb(var(--ze-combo-border))] text-left text-[rgb(var(--ze-combo-text))] transition-[box-shadow,border-color] duration-[180ms] ease-standard enabled:hover:border-[rgb(var(--ze-combo-hover-border))] enabled:hover:shadow-[0_8px_25px_rgb(var(--ze-card-shadow)_/_0.050980392156862744)] disabled:cursor-not-allowed disabled:opacity-[.68] sm:rounded-product ${
-        photo
-          ? "min-h-[177px] bg-[rgb(var(--ze-combo-ground))] lg:min-h-[224px]"
-          : "min-h-[150px] bg-[rgb(var(--ze-combo-ground))] lg:min-h-[180px]"
-      }`}
+      className={`group flex w-full overflow-hidden rounded-[12px] border border-[rgb(var(--ze-combo-border))] text-left text-[rgb(var(--ze-combo-text))] transition-[box-shadow,border-color] duration-[180ms] ease-standard enabled:hover:border-[rgb(var(--ze-combo-hover-border))] enabled:hover:shadow-[0_8px_25px_rgb(var(--ze-card-shadow)_/_0.050980392156862744)] disabled:cursor-not-allowed disabled:opacity-[.68] sm:rounded-product min-h-[177px] bg-[rgb(var(--ze-combo-ground))] lg:min-h-[224px]`}
     >
       {photo && (
         <span className="relative w-[36%] shrink-0 overflow-hidden bg-[rgb(var(--ze-photo-ground))] lg:w-[41%]">
