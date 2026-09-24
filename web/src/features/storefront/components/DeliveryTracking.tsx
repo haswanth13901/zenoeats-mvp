@@ -7,6 +7,7 @@ import {
   type LatLngLiteral,
   type MapsLibraries,
 } from "@/services/googleMaps";
+import { contrast, DEFAULT_PINS, type MapPins } from "@/features/storefront/theme";
 import type { MapPoint, Tracking, TrackingStep } from "@/types";
 
 /** A driver position older than this is shown as delayed: kept on the map as
@@ -30,6 +31,7 @@ export function DeliveryTracking({
   mapsKey,
   mapId,
   restaurantName,
+  pins = DEFAULT_PINS,
 }: {
   tracking: Tracking;
   status: string;
@@ -38,6 +40,8 @@ export function DeliveryTracking({
   mapsKey: string | null;
   mapId: string | null;
   restaurantName: string;
+  /** The colours of the three pins, from the restaurant's palette. */
+  pins?: MapPins;
 }) {
   const finished = ["COMPLETED", "CANCELLED", "EXPIRED"].includes(status);
   const onTheRoad = status === "OUT_FOR_DELIVERY";
@@ -70,6 +74,7 @@ export function DeliveryTracking({
           mapsKey={mapsKey}
           mapId={mapId}
           restaurantName={restaurantName}
+          pins={pins}
         />
       )}
 
@@ -249,24 +254,44 @@ function Freshness({ age, stale, online }: { age: number | null; stale: boolean;
 
 // --------------------------------------------------------------------- map
 
-function markerElement(kind: "restaurant" | "home" | "driver"): HTMLElement {
+/**
+ * One pin, built detached and handed to Google.
+ *
+ * Its colours are passed in rather than read from a class, because this
+ * element is never inside the page: a Tailwind colour or a CSS variable
+ * would resolve against nothing once Google mounts it on the map.
+ */
+export function markerElement(
+  kind: "restaurant" | "home" | "driver",
+  pins: MapPins = DEFAULT_PINS,
+): HTMLElement {
   const el = document.createElement("div");
   if (kind === "driver") {
-    // A forest disc with an arrow that turns with the driver's heading.
+    // A disc with an arrow that turns with the driver's heading.
     el.className =
-      "flex h-9 w-9 items-center justify-center rounded-full border-[3px] border-white bg-brick text-white shadow-[0_4px_14px_#12160B40] transition-transform duration-500";
+      "flex h-9 w-9 items-center justify-center rounded-full border-[3px] border-white shadow-[0_4px_14px_#12160B40] transition-transform duration-500";
+    el.style.background = pins.driver;
+    el.style.color = pins.onDriver;
     el.innerHTML =
       '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 3l7 18-7-4-7 4 7-18z"/></svg>';
   } else {
-    el.className = `flex h-8 w-8 items-center justify-center rounded-full border-2 border-white shadow-[0_3px_10px_#1F1B1640] ${
-      kind === "home" ? "bg-gold text-[#1D3326]" : "bg-surface text-brick"
-    }`;
+    el.className =
+      "flex h-8 w-8 items-center justify-center rounded-full border-2 border-white shadow-[0_3px_10px_#1F1B1640]";
+    el.style.background = kind === "home" ? pins.home : pins.restaurant;
+    // The line art inside: dark enough to read on whichever colour it sits.
+    el.style.color = readableOn(kind === "home" ? pins.home : pins.restaurant);
     el.innerHTML =
       kind === "home"
         ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 11l8-7 8 7v9H4z"/></svg>'
         : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 9h18L19 3H5L3 9Zm1 0v12h16V9"/></svg>';
   }
   return el;
+}
+
+/** Ink that reads on the given background: the darker of the two candidates
+ *  wins on a pale pin, the paler on a dark one. */
+function readableOn(background: string): string {
+  return contrast(background, "#1D1B16") >= contrast(background, "#FFFFFF") ? "#1D1B16" : "#FFFFFF";
 }
 
 const toLatLng = (p: MapPoint): LatLngLiteral => ({ lat: p.latitude, lng: p.longitude });
@@ -276,11 +301,13 @@ function TrackingMap({
   mapsKey,
   mapId,
   restaurantName,
+  pins,
 }: {
   tracking: Tracking;
   mapsKey: string;
   mapId: string | null;
   restaurantName: string;
+  pins: MapPins;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -328,7 +355,7 @@ function TrackingMap({
       markers.current.restaurant = new libs.AdvancedMarkerElement({
         map: map.current,
         position: toLatLng(tracking.restaurant),
-        content: markerElement("restaurant"),
+        content: markerElement("restaurant", pins),
         title: restaurantName,
       });
     }
@@ -336,7 +363,7 @@ function TrackingMap({
       markers.current.home = new libs.AdvancedMarkerElement({
         map: map.current,
         position: toLatLng(tracking.destination),
-        content: markerElement("home"),
+        content: markerElement("home", pins),
         title: "Your address",
       });
     }
@@ -352,9 +379,10 @@ function TrackingMap({
       map.current = null;
       framedWithDriver.current = false;
     };
-    // Coordinates are immutable for an order; a poll must not reset the viewport.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [libs, mapId, restaurantName, attempt]);
+    // Coordinates are immutable for an order; a poll must not reset the
+    // viewport. The pins are rebuilt when the palette changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libs, mapId, restaurantName, attempt, pins]);
 
   // The driver: placed on first sight, then glided to each new position so
   // the dot travels rather than jumping every five seconds.
@@ -374,7 +402,7 @@ function TrackingMap({
       markers.current.driver = new libs.AdvancedMarkerElement({
         map: map.current,
         position: target,
-        content: markerElement("driver"),
+        content: markerElement("driver", pins),
         title: "Your driver",
         zIndex: 10,
       });
@@ -411,7 +439,7 @@ function TrackingMap({
     }
     // Do not override the customer's panning; Recenter is an explicit action.
     return () => { if (glide.current) cancelAnimationFrame(glide.current); };
-  }, [libs, location, tracking.destination]);
+  }, [libs, location, tracking.destination, pins]);
 
   useEffect(() => () => {
     if (glide.current) cancelAnimationFrame(glide.current);

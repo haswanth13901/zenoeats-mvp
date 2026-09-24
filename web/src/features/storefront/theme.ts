@@ -66,6 +66,37 @@ export function contrastResults(theme: StorefrontTheme) {
   return [["Cream text on hero", "#FFF8E4", theme.hero], ["CTA text on accent", "#1D3326", theme.accent], ["Brand on paper", theme.brand, theme.paper], ["White text on brand", "#FFFFFF", theme.brand], ["Body text on paper", "#252620", theme.paper]].map(([name, a, b]) => ({ name, ratio: contrast(a!, b!) }));
 }
 
+/**
+ * The colours of the three pins on the delivery map.
+ *
+ * The map's own tiles are Google's, recoloured only by a style the platform
+ * set up (services/maps.py says why). What sits on top of them is ours: the
+ * restaurant, the customer's address and the driver. They take the palette
+ * the rest of the page uses, so a forest-green storefront does not open a
+ * map pinned in someone else's colours.
+ *
+ * Resolved values rather than CSS variables, because a pin is built as a
+ * detached element and handed to Google: it never inherits this page.
+ */
+export type MapPins = { restaurant: string; home: string; driver: string; onDriver: string };
+
+export const DEFAULT_PINS: MapPins = {
+  restaurant: "#FFFDF7", home: "#E8B54B", driver: "#174D39", onDriver: "#FFFFFF",
+};
+
+export function mapPins(theme: StorefrontTheme | null, themed: boolean): MapPins {
+  if (!themed || !theme) return DEFAULT_PINS;
+  return {
+    // The restaurant's own mark stays pale, as a pin on a road has to be:
+    // its paper, not its brand, or two dark pins compete on a dark map.
+    restaurant: theme.paper,
+    home: theme.accent,
+    driver: theme.brand,
+    // The arrow inside the driver's disc, against the brand behind it.
+    onDriver: contrast(theme.brand, "#FFFFFF") >= 4.5 ? "#FFFFFF" : "#1D1B16",
+  };
+}
+
 /** Only curated identifiers can create a link. Never interpolate a URL from
  * restaurant data; the CSP and this allowlist protect different boundaries. */
 export function attachFont(pair: FontPair) {

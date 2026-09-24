@@ -179,6 +179,10 @@ class PortalOut(BaseModel):
     # restricted to this site in Google's console. Null when there is no map.
     maps_browser_key: str | None = None
     maps_map_id: str | None = None
+    # Whether the pins on that map take the restaurant's palette. Off leaves
+    # them in the platform's colours, which a brand the colour of a road is
+    # better served by.
+    map_pins_themed: bool = True
 
 
 class MenuOut(BaseModel):

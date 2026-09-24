@@ -68,6 +68,7 @@ EXPECTED = {
     ("PATCH", "/restaurant/item-types/{type_id}/storefront"): STOREFRONT,
     ("PUT", "/restaurant/storefront/collections"): STOREFRONT,
     ("PUT", "/restaurant/storefront/shortcuts"): STOREFRONT,
+    ("PATCH", "/restaurant/storefront/map"): STOREFRONT,
     # The floor: the board, handing over with a PIN, and stock.
     ("GET", "/restaurant/orders"): FLOOR_READ,
     ("GET", "/restaurant/orders/history"): FLOOR_READ,
@@ -226,6 +227,7 @@ IT_SUPPORT_WRITES = {
     ("PATCH", "/restaurant/item-types/{type_id}/storefront"),
     ("PUT", "/restaurant/storefront/collections"),
     ("PUT", "/restaurant/storefront/shortcuts"),
+    ("PATCH", "/restaurant/storefront/map"),
     # A banner needs a picture. An upload attaches nothing on its own, so
     # this is not a way into the menu.
     ("POST", "/restaurant/images"),

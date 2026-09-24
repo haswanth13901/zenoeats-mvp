@@ -13,7 +13,7 @@ from app.config import settings
 from app.core.ratelimit import per_ip
 from app.models import Restaurant, RestaurantPaymentAccount
 from app.schemas.api import BrandOut, MenuOut, PortalOut
-from app.services import delivery, images, storefront
+from app.services import delivery, images, maps, storefront
 from app.services.menu import load_menu
 
 router = APIRouter(tags=["portal"])
@@ -49,7 +49,8 @@ def get_portal(
         stripe_account_id=account.stripe_account_id if account else None,
         delivery_offered=delivery.offered(restaurant),
         maps_browser_key=settings.GOOGLE_MAPS_BROWSER_KEY or None,
-        maps_map_id=settings.GOOGLE_MAPS_MAP_ID if settings.GOOGLE_MAPS_BROWSER_KEY else None,
+        maps_map_id=maps.map_id_for(restaurant.map_style_key) if settings.GOOGLE_MAPS_BROWSER_KEY else None,
+        map_pins_themed=restaurant.map_pins_themed,
     )
 
 

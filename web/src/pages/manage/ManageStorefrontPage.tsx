@@ -6,8 +6,9 @@ import { BannerFraming, DEFAULT_FRAMING } from "@/features/restaurant/components
 import { Loading, StatePage } from "@/components/common/Feedback";
 import { SettingsCard } from "@/features/restaurant/components/SettingsCard";
 import { HomeBanner, CategoryShortcuts, heroPhoto } from "@/features/storefront/components/HomePresentation";
-import { attachFont, contrastResults, FONT_PAIRS, PALETTES, themeVariables, type FontPair, type Storefront } from "@/features/storefront/theme";
-import { useStorefrontSettingsQuery, useSaveStorefrontThemeMutation, useSaveStorefrontBannersMutation, useSaveStorefrontCollectionsMutation, useSaveStorefrontShortcutsMutation, type StorefrontSettings, type BannerDraft, type CategoryDraft, type CollectionDraft, type ShortcutDraft } from "@/features/restaurant/storefrontApi";
+import { attachFont, contrastResults, FONT_PAIRS, mapPins, PALETTES, themeVariables, type FontPair, type Storefront, type StorefrontTheme } from "@/features/storefront/theme";
+import { markerElement } from "@/features/storefront/components/DeliveryTracking";
+import { useStorefrontSettingsQuery, useSaveStorefrontThemeMutation, useSaveStorefrontBannersMutation, useSaveStorefrontCollectionsMutation, useSaveStorefrontShortcutsMutation, useSaveStorefrontMapMutation, type StorefrontSettings, type BannerDraft, type CategoryDraft, type CollectionDraft, type ShortcutDraft } from "@/features/restaurant/storefrontApi";
 import { errorMessage } from "@/services/apiClient";
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -52,8 +53,11 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
   const [saveTheme] = useSaveStorefrontThemeMutation();
   const [saveBanners] = useSaveStorefrontBannersMutation();
   const [saveShortcuts] = useSaveStorefrontShortcutsMutation();
+  const [saveMap] = useSaveStorefrontMapMutation();
+  const [mapStyle, setMapStyle] = useState(initial.map_style_key ?? "");
+  const [mapPinsThemed, setMapPinsThemed] = useState(initial.map_pins_themed);
   const [saveCollections] = useSaveStorefrontCollectionsMutation();
-  const dirty = !same(banners, saved.banners) || interval !== saved.banner_interval_ms || !same(shortcuts, saved.shortcuts) || !same(collections, saved.collections) || !same(theme, saved.theme);
+  const dirty = !same(banners, saved.banners) || interval !== saved.banner_interval_ms || !same(shortcuts, saved.shortcuts) || mapStyle !== (saved.map_style_key ?? "") || mapPinsThemed !== saved.map_pins_themed || !same(collections, saved.collections) || !same(theme, saved.theme);
   const blocker = useBlocker(dirty || uploads > 0);
   useEffect(() => {
     if (!dirty && !uploads) return;
@@ -193,6 +197,28 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
           <Save disabled={off || collections.some((c) => !c.title.trim()) || emptyShown.length > 0} busy={busy === "Collections"} onClick={() => void save("Collections", async () => { const result = await saveCollections(collections).unwrap(); setCollections(result.collections); setSaved((s) => ({ ...s, collections: result.collections })); })} />
           </fieldset>
         </SettingsCard>
+        <SettingsCard id="storefront-map" title="Delivery map" subtitle="The map a customer watches their delivery on.">
+          <fieldset disabled={!!busy} className="min-w-0 space-y-4">
+            {initial.map_styles.length > 0 ? (
+              <Field label="Map style"><select className="field" value={mapStyle} onChange={(e) => setMapStyle(e.target.value)}>
+                <option value="">The platform&apos;s map</option>
+                {initial.map_styles.map((style) => <option key={style.key} value={style.key}>{style.label}</option>)}
+              </select></Field>
+            ) : (
+              /* Google applies a map style by Map ID, set up once in the Cloud
+                 console; until the platform has done that there is nothing to
+                 choose between, and a list of one would only mislead. */
+              <p className="note">The roads-and-water colours come from Zenoeats. Ask us to set up map styles if you want your own.</p>
+            )}
+            <Toggle label="Use my palette for the map pins" checked={mapPinsThemed} onChange={setMapPinsThemed} />
+            <p className="field-hint">Off keeps the Zenoeats pins, which is the safer choice if your brand colour is close to the colour of a road.</p>
+            <MapPinsPreview theme={theme} themed={mapPinsThemed} />
+            <Save disabled={off} busy={busy === "Delivery map"} onClick={() => void save("Delivery map", async () => {
+              const result = await saveMap({ map_style_key: mapStyle || null, map_pins_themed: mapPinsThemed }).unwrap();
+              setSaved((s) => ({ ...s, map_style_key: result.map_style_key, map_pins_themed: result.map_pins_themed }));
+            })} />
+          </fieldset>
+        </SettingsCard>
         <SettingsCard id="storefront-brand" title="Brand" subtitle="Choose a palette and font pairing, or keep the Zenoeats default.">
           <fieldset disabled={!!busy} className="min-w-0 space-y-4">
           <Field label="Palette"><select className="field" value={theme === null ? "default" : PALETTES.find((p) => same({ ...p.theme, font_pair: theme.font_pair }, theme))?.name ?? "custom"} onChange={(e) => setTheme(e.target.value === "default" ? null : { ...(PALETTES.find((p) => p.name === e.target.value)?.theme ?? chosenTheme), font_pair: chosenTheme.font_pair })}><option value="default">Zenoeats default</option>{PALETTES.map((p) => <option key={p.name}>{p.name}</option>)}<option value="custom">Custom</option></select></Field>
@@ -224,6 +250,27 @@ function StorefrontEditor({ initial }: { initial: StorefrontSettings }) {
       </aside>
     </div>
   </div>;
+}
+
+/** The three pins as the customer's map draws them, built by the same
+ *  function the map uses so the preview cannot drift from it. */
+function MapPinsPreview({ theme, themed }: { theme: StorefrontTheme | null; themed: boolean }) {
+  const pins = mapPins(theme, themed);
+  return (
+    <div className="flex flex-wrap items-center gap-5 rounded-field border border-hairline bg-[#EDEFE9] p-4">
+      {(["restaurant", "home", "driver"] as const).map((kind) => (
+        <span key={kind} className="flex items-center gap-2 text-caption">
+          <span
+            aria-hidden="true"
+            ref={(node) => {
+              if (node) node.replaceChildren(markerElement(kind, pins));
+            }}
+          />
+          {kind === "restaurant" ? "You" : kind === "home" ? "The customer" : "The driver"}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="my-3 block min-w-0"><span className="label mb-2 block">{label}</span>{children}</label>; }

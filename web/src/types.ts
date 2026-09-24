@@ -129,6 +129,8 @@ export type Portal = {
    *  the Map ID its markers need. Null when there is no map to show. */
   maps_browser_key: string | null;
   maps_map_id: string | null;
+  /** Whether the map's pins take the restaurant's palette. */
+  map_pins_themed?: boolean;
 };
 
 /** Who is ordering, as the server sees them. A guest is a real identity for

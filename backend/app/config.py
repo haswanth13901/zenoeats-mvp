@@ -176,6 +176,15 @@ class Settings(BaseSettings):
     # A Map ID from the Google Cloud console, which the markers need.
     # DEMO_MAP_ID works for development only.
     GOOGLE_MAPS_MAP_ID: str = "DEMO_MAP_ID"
+    # The map styles a restaurant may choose between, as JSON:
+    #   [{"key": "dark", "label": "Dark", "map_id": "a1b2c3"}]
+    #
+    # Each is a style created once in the Google Cloud console and attached
+    # to its own Map ID; Google applies it server-side, which is the only way
+    # to recolour the tiles while Advanced Markers are in use. Empty -- the
+    # ordinary case -- means every restaurant gets GOOGLE_MAPS_MAP_ID and the
+    # portal offers no choice rather than a list of one.
+    GOOGLE_MAPS_MAP_STYLES: str = ""
     # A driver's position older than this is not shown: a phone that stopped
     # reporting must not look like a driver parked on the road.
     DRIVER_LOCATION_STALE_SECONDS: int = 120
