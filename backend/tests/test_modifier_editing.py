@@ -28,6 +28,7 @@ class FakeRow:
         self.id = uuid.uuid4()
         self.name = name
         self.price_delta_minor = price_delta_minor
+        self.calories_delta = None
         self.deleted_at = None
         self.group_id = None
         self.item_type_id = None

@@ -317,6 +317,7 @@ class FakeItem:
         self.tax_exempt = False
         self.image_path = image_path
         self.price_delta_minor = 0
+        self.calories_delta = None
         self.deleted_at = None
 
 

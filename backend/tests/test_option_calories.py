@@ -23,6 +23,20 @@ from tests.test_storefront import tenants  # noqa: F401
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture(autouse=True)
+def clear_groups(tenants):
+    """The storefront fixture knows nothing about modifier groups, and a
+    restaurant cannot be deleted while one still points at it."""
+    yield
+    from sqlalchemy import text
+
+    for rid, _, _ in tenants:
+        with tenant_session(rid) as db:
+            for table in ("item_modifier_groups", "item_included_options",
+                          "modifier_group_item_types", "modifier_options", "modifier_groups"):
+                db.execute(text(f"DELETE FROM {table} WHERE restaurant_id = :r"), {"r": rid})
+
+
 def _group(db, rid, *options):
     return create_modifier_group(
         ModifierGroupIn(name="Size", selection_type="SINGLE", is_required=True,
