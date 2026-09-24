@@ -20,7 +20,7 @@ import { useOpenCart } from "@/features/cart/useOpenCart";
 import { usePortalQuery, usePublicMenuQuery } from "@/features/storefront/storefrontApi";
 import { errorMessage } from "@/services/apiClient";
 import { mealHours, money } from "@/utils/format";
-import { kcal } from "@/features/cart/calories";
+import { canAddCalories, kcal } from "@/features/cart/calories";
 import type { Combo, Item, Meal } from "@/types";
 
 /** Every meal period, rather than one of them. */
@@ -497,9 +497,12 @@ export function MenuCard({
             {/* Only where the restaurant has stated one. No figure is not a
                 figure of zero, and a menu must not read as if it were. */}
             {kcal(item.calories) && (
-              <span className="tnum whitespace-nowrap text-caption text-[rgb(var(--ze-menu-muted))]">
+              <span className="whitespace-nowrap text-caption text-[rgb(var(--ze-menu-muted))]">
                 {" · "}
-                {kcal(item.calories)}
+                {/* "from" once a size or an extra can raise it: stating 310
+                    flat would be wrong for everyone who picks the large. */}
+                {canAddCalories(item) ? "from " : ""}
+                <span className="tnum">{kcal(item.calories)}</span>
               </span>
             )}
           </span>

@@ -408,6 +408,12 @@ class ModifierGroup(Base, TimestampMixin):
 
 class ModifierOption(Base, TimestampMixin):
     __tablename__ = "modifier_options"
+    __table_args__ = (
+        CheckConstraint(
+            "calories_delta IS NULL OR calories_delta BETWEEN -20000 AND 20000",
+            name="ck_option_calories_delta_sane",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     restaurant_id: Mapped[uuid.UUID] = mapped_column(
@@ -420,6 +426,11 @@ class ModifierOption(Base, TimestampMixin):
     # May be negative: "no cheese -$0.50" is a legitimate decrement.
     # This is the documented exception to the non-negative money constraint.
     price_delta_minor: Mapped[int] = mapped_column(nullable=False, default=0)
+    # What this choice adds to the item's calories, kcal. Negative for a
+    # choice that takes something off. Null is "no change stated", counted as
+    # none -- an item's null means the figure itself is unknown, which is a
+    # different claim and is why these two are read differently.
+    calories_delta: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # A storage key, never a URL, the same as an item's. See services/images.
     image_path: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -367,6 +367,8 @@ export type ModifierGroupSummary = {
     id: string;
     name: string;
     price_delta_minor: number;
+    /** kcal this choice adds, or null where no change is stated. */
+    calories_delta: number | null;
     image_path: string | null;
     image_url: string | null;
   }[];
@@ -894,6 +896,8 @@ export const restaurantApi = api.injectEndpoints({
         groupId: string;
         name: string;
         price_delta_minor: number;
+        /** kcal this choice adds, or null for "no change stated". */
+        calories_delta?: number | null;
         image_path?: string | null;
       }
     >({
@@ -911,7 +915,12 @@ export const restaurantApi = api.injectEndpoints({
       unknown,
       {
         optionId: string;
-        changes: { name?: string; price_delta_minor?: number; image_path?: string | null };
+        changes: {
+          name?: string;
+          price_delta_minor?: number;
+          calories_delta?: number | null;
+          image_path?: string | null;
+        };
       }
     >({
       query: ({ optionId, changes }) => ({

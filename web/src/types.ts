@@ -4,6 +4,9 @@ export type Option = {
   id: string;
   name: string;
   price_delta_minor: number;
+  /** What choosing this adds to the item's calories, or null where the
+   *  restaurant stated no change. Negative takes calories off. */
+  calories_delta?: number | null;
   is_available: boolean;
   /** A thumbnail beside the choice, or null when the option has none. */
   image_url: string | null;
