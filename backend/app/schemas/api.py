@@ -178,7 +178,13 @@ class PortalOut(BaseModel):
     # The live delivery map. The key is a browser key -- public by design and
     # restricted to this site in Google's console. Null when there is no map.
     maps_browser_key: str | None = None
-    maps_map_id: str | None = None
+    # How the map colours itself: one of the styles the storefront can draw,
+    # or null for Google's own. See services/maps.py.
+    map_style_key: str | None = None
+    # Whether the pins on that map take the restaurant's palette. Off leaves
+    # them in the platform's colours, which a brand the colour of a road is
+    # better served by.
+    map_pins_themed: bool = True
 
 
 class MenuOut(BaseModel):

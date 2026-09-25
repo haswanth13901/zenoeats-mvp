@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/common/icons";
 import {
   loadGoogleMaps,
-  type AdvancedMarker,
   type GoogleMap,
   type LatLngLiteral,
+  type MapMarker,
   type MapsLibraries,
+  type MarkerIcon,
 } from "@/services/googleMaps";
+import { contrast, DEFAULT_PINS, type MapPins } from "@/features/storefront/theme";
+import type { MapStyle } from "@/features/storefront/mapStyles";
 import type { MapPoint, Tracking, TrackingStep } from "@/types";
 
 /** A driver position older than this is shown as delayed: kept on the map as
@@ -28,16 +31,20 @@ export function DeliveryTracking({
   status,
   destination,
   mapsKey,
-  mapId,
   restaurantName,
+  pins = DEFAULT_PINS,
+  style = null,
 }: {
   tracking: Tracking;
   status: string;
   /** The address as the customer typed it, from the order. */
   destination: string | null;
   mapsKey: string | null;
-  mapId: string | null;
   restaurantName: string;
+  /** The colours of the three pins, from the restaurant's palette. */
+  pins?: MapPins;
+  /** The map's own colours, or null for Google's. */
+  style?: MapStyle | null;
 }) {
   const finished = ["COMPLETED", "CANCELLED", "EXPIRED"].includes(status);
   const onTheRoad = status === "OUT_FOR_DELIVERY";
@@ -59,17 +66,18 @@ export function DeliveryTracking({
         <Headline tracking={tracking} status={status} stale={stale} online={online} />
       </div>
 
-      {!finished && (!mapsKey || !mapId || !(tracking.restaurant || tracking.destination)) && (
+      {!finished && (!mapsKey || !(tracking.restaurant || tracking.destination)) && (
         <div className="flex min-h-[260px] items-center justify-center border-t border-hairline bg-brickSoft px-6 text-center text-sm text-muted" role="status">
           Live map is unavailable. Your order status and delivery details will keep updating here.
         </div>
       )}
-      {!finished && mapsKey && mapId && (tracking.restaurant || tracking.destination) && (
+      {!finished && mapsKey && (tracking.restaurant || tracking.destination) && (
         <TrackingMap
           tracking={tracking}
           mapsKey={mapsKey}
-          mapId={mapId}
           restaurantName={restaurantName}
+          pins={pins}
+          style={style}
         />
       )}
 
@@ -249,24 +257,60 @@ function Freshness({ age, stale, online }: { age: number | null; stale: boolean;
 
 // --------------------------------------------------------------------- map
 
-function markerElement(kind: "restaurant" | "home" | "driver"): HTMLElement {
-  const el = document.createElement("div");
-  if (kind === "driver") {
-    // A forest disc with an arrow that turns with the driver's heading.
-    el.className =
-      "flex h-9 w-9 items-center justify-center rounded-full border-[3px] border-white bg-brick text-white shadow-[0_4px_14px_#12160B40] transition-transform duration-500";
-    el.innerHTML =
-      '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 3l7 18-7-4-7 4 7-18z"/></svg>';
-  } else {
-    el.className = `flex h-8 w-8 items-center justify-center rounded-full border-2 border-white shadow-[0_3px_10px_#1F1B1640] ${
-      kind === "home" ? "bg-gold text-[#1D3326]" : "bg-surface text-brick"
-    }`;
-    el.innerHTML =
-      kind === "home"
-        ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 11l8-7 8 7v9H4z"/></svg>'
-        : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 9h18L19 3H5L3 9Zm1 0v12h16V9"/></svg>';
-  }
-  return el;
+const PIN_ART = {
+  restaurant: '<path d="M3 9h18L19 3H5L3 9Zm1 0v12h16V9" fill="none" stroke="INK" stroke-width="2"/>',
+  home: '<path d="M4 11l8-7 8 7v9H4z" fill="none" stroke="INK" stroke-width="2"/>',
+  driver: '<path d="M12 3l7 18-7-4-7 4 7-18z" fill="INK"/>',
+};
+
+/**
+ * One pin, as an SVG the map draws.
+ *
+ * An image rather than an element, because the map now colours itself from a
+ * style array and therefore cannot use Advanced Markers, which are the ones
+ * that take HTML (services/googleMaps.ts says why). Its colours are baked in
+ * here: nothing about this image is inside the page, so a class or a CSS
+ * variable would resolve against nothing.
+ */
+export function markerSvg(
+  kind: "restaurant" | "home" | "driver",
+  pins: MapPins = DEFAULT_PINS,
+  heading = 0,
+): string {
+  const background = kind === "driver" ? pins.driver : kind === "home" ? pins.home : pins.restaurant;
+  const ink = kind === "driver" ? pins.onDriver : readableOn(background);
+  const size = kind === "driver" ? 40 : 36;
+  const art = PIN_ART[kind].replace(/INK/g, ink);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 40 40">` +
+    `<circle cx="20" cy="20" r="${kind === "driver" ? 15 : 13}" fill="${background}" ` +
+    `stroke="#FFFFFF" stroke-width="${kind === "driver" ? 3 : 2}"/>` +
+    `<g transform="rotate(${Math.round(heading)} 20 20) translate(8 8) ` +
+    `scale(${kind === "driver" ? 1 : 0.9})" stroke-linejoin="round">${art}</g>` +
+    "</svg>";
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+/** The icon object the map takes: the drawing, its size, and the point on it
+ *  that sits over the coordinates -- its middle, for a disc. */
+function markerIcon(
+  libs: MapsLibraries,
+  kind: "restaurant" | "home" | "driver",
+  pins: MapPins,
+  heading = 0,
+): MarkerIcon {
+  const size = kind === "driver" ? 40 : 36;
+  return {
+    url: markerSvg(kind, pins, heading),
+    scaledSize: new libs.Size(size, size),
+    anchor: new libs.Point(size / 2, size / 2),
+  };
+}
+
+/** Ink that reads on the given background: the darker of the two candidates
+ *  wins on a pale pin, the paler on a dark one. */
+function readableOn(background: string): string {
+  return contrast(background, "#1D1B16") >= contrast(background, "#FFFFFF") ? "#1D1B16" : "#FFFFFF";
 }
 
 const toLatLng = (p: MapPoint): LatLngLiteral => ({ lat: p.latitude, lng: p.longitude });
@@ -274,13 +318,15 @@ const toLatLng = (p: MapPoint): LatLngLiteral => ({ lat: p.latitude, lng: p.long
 function TrackingMap({
   tracking,
   mapsKey,
-  mapId,
   restaurantName,
+  pins,
+  style,
 }: {
   tracking: Tracking;
   mapsKey: string;
-  mapId: string | null;
   restaurantName: string;
+  pins: MapPins;
+  style: MapStyle | null;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -290,7 +336,7 @@ function TrackingMap({
   // again really does try again.
   const [attempt, setAttempt] = useState(0);
   const map = useRef<GoogleMap | null>(null);
-  const markers = useRef<{ restaurant?: AdvancedMarker; home?: AdvancedMarker; driver?: AdvancedMarker }>({});
+  const markers = useRef<{ restaurant?: MapMarker; home?: MapMarker; driver?: MapMarker }>({});
   // Framed once when the map opens and once when the driver first appears.
   // After that the customer's own panning and zooming is left alone.
   const framedWithDriver = useRef(false);
@@ -318,25 +364,28 @@ function TrackingMap({
     map.current = new libs.Map(container.current, {
       center: toLatLng(center),
       zoom: 14,
-      mapId: mapId ?? undefined,
+      // The restaurant's own colours. Sent as a style array rather than a
+      // Map ID, which is what lets it be chosen in the portal instead of in
+      // Google's console -- see features/storefront/mapStyles.ts.
+      styles: style ?? undefined,
       disableDefaultUI: true,
       zoomControl: false,
       gestureHandling: "cooperative",
       clickableIcons: false,
     });
     if (tracking.restaurant) {
-      markers.current.restaurant = new libs.AdvancedMarkerElement({
+      markers.current.restaurant = new libs.Marker({
         map: map.current,
         position: toLatLng(tracking.restaurant),
-        content: markerElement("restaurant"),
+        icon: markerIcon(libs, "restaurant", pins),
         title: restaurantName,
       });
     }
     if (tracking.destination) {
-      markers.current.home = new libs.AdvancedMarkerElement({
+      markers.current.home = new libs.Marker({
         map: map.current,
         position: toLatLng(tracking.destination),
-        content: markerElement("home"),
+        icon: markerIcon(libs, "home", pins),
         title: "Your address",
       });
     }
@@ -347,14 +396,15 @@ function TrackingMap({
     } catch { setFailed(true); }
     return () => {
       if (window.gm_authFailure === authFailed) window.gm_authFailure = previousAuthFailure;
-      Object.values(markers.current).forEach(marker => { if (marker) marker.map = null; });
+      Object.values(markers.current).forEach(marker => { if (marker) marker.setMap(null); });
       markers.current = {};
       map.current = null;
       framedWithDriver.current = false;
     };
-    // Coordinates are immutable for an order; a poll must not reset the viewport.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [libs, mapId, restaurantName, attempt]);
+    // Coordinates are immutable for an order; a poll must not reset the
+    // viewport. The pins are rebuilt when the palette changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libs, restaurantName, attempt, pins, style]);
 
   // The driver: placed on first sight, then glided to each new position so
   // the dot travels rather than jumping every five seconds.
@@ -364,42 +414,44 @@ function TrackingMap({
     const existing = markers.current.driver;
 
     if (!location) {
-      if (existing) existing.map = null;
+      if (existing) existing.setMap(null);
       markers.current.driver = undefined;
       return;
     }
 
     const target = toLatLng(location);
     if (!existing) {
-      markers.current.driver = new libs.AdvancedMarkerElement({
+      markers.current.driver = new libs.Marker({
         map: map.current,
         position: target,
-        content: markerElement("driver"),
+        icon: markerIcon(libs, "driver", pins),
         title: "Your driver",
         zIndex: 10,
       });
     } else if (reduceMotion()) {
       if (glide.current) cancelAnimationFrame(glide.current);
-      existing.position = target;
+      existing.setPosition(target);
     } else {
-      const from = existing.position ?? target;
+      const at = existing.getPosition();
+      const from = at ? { lat: at.lat(), lng: at.lng() } : target;
       const started = performance.now();
       const duration = 250;
       if (glide.current) cancelAnimationFrame(glide.current);
       const step = (now: number) => {
         const t = Math.min(1, (now - started) / duration);
         const eased = t * (2 - t);
-        existing.position = {
+        existing.setPosition({
           lat: from.lat + (target.lat - from.lat) * eased,
           lng: from.lng + (target.lng - from.lng) * eased,
-        };
+        });
         if (t < 1) glide.current = requestAnimationFrame(step);
       };
       glide.current = requestAnimationFrame(step);
     }
 
-    const content = markers.current.driver!.content;
-    content.style.transform = location.heading !== null ? `rotate(${location.heading}deg)` : "";
+    // Redrawn rather than turned: the pin is an image the map owns, so the
+    // heading has to be part of the drawing.
+    markers.current.driver!.setIcon(markerIcon(libs, "driver", pins, location.heading ?? 0));
 
     if (!framedWithDriver.current) {
       framedWithDriver.current = true;
@@ -411,7 +463,7 @@ function TrackingMap({
     }
     // Do not override the customer's panning; Recenter is an explicit action.
     return () => { if (glide.current) cancelAnimationFrame(glide.current); };
-  }, [libs, location, tracking.destination]);
+  }, [libs, location, tracking.destination, pins]);
 
   useEffect(() => () => {
     if (glide.current) cancelAnimationFrame(glide.current);

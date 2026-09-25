@@ -83,6 +83,13 @@ class Restaurant(Base, TimestampMixin):
         String(32), nullable=False, default="default", server_default="default"
     )
     banner_interval_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=5000, server_default="5000")
+    # The delivery map on a customer's order page. The style names one the
+    # platform configured (null is the platform's own); the pins follow the
+    # restaurant's palette unless it prefers the plain ones.
+    map_style_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    map_pins_themed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
 
     # Branding
     tagline: Mapped[str | None] = mapped_column(String(200), nullable=True)

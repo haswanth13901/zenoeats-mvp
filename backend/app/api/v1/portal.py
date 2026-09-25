@@ -49,7 +49,8 @@ def get_portal(
         stripe_account_id=account.stripe_account_id if account else None,
         delivery_offered=delivery.offered(restaurant),
         maps_browser_key=settings.GOOGLE_MAPS_BROWSER_KEY or None,
-        maps_map_id=settings.GOOGLE_MAPS_MAP_ID if settings.GOOGLE_MAPS_BROWSER_KEY else None,
+        map_style_key=restaurant.map_style_key,
+        map_pins_themed=restaurant.map_pins_themed,
     )
 
 

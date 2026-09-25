@@ -54,6 +54,18 @@ class ThemePatch(StorefrontInput):
     banner_interval_ms: int = Field(default=5000, ge=2000, le=10000, strict=True)
 
 
+class MapPatch(StorefrontInput):
+    """The delivery map's presentation. Both fields are optional and only the
+    ones sent are applied, so choosing a style cannot silently turn the
+    themed pins back on."""
+
+    # One of the keys the platform configured, or null for its own map. An
+    # unknown key is refused here rather than falling back quietly: the
+    # portal only ever sends a key it was offered.
+    map_style_key: str | None = Field(default=None, max_length=32)
+    map_pins_themed: bool | None = None
+
+
 class CategoryPatch(StorefrontInput):
     image_path: str | None = Field(default=None, max_length=500)
     show_in_shortcuts: bool = True

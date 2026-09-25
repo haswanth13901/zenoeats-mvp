@@ -173,9 +173,9 @@ class Settings(BaseSettings):
     # Google Cloud console to the Maps JavaScript API and to your storefront
     # domains. Empty means the page shows the timeline without a map.
     GOOGLE_MAPS_BROWSER_KEY: str = ""
-    # A Map ID from the Google Cloud console, which the markers need.
-    # DEMO_MAP_ID works for development only.
-    GOOGLE_MAPS_MAP_ID: str = "DEMO_MAP_ID"
+    # No Map ID: the tracking map colours itself from a style the restaurant
+    # chose, and Google ignores such a style whenever a Map ID is in use.
+    # See services/maps.py.
     # A driver's position older than this is not shown: a phone that stopped
     # reporting must not look like a driver parked on the road.
     DRIVER_LOCATION_STALE_SECONDS: int = 120

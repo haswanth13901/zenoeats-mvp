@@ -8,6 +8,8 @@ import { CustomerHeader } from "@/features/storefront/components/CustomerHeader"
 import { errorMessage } from "@/services/apiClient";
 import { money } from "@/utils/format";
 import { takeOrderToken } from "@/features/storefront/orderToken";
+import { mapPins } from "@/features/storefront/theme";
+import { isMapStyleKey, mapStyle } from "@/features/storefront/mapStyles";
 import type { OrderLine } from "@/types";
 
 const STATUS_COPY: Record<string, { title: string; detail: string }> = {
@@ -168,8 +170,16 @@ export function OrderPage() {
               status={order.status}
               destination={order.delivery_address}
               mapsKey={portal.data?.maps_browser_key ?? null}
-              mapId={portal.data?.maps_map_id ?? null}
+
               restaurantName={portal.data?.name ?? "The restaurant"}
+              pins={mapPins(
+                portal.data?.storefront?.theme ?? null,
+                portal.data?.map_pins_themed ?? true,
+              )}
+              style={mapStyle(
+                isMapStyleKey(portal.data?.map_style_key) ? portal.data.map_style_key : null,
+                portal.data?.storefront?.theme ?? null,
+              )}
             />
           )}
 
