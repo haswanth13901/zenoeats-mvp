@@ -622,7 +622,7 @@ function CartBar({ currency, orderable }: { currency: string; orderable: boolean
         >
           <div className="mx-auto max-w-[720px]">
             <Link
-              to="/checkout"
+              to="/cart"
               aria-disabled={!orderable}
               tabIndex={orderable ? undefined : -1}
               className={`btn-primary min-h-[56px] w-full justify-between rounded-full px-6 ${

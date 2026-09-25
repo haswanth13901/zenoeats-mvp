@@ -138,7 +138,7 @@ export function ProfilePage() {
             ))}
             {cartCount > 0 ? (
               <Link
-                to="/checkout"
+                to="/cart"
                 className="flex min-h-[44px] items-center gap-3 rounded-[12px] px-4 text-sm font-[650] text-ink hover:bg-brickSoft/60 lg:min-h-[52px] lg:px-[18px]"
               >
                 <Icon name="arrow" className="h-5 w-5" />
@@ -463,7 +463,7 @@ function SavedItems({ currency, orderable }: { currency: string; orderable: bool
         {added ? `${added} added to your order.` : ""}
       </p>
       {cartCount > 0 && (
-        <Link to="/checkout" className="btn-primary mb-5 w-full justify-between">
+        <Link to="/cart" className="btn-primary mb-5 w-full justify-between">
           <span className="flex items-center gap-3">
             <Icon name="bag" />
             Review order
