@@ -2,6 +2,7 @@ import { useState } from "react";
 import { MenuImage } from "@/components/common/MenuImage";
 import { QuantityStepper, Sheet } from "@/components/common/Sheet";
 import { money, signedMoney } from "@/utils/format";
+import { canAddCalories, comboCalories, kcal, selectionCalories } from "@/features/cart/calories";
 import type { Combo, Item, Option } from "@/types";
 import {
   defaultSelection,
@@ -103,6 +104,7 @@ export function ComboSheet({
 
   const ready = emptySlots.length === 0 && unanswered.length === 0;
 
+  const total = comboCalories(filled.map(({ choice }) => choice));
   const helper =
     emptySlots.length > 0
       ? `Still to choose: ${emptySlots.join(", ")}.`
@@ -131,6 +133,15 @@ export function ComboSheet({
       onClose={onClose}
       footer={
         <>
+          {/* The deal as it now stands: only once every slot's choice states
+              a figure, because a total missing one dish is a smaller number
+              presented as the whole meal. */}
+          {total !== null && (
+            <div className="mb-[13px] flex items-baseline justify-between text-caption">
+              <span className="text-muted">Calories, as chosen</span>
+              <span className="tnum font-[650]">{kcal(total)}</span>
+            </div>
+          )}
           {discount > 0 && (
             <div className="mb-[13px] flex items-baseline justify-between text-caption">
               <span className="text-muted">{money(itemsSubtotal, currency)} separately</span>
@@ -209,6 +220,15 @@ export function ComboSheet({
                     <span className="min-w-0 flex-1 text-sm">
                       {item.name}
                       {!item.is_available && <span className="text-danger"> · Sold out</span>}
+                      {/* Once this one is chosen its own sizes are settled,
+                          so it states a figure rather than a floor. */}
+                      {kcal(item.calories) && (
+                        <span className="block text-caption text-muted">
+                          {checked
+                            ? kcal(selectionCalories(item, choice.selected))
+                            : `${canAddCalories(item) ? "from " : ""}${kcal(item.calories)}`}
+                        </span>
+                      )}
                     </span>
                     <span className="tnum ml-auto whitespace-nowrap text-caption">
                       {money(item.base_price_minor, currency)}

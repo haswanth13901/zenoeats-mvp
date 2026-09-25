@@ -959,6 +959,9 @@ class ItemUpdateIn(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=180)
     description: str | None = None
+    # Null takes the figure off again, so it has to be told apart from the
+    # field being left out -- like description and image_path below.
+    calories: int | None = Field(default=None, ge=0, le=20000)
     base_price_minor: int | None = Field(default=None, ge=0)
     tax_exempt: bool | None = None
     item_type_id: UUID | None = None
@@ -980,6 +983,9 @@ class ItemIn(BaseModel):
     name: str = Field(max_length=180)
     item_type_id: UUID
     description: str | None = None
+    # kcal, as the restaurant states it. Null is "not stated"; a combo adds
+    # up what its chosen items state.
+    calories: int | None = Field(default=None, ge=0, le=20000)
     base_price_minor: int = Field(ge=0)
     # Left out of the tax on every order it is part of.
     tax_exempt: bool = False
@@ -1059,6 +1065,9 @@ class OptionIn(BaseModel):
 
     name: str = Field(max_length=180)
     price_delta_minor: int = 0
+    # What this choice adds to the item's calories. Negative takes them off;
+    # null states no change, which is counted as none.
+    calories_delta: int | None = Field(default=None, ge=-20000, le=20000)
     sort_order: int = 0
     # A key returned by POST /images?kind=options.
     image_path: str | None = Field(default=None, max_length=200)
@@ -1092,6 +1101,9 @@ class ModifierOptionUpdateIn(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=180)
     price_delta_minor: int | None = None
+    # Null here really is "no change stated", so it is applied rather than
+    # refused -- unlike price_delta_minor, which every option must have.
+    calories_delta: int | None = Field(default=None, ge=-20000, le=20000)
     # A key returned by POST /images?kind=options, or null to take it off.
     image_path: str | None = Field(default=None, max_length=200)
 
@@ -1741,6 +1753,7 @@ def create_modifier_group(
             ModifierOption(
                 restaurant_id=restaurant.id, group_id=group.id, name=option_name,
                 price_delta_minor=option.price_delta_minor,
+                calories_delta=option.calories_delta,
                 sort_order=option.sort_order,
                 image_path=images.accept(option.image_path, restaurant.id, ImageKind.OPTIONS),
             )
@@ -1795,6 +1808,7 @@ def list_modifier_groups(
                 {
                     "id": str(o.id), "name": o.name,
                     "price_delta_minor": o.price_delta_minor,
+                    "calories_delta": o.calories_delta,
                     # The key is what an edit sends back unchanged; the URL is
                     # what the thumbnail shows.
                     "image_path": o.image_path,
@@ -1976,6 +1990,7 @@ def create_modifier_option(
     option = ModifierOption(
         restaurant_id=restaurant.id, group_id=group.id, name=name,
         price_delta_minor=body.price_delta_minor,
+        calories_delta=body.calories_delta,
         sort_order=(highest + 1) if highest is not None else 0,
         image_path=images.accept(body.image_path, restaurant.id, ImageKind.OPTIONS),
     )
@@ -2012,6 +2027,10 @@ def update_modifier_option(
             raise errors.validation_error("A price change cannot be blank. Use 0 for none.")
         option.price_delta_minor = sent["price_delta_minor"]
 
+    # Null is a real value here: it takes a stated change back off.
+    if "calories_delta" in sent:
+        option.calories_delta = sent["calories_delta"]
+
     if "image_path" in sent:
         previous = option.image_path
         option.image_path = images.accept(sent["image_path"], restaurant.id, ImageKind.OPTIONS)
@@ -2022,6 +2041,7 @@ def update_modifier_option(
         "id": str(option.id),
         "name": option.name,
         "price_delta_minor": option.price_delta_minor,
+        "calories_delta": option.calories_delta,
     }
 
 
@@ -2567,6 +2587,7 @@ def list_items(
             "name": item.name,
             "item_type_id": str(item.item_type_id),
             "description": item.description,
+            "calories": item.calories,
             "base_price_minor": item.base_price_minor,
             "currency": item.currency,
             "is_available": item.is_available,
@@ -2599,6 +2620,7 @@ def create_item(
     item = Item(
         restaurant_id=restaurant.id, name=name, item_type_id=item_type.id,
         description=(body.description or "").strip() or None,
+        calories=body.calories,
         base_price_minor=body.base_price_minor, tax_exempt=body.tax_exempt,
         currency=restaurant.currency, sort_order=body.sort_order,
         image_path=images.accept(body.image_path, restaurant.id, ImageKind.ITEMS),
@@ -2657,6 +2679,9 @@ def update_item(
         description = (sent["description"] or "").strip()
         item.description = description or None
 
+    if "calories" in sent:
+        item.calories = sent["calories"]
+
     if "base_price_minor" in sent:
         item.base_price_minor = sent["base_price_minor"]
 
@@ -2699,6 +2724,7 @@ def update_item(
         "name": item.name,
         "item_type_id": str(item.item_type_id),
         "description": item.description,
+        "calories": item.calories,
         "base_price_minor": item.base_price_minor,
         "tax_exempt": item.tax_exempt,
     }

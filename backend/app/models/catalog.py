@@ -259,6 +259,9 @@ class Item(Base, TimestampMixin):
     __tablename__ = "menu_items"
     __table_args__ = (
         CheckConstraint("base_price_minor >= 0", name="ck_item_price_non_negative"),
+        CheckConstraint(
+            "calories IS NULL OR calories BETWEEN 0 AND 20000", name="ck_item_calories_sane"
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -270,6 +273,9 @@ class Item(Base, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("item_types.id"), nullable=False, index=True
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Energy per item as the restaurant states it, kcal. Null means it has
+    # not said -- never zero, which would claim the dish has none.
+    calories: Mapped[int | None] = mapped_column(Integer, nullable=True)
     base_price_minor: Mapped[int] = mapped_column(nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -402,6 +408,12 @@ class ModifierGroup(Base, TimestampMixin):
 
 class ModifierOption(Base, TimestampMixin):
     __tablename__ = "modifier_options"
+    __table_args__ = (
+        CheckConstraint(
+            "calories_delta IS NULL OR calories_delta BETWEEN -20000 AND 20000",
+            name="ck_option_calories_delta_sane",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     restaurant_id: Mapped[uuid.UUID] = mapped_column(
@@ -414,6 +426,11 @@ class ModifierOption(Base, TimestampMixin):
     # May be negative: "no cheese -$0.50" is a legitimate decrement.
     # This is the documented exception to the non-negative money constraint.
     price_delta_minor: Mapped[int] = mapped_column(nullable=False, default=0)
+    # What this choice adds to the item's calories, kcal. Negative for a
+    # choice that takes something off. Null is "no change stated", counted as
+    # none -- an item's null means the figure itself is unknown, which is a
+    # different claim and is why these two are read differently.
+    calories_delta: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # A storage key, never a URL, the same as an item's. See services/images.
     image_path: Mapped[str | None] = mapped_column(Text, nullable=True)

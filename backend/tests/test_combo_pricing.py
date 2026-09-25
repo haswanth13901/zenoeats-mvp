@@ -129,6 +129,7 @@ class FakeItem:
         self.name = name
         self.item_type_id = item_type.id
         self.base_price_minor = price
+        self.calories = None
         self.currency = "USD"
         self.is_available = True
         self.tax_exempt = False

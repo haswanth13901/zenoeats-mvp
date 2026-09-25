@@ -11,6 +11,9 @@ class OptionOut(BaseModel):
     id: UUID
     name: str
     price_delta_minor: int
+    # What choosing this adds to the item's calories, or null where the
+    # restaurant has stated no change. Counted as none either way.
+    calories_delta: int | None = None
     is_available: bool
     # Where the browser loads the option's picture, or null when it has none.
     image_url: str | None = None
@@ -34,6 +37,9 @@ class ItemOut(BaseModel):
     # rather than needing a menu rebuild.
     item_type_id: UUID
     description: str | None
+    # kcal as the restaurant states it, or null where it has not. A combo's
+    # total is added up from the items chosen for it.
+    calories: int | None = None
     base_price_minor: int
     currency: str
     is_available: bool

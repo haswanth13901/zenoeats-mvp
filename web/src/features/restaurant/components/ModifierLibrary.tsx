@@ -20,7 +20,7 @@ import {
 } from "./ImagePicker";
 
 /** A row of the option editor, before it is worth sending. */
-type OptionDraft = { key: number; name: string; delta: string; image: ImageDraft };
+type OptionDraft = { key: number; name: string; delta: string; kcal: string; image: ImageDraft };
 
 /** Enough rows to show the shape of the thing without a click. */
 const BLANK_ROWS = 3;
@@ -31,7 +31,36 @@ const EXAMPLES = ["Lettuce", "Tomato", "Jalapenos"];
 /** Photo · name · price · action, aligned the same in the create form, the
  *  editor and the add-option row. Stacks the price under the name on a phone. */
 const OPTION_GRID =
-  "grid grid-cols-[38px_minmax(0,1fr)_48px] items-end gap-2.5 py-2 md:grid-cols-[38px_minmax(0,1fr)_100px_48px] lg:grid-cols-[44px_minmax(0,1fr)_140px_70px] lg:gap-3";
+  "grid grid-cols-[38px_minmax(0,1fr)_48px] items-end gap-2.5 py-2 md:grid-cols-[38px_minmax(0,1fr)_100px_90px_48px] lg:grid-cols-[44px_minmax(0,1fr)_140px_110px_70px] lg:gap-3";
+
+/**
+ * A typed calorie change: the number, null for "no change stated", or false
+ * for something that is neither. Negative is ordinary -- "no cheese" takes
+ * calories off exactly as it takes money off.
+ */
+function caloriesDeltaOf(typed: string): number | null | false {
+  const text = typed.trim();
+  if (!text) return null;
+  if (!/^-?\d{1,5}$/.test(text)) return false;
+  const value = Number(text);
+  return Math.abs(value) <= 20000 ? value : false;
+}
+
+/**
+ * Which options of a required group state a calorie change and which do not.
+ *
+ * Half a group is the dangerous state: the customer picking the size nobody
+ * filled in is shown a confident total that is simply wrong. Said in the
+ * builder, where it can be fixed.
+ */
+function halfStatedCalories(group: {
+  is_required: boolean;
+  options: { calories_delta?: number | null }[];
+}): boolean {
+  if (!group.is_required || group.options.length < 2) return false;
+  const stated = group.options.filter((o) => typeof o.calories_delta === "number").length;
+  return stated > 0 && stated < group.options.length;
+}
 
 /** Reusable modifier groups, shared across every item that opts into them. */
 export function ModifierLibrary({
@@ -58,7 +87,7 @@ export function ModifierLibrary({
   const keys = useRef(0);
   function blankRow(): OptionDraft {
     keys.current += 1;
-    return { key: keys.current, name: "", delta: "", image: NO_IMAGE };
+    return { key: keys.current, name: "", delta: "", kcal: "", image: NO_IMAGE };
   }
 
   const [options, setOptions] = useState<OptionDraft[]>(() =>
@@ -128,9 +157,15 @@ export function ModifierLibrary({
         );
         return;
       }
+      const kcalDelta = caloriesDeltaOf(option.kcal);
+      if (kcalDelta === false) {
+        onError(`Enter the calorie change for ${label} as a whole number, like 130 or -90.`);
+        return;
+      }
       parsed.push({
         name: label,
         price_delta_minor: minor,
+        calories_delta: kcalDelta,
         is_default: false,
         sort_order: parsed.length,
         image_path: option.image.path,
@@ -272,6 +307,14 @@ export function ModifierLibrary({
                   value={option.delta}
                   aria-label={`Price change for option ${index + 1}`}
                   onChange={(e) => setRow(option.key, { delta: e.target.value })}
+                />
+                <input
+                  className="field tnum col-start-2 md:col-start-auto"
+                  inputMode="numeric"
+                  placeholder="+kcal"
+                  value={option.kcal}
+                  aria-label={`Calorie change for option ${index + 1}`}
+                  onChange={(e) => setRow(option.key, { kcal: e.target.value })}
                 />
                 <button
                   type="button"
@@ -481,7 +524,7 @@ function GroupCard({
   );
 }
 
-type OptionEdit = { name: string; delta: string; image: ImageDraft };
+type OptionEdit = { name: string; delta: string; kcal: string; image: ImageDraft };
 
 type GroupDraft = {
   name: string;
@@ -497,6 +540,9 @@ function optionEdit(option: ModifierGroupSummary["options"][number]): OptionEdit
   return {
     name: option.name,
     delta: minorToDeltaInput(option.price_delta_minor),
+    kcal: option.calories_delta === null || option.calories_delta === undefined
+      ? ""
+      : String(option.calories_delta),
     image: { path: option.image_path, url: option.image_url },
   };
 }
@@ -583,6 +629,16 @@ function GroupEditor({
   const [deleteGroup] = useDeleteModifierGroupMutation();
   const [updateOption] = useUpdateModifierOptionMutation();
   const [deleteOption] = useDeleteModifierOptionMutation();
+  // As typed, not as saved: the warning has to follow what is on screen,
+  // and an option on its way out is no longer part of the group.
+  const draftOptionCalories = group.options
+    .filter((o) => !removed[o.id])
+    .map((o) => {
+      // A typed 0 is a stated change of none, not a blank: "|| null" would
+      // quietly call it unstated and hide the warning that matters.
+      const parsed = caloriesDeltaOf(draft.options[o.id]?.kcal ?? "");
+      return { calories_delta: typeof parsed === "number" ? parsed : null };
+    });
 
   // Options added while the form is open arrive through a refetch. Take only
   // the ones the draft has never seen, so edits in progress survive.
@@ -679,6 +735,7 @@ function GroupEditor({
         const changes: {
           name?: string;
           price_delta_minor?: number;
+          calories_delta?: number | null;
           image_path?: string | null;
         } = {};
         const optionName = edited.name.trim();
@@ -696,6 +753,15 @@ function GroupEditor({
           return;
         }
         if (minor !== option.price_delta_minor) changes.price_delta_minor = minor;
+
+        const kcalDelta = caloriesDeltaOf(edited.kcal);
+        if (kcalDelta === false) {
+          onError(
+            `Enter the calorie change for ${option.name} as a whole number, like 130 or -90.`,
+          );
+          return;
+        }
+        if (kcalDelta !== (option.calories_delta ?? null)) changes.calories_delta = kcalDelta;
 
         // Only when it changed: null means "take the photo off".
         if (edited.image.path !== option.image_path) changes.image_path = edited.image.path;
@@ -813,6 +879,15 @@ function GroupEditor({
           <fieldset>
             <legend className="mb-1 text-sm font-semibold">Options</legend>
             <ImageSizeHint kind="options" className="mb-2" />
+            {/* Half a required group is the dangerous state: every customer
+                who picks the size nobody filled in is shown a total that is
+                confidently short. */}
+            {halfStatedCalories({ is_required: draft.required, options: draftOptionCalories }) && (
+              <p className="note-warning mb-3">
+                Some choices here state a calorie change and some do not. A customer choosing one
+                of the blank ones sees a total as if it added nothing.
+              </p>
+            )}
             {group.options.map((option) => {
               const going = !!removed[option.id];
               return (
@@ -860,6 +935,15 @@ function GroupEditor({
                         disabled={saving}
                         aria-label={`${option.name} price change`}
                         onChange={(e) => setOption(option.id, { delta: e.target.value })}
+                      />
+                      <input
+                        className="field tnum col-start-2 md:col-start-auto"
+                        inputMode="numeric"
+                        placeholder="+kcal"
+                        value={draft.options[option.id]?.kcal ?? ""}
+                        disabled={saving}
+                        aria-label={`${option.name} calorie change`}
+                        onChange={(e) => setOption(option.id, { kcal: e.target.value })}
                       />
                     </>
                   )}
@@ -945,6 +1029,7 @@ function AddOption({
 }) {
   const [name, setName] = useState("");
   const [delta, setDelta] = useState("0.00");
+  const [kcalDelta, setKcalDelta] = useState("");
   const [image, setImage] = useState<ImageDraft>(NO_IMAGE);
   const [adding, setAdding] = useState(false);
   const [uploading, trackUpload] = useUploadsInFlight();
@@ -985,6 +1070,16 @@ function AddOption({
             onChange={(e) => setDelta(e.target.value)}
           />
         </label>
+        <label className="col-start-2 block min-w-0 md:col-start-auto">
+          <span className="label">Calorie change</span>
+          <input
+            className="field tnum mt-[7px]"
+            inputMode="numeric"
+            placeholder="+kcal"
+            value={kcalDelta}
+            onChange={(e) => setKcalDelta(e.target.value)}
+          />
+        </label>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-4">
         <button
@@ -1003,14 +1098,21 @@ function AddOption({
             }
             setAdding(true);
             try {
+              const kcalChange = caloriesDeltaOf(kcalDelta);
+              if (kcalChange === false) {
+                onError("Enter the calorie change as a whole number, like 130 or -90.");
+                return;
+              }
               await createOption({
                 groupId,
                 name: name.trim(),
                 price_delta_minor: minor,
+                calories_delta: kcalChange,
                 image_path: image.path,
               }).unwrap();
               setName("");
               setDelta("0.00");
+              setKcalDelta("");
               setImage(NO_IMAGE);
               onError(null);
               onDone();

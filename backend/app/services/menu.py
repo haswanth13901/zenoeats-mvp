@@ -325,6 +325,7 @@ def _item(item: Item) -> ItemOut:
                         id=o.id,
                         name=o.name,
                         price_delta_minor=o.price_delta_minor,
+                        calories_delta=o.calories_delta,
                         is_available=o.is_available,
                         image_url=image_url(o.image_path),
                     )
@@ -339,6 +340,7 @@ def _item(item: Item) -> ItemOut:
         name=item.name,
         item_type_id=item.item_type_id,
         description=item.description,
+        calories=item.calories,
         base_price_minor=item.base_price_minor,
         currency=item.currency,
         is_available=item.is_available,

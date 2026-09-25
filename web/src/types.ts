@@ -4,6 +4,9 @@ export type Option = {
   id: string;
   name: string;
   price_delta_minor: number;
+  /** What choosing this adds to the item's calories, or null where the
+   *  restaurant stated no change. Negative takes calories off. */
+  calories_delta?: number | null;
   is_available: boolean;
   /** A thumbnail beside the choice, or null when the option has none. */
   image_url: string | null;
@@ -20,6 +23,9 @@ export type ModifierGroup = {
 };
 
 export type Item = {
+  /** kcal as the restaurant states it, or null where it has not. A combo's
+   *  total is added up from the items chosen for it. */
+  calories?: number | null;
   id: string;
   name: string;
   /** Which type, by id. The name is on the section or slot above it, so a
