@@ -7,6 +7,7 @@ import {
   rememberRestaurantName,
 } from "@/utils/restaurantName";
 import { brandFontFamily, brandFrom, loadBrandFont, type Brand } from "@/features/storefront/brand";
+import { safeNextPath } from "./safe-next";
 
 /**
  * What the customer account pages have in common.
@@ -34,11 +35,7 @@ export function params(): URLSearchParams {
 /** Where to go afterwards. Same-origin paths only: an absolute URL here would
  *  be an open redirect. */
 export function nextPath(fallback = "/"): string {
-  const raw = params().get("next");
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) {
-    return fallback;
-  }
-  return raw;
+  return safeNextPath(params().get("next"), fallback);
 }
 
 /** A link to another account page that keeps the return path. */
