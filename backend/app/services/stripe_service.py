@@ -340,6 +340,64 @@ def retrieve_account_status(stripe_account_id: str) -> dict:
     }
 
 
+def storefront_domain(slug: str) -> str:
+    return f"{slug}.{settings.ROOT_DOMAIN}"
+
+
+def ensure_wallet_domain(stripe_account_id: str, slug: str) -> dict | None:
+    """Register the restaurant's storefront for Apple Pay, Google Pay and Link.
+
+    Stripe only shows wallet buttons in the Payment Element on a registered
+    domain, and with direct charges the registration belongs to the account
+    running the charge: each restaurant's own connected account, for its own
+    subdomain. Unregistered, checkout still takes cards, so nothing fails --
+    the wallets are simply never offered, which is easy to miss for months.
+
+    Idempotent: finds an existing registration and re-enables or re-validates
+    it, creating one only if there is none. Never raises. A wallet problem
+    must not stop a restaurant going live, so the outcome is returned for the
+    portal to show instead. None where there is nothing to register: a
+    development domain Stripe would refuse.
+    """
+    domain = storefront_domain(slug)
+    if settings.ROOT_DOMAIN.endswith(".local") or not settings.STRIPE_SECRET_KEY:
+        return None
+
+    try:
+        found = stripe.PaymentMethodDomain.list(
+            domain_name=domain, limit=1, stripe_account=stripe_account_id
+        ).data
+        if not found:
+            record = stripe.PaymentMethodDomain.create(
+                domain_name=domain, stripe_account=stripe_account_id
+            )
+        else:
+            record = found[0]
+            if not record.enabled:
+                record = stripe.PaymentMethodDomain.modify(
+                    record.id, enabled=True, stripe_account=stripe_account_id
+                )
+            if record.apple_pay.status != "active":
+                record = stripe.PaymentMethodDomain.validate(
+                    record.id, stripe_account=stripe_account_id
+                )
+    except stripe.StripeError as exc:
+        detail = getattr(exc, "user_message", None) or str(exc)
+        log.warning("could not register %s for wallets on %s: %s", domain, stripe_account_id, detail)
+        return {"domain": domain, "apple_pay": "unknown", "google_pay": "unknown", "problem": detail}
+
+    apple = record.apple_pay
+    problem = None
+    if apple.status != "active" and getattr(apple, "status_details", None):
+        problem = apple.status_details.error_message
+    return {
+        "domain": domain,
+        "apple_pay": apple.status,
+        "google_pay": record.google_pay.status,
+        "problem": problem,
+    }
+
+
 def construct_connect_event(payload: bytes, signature: str) -> stripe.Event:
     """Verify the Connect webhook signature. Raises on tampering."""
     return stripe.Webhook.construct_event(

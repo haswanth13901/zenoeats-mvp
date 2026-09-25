@@ -107,6 +107,17 @@ export function RestaurantRow({
             </div>
           )}
           {stripeStatus?.charges_enabled && <div className="mt-1 text-muted">Synced from Stripe.</div>}
+          {/* Cards work either way; without this the wallets are silently
+              never offered. "active" is the only state that shows them. */}
+          {stripeStatus?.wallet_domain && (
+            <div className="mt-1 text-muted [overflow-wrap:anywhere]">
+              Apple Pay {stripeStatus.wallet_domain.apple_pay} · Google Pay{" "}
+              {stripeStatus.wallet_domain.google_pay}
+              {stripeStatus.wallet_domain.problem && (
+                <div className="text-danger">{stripeStatus.wallet_domain.problem}</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="col-span-full flex flex-wrap items-center gap-x-[15px] gap-y-1 xl:col-span-1 xl:justify-end">
