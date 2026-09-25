@@ -16,6 +16,7 @@ from app.api.v1.router import api_router
 from app.config import settings
 from app.core import errors, observability, stall_watch, startup_checks
 from app.db.session import app_engine, system_engine
+from app.services import ops_health
 
 logging.basicConfig(
     level=settings.LOG_LEVEL,
@@ -220,6 +221,19 @@ def ready():
     except Exception:
         log.exception("readiness check failed")
         return JSONResponse(status_code=503, content={"status": "not-ready"})
+
+
+@app.get("/health/operations")
+def operations():
+    """Workers, beat, webhooks and Redis: the parts that fail without an error.
+
+    For an uptime monitor, beside /health/ready. 503 names what is failing
+    and nothing more; see services/ops_health.
+    """
+    problems = ops_health.failing()
+    if problems:
+        return JSONResponse(status_code=503, content={"status": "degraded", "failing": problems})
+    return {"status": "ok"}
 
 
 # Uploaded menu images, served straight off the disk they were written to.

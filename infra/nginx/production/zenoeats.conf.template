@@ -135,8 +135,12 @@ server {
         proxy_set_header X-Forwarded-Proto https;
     }
 
-    location = /health {
-        proxy_pass http://zenoeats_api/health;
+    # Every health path, not just /health: /health/ready (the database) and
+    # /health/operations (workers, webhooks, Redis) are what uptime checks
+    # watch. An exact match here once sent them to the web container, whose
+    # page fallback answers 200 for any path -- a monitor that could never fail.
+    location ^~ /health {
+        proxy_pass http://zenoeats_api;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         access_log off;

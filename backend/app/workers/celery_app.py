@@ -34,5 +34,14 @@ celery_app.conf.update(
             "task": "app.workers.tasks.sweep_retention",
             "schedule": crontab(minute=23),
         },
+        # Proof of life for beat and the workers together, read by
+        # /health/operations. See services/ops_health.
+        "heartbeat": {
+            "task": "app.workers.tasks.heartbeat",
+            "schedule": 60.0,
+            # A heartbeat that waited out an outage in the queue proves
+            # nothing about now; drop it rather than deliver it late.
+            "options": {"expires": 50},
+        },
     },
 )

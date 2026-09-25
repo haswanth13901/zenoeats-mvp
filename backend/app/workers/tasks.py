@@ -24,7 +24,7 @@ from app.models import (
     ClerkEvent, Order, OrderStatus, Payment, PaymentStatus,
     RestaurantPaymentAccount, StripeEvent, StripeEventStatus, User, UserKind,
 )
-from app.services import stripe_service, stripe_tax
+from app.services import ops_health, stripe_service, stripe_tax
 from app.services.orders import transition
 from app.workers.celery_app import celery_app
 
@@ -391,6 +391,12 @@ def send_staff_invitation(
             )
             return False
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+
+
+@celery_app.task(name="app.workers.tasks.heartbeat", ignore_result=True)
+def heartbeat():
+    """Scheduled every minute by beat; see services/ops_health."""
+    ops_health.beat()
 
 
 @celery_app.task(name="app.workers.tasks.sweep_retention")
