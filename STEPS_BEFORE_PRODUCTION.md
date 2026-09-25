@@ -15,20 +15,47 @@ Items marked *(code)* need a change in this repository. Everything else is
 configuration, accounts or process on your side. Ticked items are done; each
 says what changed and where, so it can be checked.
 
+### Where this stands (25 September 2026)
+
+An end-to-end pass over the running app found the code ready. A card
+payment, the kitchen board, the PIN, cancel-and-refund, the admin portal and
+the security checks all passed. Every *(code)* item is now done: the last of
+them are in PR #20, with section 2.7 listing what that pass found. **What is
+left is accounts, the domain, the server and the lawyer.** Suggested order,
+since each step needs the one before:
+
+1. Merge PR #20, then tag the release (§1).
+2. Accounts that need no domain: Stripe live activation (§3.4), Cloudflare
+   R2 and healthchecks.io for backups (§5), Sentry (§6).
+3. Legal details, then the lawyer (§9).
+4. **Last: the domain** (§4.0), then everything that hangs off it: Clerk
+   production (§3.1, §3.2), Stripe webhooks (§3.4), Resend (§3.6) and TLS (§4).
+5. The server and first deploy (§11), a staging rehearsal (§10), then live keys.
+
 ---
 
 ## 1. Repository and release hygiene
 
-- [ ] **[BLOCKER]** Commit the working tree. Today almost everything is
-      uncommitted: the new `web/` app is untracked, the old `frontend/` is
-      staged for deletion, migrations `0004`–`0012` are untracked, and the
-      Clerk/staff-invite work is unstaged. Nothing uncommitted can be
-      reproduced on a server.
-- [ ] **[BLOCKER]** CI green on the commit you deploy: backend tests, the RLS
+- [x] **[BLOCKER]** Commit the working tree. *Done:* everything is committed
+      and reached `main` through reviewed PRs (#8–#19; #20 open). The tree is
+      clean.
+- [x] **[BLOCKER]** CI green on the commit you deploy: backend tests, the RLS
       isolation gates (`tests/test_rls_isolation.py`), the reversible-migration
-      check, web lint/typecheck/build.
-- [ ] **[LAUNCH]** Tag the release (e.g. `v1.0.0`) and deploy images built
-      from that tag only.
+      check, web lint/typecheck/build. *Green* on `main` (098a78d) and on PR
+      #20. Check it again on the tag itself before deploying it.
+- [ ] **[LAUNCH]** Tag the release and deploy images built from that tag
+      only. After PR #20 is merged:
+
+      ```powershell
+      git checkout main; git pull
+      git tag v1.0.0; git push origin v1.0.0
+      ```
+
+      CI then publishes `ghcr.io/haswanth13901/zenoeats-mvp/api:v1.0.0` and
+      `…/web:v1.0.0`, which are what `API_IMAGE` and `WEB_IMAGE` name (§11).
+      The repository and both images are public, so the server pulls them
+      without logging in. Neither image contains a secret: every key arrives
+      at runtime from `.env`.
 - [x] **[LAUNCH]** `README.md` → "Before real money" was stale (it said rate
       limiting was unused). *Fixed:* it now points here as the source of truth.
 
@@ -132,10 +159,15 @@ Stripe Dashboard).
       `app/services/stripe_tax.py`, `tests/test_stripe_tax.py`; a real
       calculation request was accepted by Stripe's test API.
       **On your side:** §3.5.
-- [x] **[LAUNCH] Refunds and cancellations.** *Decided:* refunds stay in each
-      restaurant's own Stripe Dashboard, where disputes also live. The
-      `charge.refunded` webhook reconciles the payment and, for Stripe Tax
-      restaurants, reverses the tax. **On your side:** tell restaurants (§9).
+- [x] **[LAUNCH] Refunds and cancellations.** *(code)* Cancelling an order on
+      the kitchen board offers **Cancel and refund**, a full refund to the
+      card, Zenoeats' fee included (untick it for a no-show the restaurant is
+      charging for). Cancelled orders not yet refunded wait under **Refunds to
+      issue** on the board. Anything else, such as a partial refund or a refund
+      after collection, is issued in the restaurant's own Stripe Dashboard,
+      where disputes also live. Either way the `charge.refunded` webhook
+      reconciles the payment and, for Stripe Tax restaurants, reverses the tax
+      (PR #17). **On your side:** tell restaurants (§9).
 - [x] **[SOON] Receipts from Zenoeats.** *(code)* *Fixed — Resend:* the worker
       emails an order confirmation once the payment webhook marks the order
       paid — exactly once per order, retried on rate limits and outages. It
@@ -247,6 +279,54 @@ passed, and everything below was found and has since been fixed.
       restaurant pricing in another currency made the headline figure
       meaningless. *Fixed:* one figure per currency.
 
+### 2.7 Found by the end-to-end pass (25 September 2026, PR #20)
+
+The pass itself: a guest ordered in a real browser and paid with Stripe's
+test card. The order reached the kitchen board, was marked ready, refused a
+wrong PIN and completed with the right one. A second order was cancelled
+with a real test-mode refund. The admin portal and the sign-in rate limit
+(forged IPs included) held, and 859 backend and 26 web tests passed. It
+found no bug in the ordering path. What it did find:
+
+- [x] **[BLOCKER] Production would start on test keys.** *(code)* An API on
+      `sk_test_` keys boots, takes orders and collects nothing. *Fixed:* with
+      `ENV=production` the startup check refuses Stripe or Clerk test keys
+      unless `ALLOW_TEST_KEYS=true` (staging only). A test publishable key
+      beside a live secret key is refused everywhere.
+      `tests/test_startup_checks.py`.
+- [x] **[BLOCKER] Monitors could never see `/health/ready` fail.** *(code)* The
+      production nginx routed only an exact `/health` to the api. Every other
+      health path fell through to the web container, whose page fallback
+      answers 200 for anything. *Fixed:* every `/health…` path goes to the api.
+      Confirmed through the edge on a production-shaped stack.
+- [x] **[BLOCKER] Production passwords were optional.** *(code)* The roles
+      script put `*_dev_pw` on a fresh database, Redis had no password, and
+      every service published a host port. *Fixed:* see §4 (PostgreSQL,
+      Redis) and §11. `docker-compose.prod.yml` refuses to start without real
+      passwords.
+- [x] **[LAUNCH] Apple Pay and Google Pay were never offered.** *(code)* Wallet
+      buttons appear only on a domain registered on the connected account
+      running the charge, and nothing registered one. *Fixed:* activation and
+      "Refresh Stripe" register `<slug>.<root domain>` on the restaurant's own
+      account, idempotently and never blocking activation. The portal shows
+      the result. Checked against Stripe's test API.
+      `tests/test_wallet_domain.py`.
+- [x] **[LAUNCH] Proxy trust narrowed.** *(code)* The api believed forwarding
+      headers from every private range, so any container on the network could
+      claim to be any client. *Fixed:* nginx has a fixed address
+      (`EDGE_IP`, default 172.31.250.10), and the api trusts that alone.
+      Proven live: forged `X-Real-IP` from another container is rate-limited
+      as that container.
+- [x] **[LAUNCH] Silent failures now have an endpoint.** *(code)*
+      `/health/operations`: see §6.
+- [x] **[SOON] Test debris.** *(code)* The Stripe webhook tests left every event
+      at RECEIVED (150 in the development database), which read as a stuck
+      worker. They clean up after themselves now.
+- [x] **[LAUNCH] The data deletion page contradicted the product.** It said
+      deletion was by email only, after PR #19 had added self-service
+      closing. *Fixed:* it leads with Manage profile → Personal details →
+      Close my account, and email is the fallback.
+
 ---
 
 ## 3. Third-party accounts (new production accounts)
@@ -304,6 +384,8 @@ provider page in Clerk shows the **redirect URI** to paste into the provider.
 - [ ] **[BLOCKER]** Activate the **platform** account (business details, bank,
       identity) and complete the **Connect platform profile**.
 - [ ] **[BLOCKER]** Live keys → `STRIPE_SECRET_KEY` and `STRIPE_PUBLISHABLE_KEY`.
+      Both must be live, or both test on staging: the API refuses a mix, and
+      refuses test keys in production (§2.7).
 - [ ] **[BLOCKER]** Create the webhook **on the Connect tab** (not the account
       tab): `https://<yourdomain>/api/v1/webhooks/stripe/connect`, events
       `payment_intent.succeeded`, `payment_intent.payment_failed`,
@@ -313,11 +395,15 @@ provider page in Clerk shows the **redirect URI** to paste into the provider.
       onboarding so it gets a **real** connected account with
       `charges_enabled`. Never carry over `acct_REPLACE_WITH_TEST_ACCOUNT`
       from the seed.
-- [ ] **[LAUNCH] Apple Pay / Google Pay.** Checkout uses
+- [x] **[LAUNCH] Apple Pay / Google Pay.** *(code)* Checkout uses
       `automatic_payment_methods`. Wallet buttons only appear on domains
-      registered as **payment method domains**; with direct charges that
+      registered as **payment method domains**. With direct charges that
       registration is per connected account, per restaurant subdomain.
-      Register each storefront domain when a restaurant is activated.
+      *Done automatically* on activation and on "Refresh Stripe" (§2.7).
+      **On your side:** after go-live, press "Refresh Stripe" on each
+      restaurant in the admin portal and check it shows "Apple Pay active ·
+      Google Pay active". No domain association file needs hosting; Stripe
+      does Apple's merchant validation.
 - [ ] **[LAUNCH]** Decide **statement descriptors** (what shows on the
       customer's card statement) and confirm **email receipts** are enabled for
       connected accounts.
@@ -356,48 +442,92 @@ provider page in Clerk shows the **redirect URI** to paste into the provider.
 
 ## 4. Infrastructure
 
-- [ ] **[BLOCKER] Domain and DNS**: the root domain, `admin.<domain>`, and a
-      wildcard `*.<domain>` for restaurant subdomains. `admin.<domain>` is
-      required, not a convention: the platform portal and its API answer on
-      that hostname only, and nowhere else (see 2.6).
+### 4.0 The domain (left until last on purpose; everything in §3.1, §3.2, §3.6 and TLS needs it)
+
+- [ ] **[BLOCKER] Buy the domain and put it on Cloudflare.** Any registrar
+      (Cloudflare Registrar sells at cost). In Cloudflare, **Add a site**,
+      choose the Free plan, and at the registrar replace the nameservers with
+      the two Cloudflare gives you. Wait for "Active".
+- [ ] **[BLOCKER] Records**, in Cloudflare → DNS, all pointing at the VM's
+      public IPv4 (§11):
+
+      | Type | Name | Content | Proxy |
+      |---|---|---|---|
+      | A | `@` (the root domain) | VM IP | Proxied (orange) |
+      | A | `*` (every restaurant subdomain) | VM IP | Proxied |
+      | A | `admin` | VM IP | Proxied |
+
+      Clerk's records (§3.1) and Resend's (§3.6) are added later and must be
+      **DNS only (grey)**, never proxied. The `admin` record is required: the
+      platform portal and its API answer on `admin.<domain>` and nowhere else
+      (see 2.6). A restaurant is only ever one level deep (`spicehouse.<domain>`),
+      which is what Cloudflare's free certificate covers.
+- [ ] **[BLOCKER] SSL/TLS settings**: mode **Full (strict)**; Edge
+      Certificates → **Always Use HTTPS** on, **Minimum TLS 1.2**.
+- [ ] **[BLOCKER] Tell the app.** `make_prod_env.py --domain <domain>` sets
+      `ROOT_DOMAIN`, the email sender and the storefront links from it (§11).
+      Add any other hostname you plan to use to `RESERVED_SLUGS` in
+      `app/core/tenant.py` first, so no restaurant can take it.
+
+### 4.1 Server and services
+
+- [x] **[BLOCKER] Domain and DNS shape** is described in 4.0: the root domain,
+      `admin.<domain>`, and a wildcard `*.<domain>`.
 - [x] **[BLOCKER] Reserve Clerk's subdomains.** *(code)* *Fixed:* `clerk`,
       `accounts` and `clkmail` added to `RESERVED_SLUGS` in
       `app/core/tenant.py`, so no restaurant can take the DNS names Clerk
       production needs. Add any other hostname you plan to use there too.
-- [ ] **[BLOCKER] TLS**: wildcard certificate via DNS-01 validation (Let's
-      Encrypt) or a Cloudflare origin certificate, plus monitoring on expiry.
-      A lapsed wildcard certificate takes down every storefront at once.
-      Place `fullchain.pem` and `privkey.pem` in `infra/certs/` (git-ignored)
-      or point `TLS_CERT_DIR` at them.
-- [ ] **[LAUNCH] Narrow proxy trust.** Set `TRUSTED_PROXY_CIDRS` and
-      `FORWARDED_ALLOW_IPS` to the network nginx actually runs on, instead of
-      the default private ranges.
-- [ ] **[LAUNCH] Cloudflare ranges.** Re-check
-      `infra/nginx/production/cloudflare-realip.conf` against
-      https://www.cloudflare.com/ips/ before launch.
-- [ ] **[BLOCKER] Origin firewall**: if behind Cloudflare, allow inbound 80/443
-      only from Cloudflare's ranges, as `nginx.conf` assumes. The rate limiter
-      and the forwarded headers are only trustworthy if the origin cannot be
-      reached directly.
+- [ ] **[BLOCKER] TLS: a Cloudflare Origin Certificate.** Cloudflare →
+      SSL/TLS → Origin Server → **Create Certificate**. Choose RSA, hostnames
+      `<domain>` and `*.<domain>`, validity 15 years. Save the certificate as
+      `infra/certs/fullchain.pem` and the private key as
+      `infra/certs/privkey.pem` on the server (git-ignored; `chmod 600` the
+      key). It is only trusted by Cloudflare, which is exactly the point:
+      every visitor arrives through Cloudflare's own public certificate, and
+      nothing ever needs renewing on the server. Add a calendar reminder at
+      14 years. A lapsed certificate takes down every storefront at once.
+      (Let's Encrypt with DNS-01 also works, if you would rather not depend on
+      Cloudflare for it.)
+- [x] **[LAUNCH] Narrow proxy trust.** *(code)* `docker-compose.prod.yml` gives
+      nginx a fixed address and sets `FORWARDED_ALLOW_IPS` and
+      `TRUSTED_PROXY_CIDRS` to it alone (§2.7). Change `EDGE_SUBNET` and
+      `EDGE_IP` together only if 172.31.250.0/24 is taken on the server.
+- [x] **[LAUNCH] Cloudflare ranges.** Re-checked 2026-09-25 against
+      https://www.cloudflare.com/ips-v4 and ips-v6: identical, 22 ranges.
+      Check again if launch is months away.
+- [ ] **[BLOCKER] Origin firewall**: allow inbound 80/443 **only from
+      Cloudflare's ranges**, and SSH only from your own IP. Do this in the
+      cloud provider's firewall (security group), **not** with `ufw`: Docker
+      writes its own iptables rules for published ports and bypasses `ufw`
+      entirely. The rate limiter and the forwarded headers are only
+      trustworthy if the origin cannot be reached directly.
 - [ ] **[BLOCKER] PostgreSQL**:
-  - [ ] Create `zenoeats_migrate`, `zenoeats_app` and `zenoeats_system` with
-        **strong, unique passwords**. `infra/postgres/01-roles.sql` contains the
-        dev passwords (`*_dev_pw`) and must not be used as-is.
-  - [ ] All three roles `NOBYPASSRLS`; `zenoeats_app` must not own tables.
-        Run `tests/test_rls_isolation.py` against staging to prove it.
-  - [ ] Not reachable from the internet; TLS for the connection if the
-        database is on another host.
+  - [x] *(code)* `zenoeats_migrate`, `zenoeats_app` and `zenoeats_system` get
+        their passwords from `ZENOEATS_*_PASSWORD`. `infra/postgres/01-roles.sql`
+        reads them when the volume is first created, and the production
+        compose file refuses to start without them. `make_prod_env.py`
+        generates all three (§11).
+  - [x] All three roles `NOBYPASSRLS`; `zenoeats_app` owns no tables. CI's
+        privilege gates prove it on every build.
+        **On your side:** also run `tests/test_rls_isolation.py` against
+        staging.
+  - [x] *(code)* Not reachable from outside: no host port is published in
+        production. On another host, use TLS for the connection.
   - [ ] On a managed database (RDS, Cloud SQL…), the init script will not run;
         create the roles and grants by hand before the first migration.
-- [ ] **[BLOCKER] Redis ×2**: `redis-broker` with AOF and `noeviction` (a lost
-      task is a lost payment webhook), `redis-runtime` with eviction. Neither
-      exposed publicly; set passwords. If `redis-runtime` is down the rate
-      limiter **fails open**, so alert on it.
-- [ ] **[BLOCKER] Celery**: at least one `worker` (Stripe and Clerk webhooks do
-      nothing without it) and **exactly one** `beat` (expires abandoned
-      checkouts every 5 minutes).
-- [ ] **[BLOCKER] Secrets**: keep the production `.env` / secret files outside
-      images and outside git; restrict who can read them.
+- [x] **[BLOCKER] Redis ×2.** *(code)* `redis-broker` runs with AOF and
+      `noeviction` (a lost task is a lost payment webhook), `redis-runtime`
+      with eviction. Both have passwords (`REDIS_*_PASSWORD`) and no published
+      port. The rate limiter **fails open** without `redis-runtime`, so
+      `/health/operations` reports `redis_runtime` (§6).
+- [x] **[BLOCKER] Celery.** *(code)* The compose file runs one `worker` and
+      **exactly one** `beat`; never `--scale` beat. Beat and the worker
+      together are watched through the heartbeat in `/health/operations`
+      (§6).
+- [ ] **[BLOCKER] Secrets**: `make_prod_env.py` writes `.env` readable by its
+      owner only, outside images and outside git. **On your side:** keep a
+      copy in a password manager (§5), and give nobody else a login on the
+      server.
 ### Menu images
 
 **Decided: launch on the API host's disk.** Not because object storage is
@@ -410,13 +540,19 @@ new failure mode before the first real customer buys nothing.
 
 What that decision costs, and therefore what is not optional:
 
-- [ ] **[BLOCKER] `IMAGES_DIR` on persistent storage that is backed up.**
+- [x] **[BLOCKER] `IMAGES_DIR` on persistent storage that is backed up.**
       Losing the disk loses every menu photograph irrecoverably, and the rows
       keep their keys — so every storefront renders broken images rather than
       degrading. A container filesystem is not persistent storage.
-- [ ] **[BLOCKER] The restore drill (§5) covers the images directory too,**
-      restored to the same point in time as the database. A database restored
-      newer than the image folder points at files that do not exist.
+      *(code)* The api writes to `./images` in the repository on the server's
+      disk, a bind mount, never the container's filesystem. `backup.sh` takes
+      it with every database dump (§5). If the VM gives you a separate data
+      disk, clone the repository onto that disk.
+- [x] **[BLOCKER] The restore drill (§5) covers the images directory too,**
+      restored to the same point in time as the database. *(code)*
+      `backup.sh` copies the folder before and after the dump, so the archive
+      holds every file the dump refers to. `restore_drill.sh` fails if any
+      referenced image is missing.
 - [ ] **[LAUNCH] Accept one API machine.** `API_WORKERS` still uses every
       core on that host, so this is a limit on machines, not on processes.
       Images written on one host are invisible to another.
@@ -447,13 +583,88 @@ rather than a directory removal.
 
 ## 5. Backups and recovery
 
-- [ ] **[BLOCKER]** Nightly encrypted `pg_dump`, copied off the server.
-- [ ] **[BLOCKER]** Escrow `FIELD_ENCRYPTION_KEY` separately from the database
-      backups. Pickup PINs are encrypted with it; losing the key makes them
-      unreadable, and a backup stored together with the key protects nothing.
-- [ ] **[BLOCKER]** One **timed restore drill** into a fresh environment before
-      launch. A backup that has never been restored is not a backup.
-- [ ] **[LAUNCH]** Back up the menu images directory (or its bucket).
+*(code, done)* `scripts/backup.sh` runs nightly from
+`infra/systemd/zenoeats-backup.timer`. It takes a `pg_dump` and the images
+folder together, encrypts both to an **age** public key, copies them off the
+server with **rclone**, and pings **healthchecks.io** whether it succeeds or
+fails. `scripts/restore_drill.sh` restores one into a scratch PostgreSQL and
+fails unless the checksums, `pg_restore`, row-level security and every
+referenced image all check out. Both were run end to end on 2026-09-25: a
+25-second backup, a passing drill, and a corrupted archive caught on its
+checksum.
+
+The encryption key pair was generated on 2026-09-25. The **public** key,
+which goes on the server, is
+`age1fayakxatfwar93dxcrl5qw09xfje6hpete73lnmrqsa8q9ss03dsmfccq9`. The
+**private** key is in `%USERPROFILE%\zenoeats-secrets\backup-age-identity.txt`
+on the development laptop, and nowhere else yet.
+
+- [ ] **[BLOCKER] Keep the private key safe.** Copy that file into a password
+      manager and onto an offline copy (USB). It never goes on the server or
+      into git. Without it no backup can be read, ever.
+- [ ] **[BLOCKER] Off-site storage: Cloudflare R2** (free tier 10 GB; needs a card).
+  1. Cloudflare → **R2 Object Storage** → enable → **Create bucket**
+     `zenoeats-backups`.
+  2. Bucket → Settings → **Object lifecycle rules**: delete objects after
+     **90 days**.
+  3. Bucket → Settings → **Bucket lock rules**: retain all objects **30 days**,
+     so nobody, including someone holding the server's key, can delete recent
+     backups.
+  4. R2 → **Manage API tokens → Create API token**: *Object Read & Write*,
+     scoped to `zenoeats-backups` only. Note the Access Key ID, the Secret
+     Access Key and the endpoint `https://<account-id>.r2.cloudflarestorage.com`.
+- [ ] **[BLOCKER] Missed-backup alert: healthchecks.io** (free). Add a check
+      named `zenoeats-backup`, with period 1 day and grace 2 hours, and note
+      its ping URL.
+- [ ] **[BLOCKER] Install on the server** (after §11). Write
+      `/etc/zenoeats/backup.env` (`sudo chmod 600`):
+
+      ```
+      BACKUP_AGE_RECIPIENT=age1fayakxatfwar93dxcrl5qw09xfje6hpete73lnmrqsa8q9ss03dsmfccq9
+      BACKUP_RCLONE_REMOTE=r2:zenoeats-backups/nightly
+      BACKUP_HEALTHCHECK_URL=https://hc-ping.com/<uuid>
+      RCLONE_CONFIG_R2_TYPE=s3
+      RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID=<access key id>
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=<secret access key>
+      RCLONE_CONFIG_R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+      RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+      ```
+
+      Then:
+
+      ```bash
+      sudo apt install -y age rclone
+      sudo cp infra/systemd/zenoeats-backup.* /etc/systemd/system/
+      sudo systemctl daemon-reload
+      sudo systemctl enable --now zenoeats-backup.timer
+      sudo systemctl start zenoeats-backup.service   # one run now
+      journalctl -u zenoeats-backup.service          # it should end "done:"
+      ```
+
+      The unit files assume the repository is at `/opt/zenoeats`. Edit both
+      paths if it is not.
+- [ ] **[BLOCKER] Escrow `.env`**, which holds `FIELD_ENCRYPTION_KEY`, separately
+      from the backups: a password manager entry. Pickup PINs are encrypted
+      with it. Losing it makes them unreadable, and a backup stored together
+      with the key protects nothing, which is why `backup.sh` leaves `.env`
+      out.
+- [ ] **[BLOCKER] One timed restore drill before launch**, then monthly, on
+      the laptop (never the server, which has no private key). It needs
+      Docker, bash, `age` and `rclone`. On Windows the simplest is WSL Ubuntu
+      with `sudo apt install age rclone`. Export the same `RCLONE_CONFIG_R2_*`
+      variables as the server; a second, *Object Read* only token is enough
+      here.
+
+      ```bash
+      BACKUP_AGE_IDENTITY=~/zenoeats-secrets/backup-age-identity.txt \
+      BACKUP_RCLONE_REMOTE=r2:zenoeats-backups/nightly \
+        scripts/restore_drill.sh
+      ```
+
+      Write down the time it prints. That is how long a real restore takes.
+- [x] **[LAUNCH]** Back up the menu images directory. *(code)* It's in every
+      backup (above).
 - [ ] **[LAUNCH]** Write a short rollback plan: previous image tags, and
       whether the latest migration's downgrade is safe to run.
 
@@ -461,52 +672,82 @@ rather than a directory removal.
 
 ## 6. Monitoring and alerting
 
-- [ ] **[BLOCKER]** Uptime check on `/health/ready` (checks the database as the
-      app role), not just `/health`.
-- [ ] **[LAUNCH]** Alert on **stale `PENDING_PAYMENT` orders** (beat stopped or
-      webhooks not arriving).
-- [ ] **[LAUNCH]** Alert on `stripe_events` and `clerk_events` rows with status
-      `FAILED`.
-- [ ] **[LAUNCH]** Alert on Redis being unreachable (limiter fails open), disk
-      space on the database and images volumes, and certificate expiry.
+*(code, done)* `/health/operations` answers 503, naming what is failing, when
+any of these is wrong, and 200 `{"status":"ok"}` otherwise:
+
+| Name | Means |
+|---|---|
+| `worker_heartbeat` | beat or the worker has stopped (no heartbeat task for 5 minutes) |
+| `webhooks_stuck` | a Stripe or Clerk delivery unprocessed for 10 minutes |
+| `webhooks_failed` | a delivery failed in the last 24 hours |
+| `stale_checkouts` | unpaid orders 15 minutes past their expiry |
+| `redis_runtime` / `redis_broker` | a Redis unreachable (the rate limiter fails open) |
+| `database` | the system role cannot reach Postgres |
+| `disk` | under a tenth, or under 2 GB, free where images and the database live |
+
+It gives names only, never counts, because it is public. It answers on the
+root domain and every subdomain.
+
+- [ ] **[BLOCKER]** Uptime checks: with **UptimeRobot** (free, 5-minute
+      interval) or Better Stack, add two HTTP monitors that alert on anything
+      but 200:
+      `https://<domain>/health/ready` (the database, as the app role) and
+      `https://<domain>/health/operations`. Alert by email and phone push.
+- [x] **[LAUNCH]** Alert on **stale `PENDING_PAYMENT` orders**. *(code)*
+      `stale_checkouts`, above.
+- [x] **[LAUNCH]** Alert on `stripe_events` and `clerk_events` rows with status
+      `FAILED`. *(code)* `webhooks_failed`, and `webhooks_stuck` for ones never
+      processed.
+- [x] **[LAUNCH]** Alert on Redis being unreachable and on disk space. *(code)*
+      `redis_*` and `disk`, above. Certificate expiry: the Cloudflare origin
+      certificate lasts 15 years (§4); Cloudflare renews its public one
+      itself.
+- [ ] **[LAUNCH]** A missed nightly backup alerts through healthchecks.io (§5).
 - [ ] **[LAUNCH]** Centralised logs with a retention period.
-- [ ] **[LAUNCH]** Create a Sentry project and set `SENTRY_DSN`,
-      `SENTRY_ENVIRONMENT` and `RELEASE`.
+- [ ] **[LAUNCH]** Create a Sentry project (free Developer plan, platform
+      *Python / FastAPI*) and set `SENTRY_DSN`. `make_prod_env.py` already
+      sets `SENTRY_ENVIRONMENT` and `RELEASE`.
 
 ---
 
 ## 7. Production configuration
 
 Every setting the backend reads, with what it must be in production.
+**`python3 scripts/make_prod_env.py --domain <domain> --release v1.0.0`
+writes the whole file** (§11): it generates every secret, sets every value
+below that does not come from an account, and leaves those that do empty.
+`--check .env` lists what is still missing.
 
 | Variable | Production value | Notes |
 |---|---|---|
 | `ENV` | `production` | **[BLOCKER]** Secure cookies, no `/docs`, no error details, and the startup safety checks (§2.1). |
 | `ROOT_DOMAIN` | e.g. `zenoeats.com` | Tenant resolution, CORS, the Clerk token origin check, the nginx template. |
-| `DATABASE_URL_APP` / `_SYSTEM` | strong per-role passwords | The only database URLs runtime containers get. |
-| `DATABASE_URL_MIGRATE` | owner role | Migration job only. A production API refuses to start with it. |
-| `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `REDIS_RUNTIME_URL` | production Redis, with passwords | |
-| `TRUSTED_PROXY_CIDRS` | nginx's network | Where forwarding headers are believed from (rate limiter). |
-| `FORWARDED_ALLOW_IPS` | nginx's network | Same, for uvicorn. Keep the two in step. |
+| `ALLOW_TEST_KEYS` | `false` | `true` on staging only. Production refuses test keys without it (§2.7). |
+| `API_IMAGE`, `WEB_IMAGE` | `ghcr.io/haswanth13901/zenoeats-mvp/{api,web}:v1.0.0` | The release to run. Never built on the server. |
+| `POSTGRES_PASSWORD` | generated | The Postgres superuser. |
+| `ZENOEATS_MIGRATE_PASSWORD`, `_APP_`, `_SYSTEM_` | generated, hex | The three roles. Applied when the volume is first created; later changes are an `ALTER ROLE`. |
+| `REDIS_BROKER_PASSWORD`, `REDIS_RUNTIME_PASSWORD` | generated, hex | |
+| `DATABASE_URL_APP` / `_SYSTEM` / `_MIGRATE`, `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, `REDIS_RUNTIME_URL` | *not set* | Built by `docker-compose.prod.yml` from the passwords above. Only the migrate job gets the owner's URL. A production API refuses to start with it. |
+| `TRUSTED_PROXY_CIDRS`, `FORWARDED_ALLOW_IPS` | *not set* | Set by `docker-compose.prod.yml` to nginx's fixed address (`EDGE_IP`). |
+| `EDGE_SUBNET`, `EDGE_IP` | defaults `172.31.250.0/24`, `172.31.250.10` | Change together, only on a clash. |
 | `API_WORKERS` / `WEB_CONCURRENCY` | 2+ | Size with database pools. |
 | `CLERK_JWKS_URL`, `CLERK_ISSUER`, `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET` | production Clerk instance | The first three are required at startup. |
 | `CLERK_PUBLISHABLE_KEY` (web container) | `pk_live_…` | Read at container start. Compose maps it from `VITE_CLERK_PUBLISHABLE_KEY`. |
 | `CSP_EXTRA_IMG_SRC`, `CSP_REPORT_ONLY` | bucket origin; `false` | Web container. `true` only for a first staging run. |
 | `AUTH_DEV_BYPASS` | `false` | Startup refuses `true`. |
-| `ADMIN_USERS` | generated with `scripts/hash_password.py` | Required at startup. |
-| `SESSION_SECRET` | `openssl rand -base64 32` | Required at startup, 32+ characters. |
+| `ADMIN_USERS` | `docker run --rm -it <API_IMAGE> python scripts/hash_password.py you@example.com` | Required at startup. One named entry per operator, `;`-separated. |
+| `SESSION_SECRET` | generated | Required at startup, 32+ characters. |
 | `ADMIN_SESSION_TTL_MINUTES`, `STAFF_SESSION_TTL_MINUTES` | 480 / 720, or your policy | |
 | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_CONNECT_WEBHOOK_SECRET` | live values | Secret and webhook secret required at startup. |
 | `PLATFORM_FEE_BPS`, `PLATFORM_FEE_FIXED_MINOR` | your fee | 0 = no fee. |
 | `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_REPLY_TO` | Resend key; sender on a verified domain | Empty key = no emails. |
 | `STOREFRONT_URL_TEMPLATE` | `https://{slug}.{root_domain}` | Links in emails. |
-| `FIELD_ENCRYPTION_KEY` | new Fernet key (`make key`) | Required at startup. Never reuse the dev key; escrow it (§5). |
+| `FIELD_ENCRYPTION_KEY` | generated | Required at startup. Never reuse the dev key, never regenerate a live one; escrow it (§5). |
 | `IMAGES_DIR`, `IMAGES_PUBLIC_BASE` | persistent path or bucket URL | |
 | `PENDING_PAYMENT_TTL_MINUTES`, `IDEMPOTENCY_TTL_HOURS`, `MAX_ITEMS_PER_ORDER` | defaults are reasonable | |
 | `WEBHOOK_EVENT_RETENTION_DAYS` | 365, or your policy | 0 = keep forever. |
 | `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE`, `RELEASE` | your Sentry project | Empty DSN = off. |
 | `TLS_CERT_DIR` | certificate directory | `docker-compose.prod.yml`. |
-| `POSTGRES_PASSWORD` | strong | Only if running Postgres in compose. |
 
 ---
 
@@ -533,6 +774,13 @@ footer on every customer page. **Every one of them carries a visible “draft,
 not reviewed” banner and a list of what a lawyer must confirm, and those stay
 until the review below happens.**
 
+- [ ] **[BLOCKER]** **Your details for the pages** (skipped on 2026-09-25,
+      to be supplied): the legal entity name (company, or your own name as a
+      sole proprietor); the trading or registered address; a contact email
+      somebody reads, for privacy and deletion requests; where you operate
+      (country, and state in the US); and the deletion response windows
+      (suggested: confirm within **7 days**, complete within **30**). Every
+      `PLACEHOLDER` in `web/legal/*.html` is one of these.
 - [ ] **[BLOCKER]** **Legal review** of all four pages. Each one ends with the
       specific questions for its own text; the common ones are the legal
       entity name, trading address and contact address (`PLACEHOLDER` in the
@@ -543,16 +791,20 @@ until the review below happens.**
 - [ ] **[BLOCKER]** **Publish them on the root domain** and give Google,
       Facebook and Apple the `https://<root domain>/legal/...` URLs, not a
       restaurant subdomain. §3.2 needs these before any provider is approved.
-- [ ] **[BLOCKER]** **A process behind data deletion.** The page commits to
-      response windows and a monitored mailbox. Note there is **no
-      self-service account deletion** in the software: the only route is a
-      Clerk-side delete, whose `user.deleted` webhook soft-deletes the
-      customer and keeps their paid orders. Everything else is manual.
+- [ ] **[BLOCKER]** **A process behind data deletion.** Customers close their
+      own account from Manage profile → Personal details, which removes the
+      Clerk sign-in, their details and favourites and keeps paid orders (PR
+      #19). The page describes that first (§2.7). The email route, for
+      anyone who cannot sign in, is manual: it needs the monitored mailbox and
+      the response windows the page commits to. Handle it by deleting the
+      user in the Clerk dashboard once the request is confirmed; the
+      `user.deleted` webhook runs the same removal.
 - [ ] **[LAUNCH]** **Restaurant agreement**: fees, merchant-of-record duties,
       disputes, tax responsibility, data processing. It must agree with
       `/legal/refunds` about who bears a refund and a chargeback, and must
-      tell restaurants refunds are issued from their own Stripe Dashboard —
-      the software has no refund button.
+      tell restaurants how refunds work: a full refund with **Cancel and
+      refund** on the kitchen board, anything else from their own Stripe
+      Dashboard (§2.3).
 - [ ] **[LAUNCH]** **Cookie notice** where required. The privacy policy lists
       the cookies and says all are necessary; whether a consent banner is
       needed where you operate is part of the review above.
@@ -576,7 +828,24 @@ until the review below happens.**
 
 Run the whole flow on a staging environment that uses the **production shape**
 (same nginx, TLS, containers and migration process) with test-mode Stripe and
-a separate Clerk instance.
+a separate Clerk instance. Set it up exactly as §11, but generate the file
+with `make_prod_env.py --staging --domain <staging domain>`, which allows
+test keys and nothing else.
+
+Already proven on 2026-09-25, on a production-shaped stack on the laptop
+(fresh volume, HTTPS edge, real passwords):
+- migrations ran as the owner role, and a dev password was refused
+- Redis refused connections without its password
+- no internal port was exposed
+- HTTP redirected to HTTPS, with HSTS
+- both health endpoints returned the API's JSON through the edge
+- forged client IPs were rate-limited
+- a guest card payment went through to a completed PIN handover and a
+  cancel-and-refund, against Stripe's test API
+- backup and restore drill passed
+
+Staging repeats all of this where the laptop cannot: the real domain,
+Cloudflare, Clerk and webhooks from Stripe.
 
 - [ ] Customer **sign-up** with email code, **sign-in**, **forgot password**.
 - [ ] **Google**, **Apple** and **Facebook** sign-in, including a first-time
@@ -590,9 +859,18 @@ a separate Clerk instance.
       ready → **PIN** completes it.
 - [ ] **Apple Pay** on a real iPhone (Safari) and **Google Pay** on Android.
 - [ ] Abandon a checkout → it **expires** after the TTL with nothing charged.
-- [ ] **Refund** from the restaurant's Stripe Dashboard → payment status
-      updates in the portal, and for a Stripe Tax restaurant a reversal appears
-      under Tax → Transactions.
+- [ ] **Cancel and refund** on the kitchen board, and a **partial refund** from
+      the restaurant's Stripe Dashboard: payment status updates in the
+      portal, and for a Stripe Tax restaurant a reversal appears under Tax →
+      Transactions.
+- [ ] The order becomes PAID **through the webhook**, within seconds. If it
+      takes about 10 seconds, the fallback settled it, and the webhook
+      endpoint or its secret is wrong.
+- [ ] `https://<domain>/health/operations` answers 200. Stop the worker
+      (`docker compose … stop worker`) and within 5 minutes it answers 503
+      `worker_heartbeat`, and the uptime monitor alerts. Start it again.
+- [ ] "Refresh Stripe" on the test restaurant shows Apple Pay and Google Pay
+      active.
 - [ ] A **Stripe Tax** restaurant: the quote shows local tax for the pickup
       address, the paid order appears under the restaurant's Tax →
       Transactions, and the amounts match.
@@ -605,9 +883,79 @@ a separate Clerk instance.
 - [ ] Try a forged `X-Forwarded-For` against `/restaurant/login` through the
       real edge and confirm the rate limit still applies.
 - [ ] Menu photos load on a storefront (served by the API through the edge).
-- [ ] Restore last night's backup into a scratch database (§5).
+- [ ] Last night's backup exists in R2, healthchecks.io received its ping,
+      and `restore_drill.sh` passes on it (§5).
 - [ ] Light load test on menu, quote and order creation.
 
 When every **[BLOCKER]** and **[LAUNCH]** box is ticked, switch Stripe and
 Clerk to live keys, deploy the tagged release, and place one real low-value
 order end to end before announcing.
+
+---
+
+## 11. First deploy, step by step
+
+The server: an Ubuntu 24.04 VM with at least **2 vCPU and 4 GB RAM**, a
+public IPv4 address, and its disk backed up by the provider if it offers
+that. Everything below runs on it, as a user with `sudo`.
+
+1. **Firewall first** (§4.1): in the provider's firewall, allow 22 from your
+   IP only, and 80/443 from Cloudflare's ranges only.
+2. **Docker**, the native engine, not Docker Desktop:
+
+   ```bash
+   curl -fsSL https://get.docker.com | sudo sh
+   sudo usermod -aG docker $USER   # then log out and back in
+   ```
+
+3. **The repository**, at the path the backup timer expects:
+
+   ```bash
+   sudo git clone https://github.com/haswanth13901/zenoeats-mvp.git /opt/zenoeats
+   sudo chown -R $USER: /opt/zenoeats
+   cd /opt/zenoeats && git checkout v1.0.0
+   ```
+
+4. **The production `.env`** (§7):
+
+   ```bash
+   python3 scripts/make_prod_env.py --domain <domain> --release v1.0.0
+   ```
+
+   Fill in each value marked `# FILL IN:` from §3 (Clerk, Stripe, Resend,
+   Sentry). For `ADMIN_USERS`:
+
+   ```bash
+   docker run --rm -it ghcr.io/haswanth13901/zenoeats-mvp/api:v1.0.0      python scripts/hash_password.py you@example.com
+   ```
+
+   Then `python3 scripts/make_prod_env.py --check .env` until it lists
+   nothing under "Before this can run". **Put a copy of `.env` in your password
+   manager now** (§5).
+5. **The certificate** from §4.0 into `infra/certs/fullchain.pem` and
+   `infra/certs/privkey.pem` (`chmod 600` the key).
+6. **Start it.** Pull, migrate, then everything else:
+
+   ```bash
+   export COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+   docker compose --profile app pull
+   docker compose --profile app up -d
+   docker compose ps          # all healthy; migrate "Exited (0)"
+   ```
+
+   Put the `export` line in `~/.bashrc` so every later `docker compose` on
+   this server uses the production file.
+7. **Check it**: `https://<domain>/health/ready` and `/health/operations`
+   answer 200, the latter within a minute or two of starting.
+   `https://admin.<domain>` shows the platform sign-in.
+8. **Backups** (§5): write `/etc/zenoeats/backup.env`, install the timer, run
+   it once and see it land in R2.
+9. **Monitors** (§6): the two uptime checks.
+10. **First restaurant** (§8): create it in the admin portal, create its owner,
+    run Stripe onboarding, activate, and press "Refresh Stripe" to see the
+    wallets active.
+
+**A later release** is the same image swap: `git fetch --tags && git
+checkout vX.Y.Z`, change `RELEASE`, `API_IMAGE` and `WEB_IMAGE` in `.env`,
+then `docker compose --profile app pull && docker compose --profile app up -d`.
+The `migrate` job runs first on every `up`, and the api waits for it.

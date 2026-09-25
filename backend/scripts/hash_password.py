@@ -11,7 +11,9 @@ import sys
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
 
-from app.core.platform_auth import hash_password  # noqa: E402
+# Not platform_auth: that reads the settings, which a new server cannot
+# satisfy until it has the very entry this script makes.
+from app.core.admin_password import hash_password  # noqa: E402
 
 
 def main() -> int:

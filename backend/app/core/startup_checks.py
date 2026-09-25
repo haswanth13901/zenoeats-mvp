@@ -57,6 +57,8 @@ def configuration_problems(settings: Settings) -> list[str]:
         if not value or "replace_me" in value:
             problems.append(f"{name} is not set; no order can be paid or confirmed.")
 
+    problems.extend(_key_mode_problems(settings))
+
     if not settings.ADMIN_USERS.strip():
         problems.append("ADMIN_USERS is empty; nobody can sign in to the super admin portal.")
 
@@ -66,6 +68,41 @@ def configuration_problems(settings: Settings) -> list[str]:
             "storefronts would resolve to no restaurant."
         )
 
+    return problems
+
+
+def _key_mode(value: str) -> str | None:
+    """'test' or 'live' from a Stripe or Clerk key's prefix; None if unset."""
+    if "_test_" in value[:8]:
+        return "test"
+    if "_live_" in value[:8]:
+        return "live"
+    return None
+
+
+def _key_mode_problems(settings: Settings) -> list[str]:
+    keys = {
+        name: _key_mode(getattr(settings, name))
+        for name in ("STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "CLERK_SECRET_KEY")
+    }
+    problems: list[str] = []
+
+    # A test publishable key beside a live secret key cannot confirm a single
+    # payment: the browser and the server are talking to different Stripes.
+    stripe_modes = {keys["STRIPE_SECRET_KEY"], keys["STRIPE_PUBLISHABLE_KEY"]} - {None}
+    if len(stripe_modes) > 1:
+        problems.append(
+            "STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY are from different modes "
+            "(one test, one live); checkout cannot confirm a payment."
+        )
+
+    on_test = sorted(name for name, mode in keys.items() if mode == "test")
+    if on_test and not settings.ALLOW_TEST_KEYS:
+        problems.append(
+            f"{', '.join(on_test)} {'is a test key' if len(on_test) == 1 else 'are test keys'}; "
+            "production would take orders and collect no money. Use live keys, "
+            "or set ALLOW_TEST_KEYS=true on staging."
+        )
     return problems
 
 

@@ -24,6 +24,27 @@ from app.config import settings
 
 integration = pytest.mark.integration
 
+# Every event id _event() hands out, so each test's deliveries can be removed
+# after it. Left behind they sit at RECEIVED forever -- nothing processes a
+# test event -- and /health/operations reads them as a stuck worker.
+_made: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _remove_stored_events():
+    yield
+    from sqlalchemy import text
+
+    from app.services.retention import _platform_transaction
+
+    if _made:
+        with _platform_transaction() as session:
+            session.execute(
+                text("DELETE FROM stripe_events WHERE stripe_event_id = ANY(:ids)"),
+                {"ids": list(_made)},
+            )
+        _made.clear()
+
 
 def _client():
     from fastapi.testclient import TestClient
@@ -43,8 +64,10 @@ def _signed(event: dict, secret: str | None = None) -> tuple[str, dict]:
 
 
 def _event(event_type="payment_intent.succeeded", account="acct_test_123", **extra):
+    event_id = f"evt_test_{uuid.uuid4().hex[:16]}"
+    _made.append(event_id)
     return {
-        "id": f"evt_test_{uuid.uuid4().hex[:16]}",
+        "id": event_id,
         "object": "event",
         "type": event_type,
         "account": account,

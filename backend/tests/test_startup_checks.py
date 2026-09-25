@@ -25,6 +25,8 @@ def _production(**overrides) -> Settings:
         CLERK_ISSUER="https://clerk.zenoeats.com",
         CLERK_SECRET_KEY="sk_live_abc",
         STRIPE_SECRET_KEY="sk_live_abc",
+        STRIPE_PUBLISHABLE_KEY="pk_live_abc",
+        ALLOW_TEST_KEYS=False,
         STRIPE_CONNECT_WEBHOOK_SECRET="whsec_abc",
         ADMIN_USERS="ops@zenoeats.com:aGFzaA==",
         AUTH_DEV_BYPASS=False,
@@ -60,6 +62,46 @@ def test_production_refuses_to_start(overrides, fragment):
     with pytest.raises(RuntimeError) as caught:
         startup_checks.enforce(_production(**overrides))
     assert fragment in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "overrides, fragment",
+    [
+        ({"STRIPE_SECRET_KEY": "sk_test_abc"}, "STRIPE_SECRET_KEY is a test key"),
+        ({"STRIPE_SECRET_KEY": "rk_test_abc"}, "STRIPE_SECRET_KEY is a test key"),
+        ({"STRIPE_PUBLISHABLE_KEY": "pk_test_abc", "STRIPE_SECRET_KEY": "sk_test_abc"},
+         "STRIPE_PUBLISHABLE_KEY, STRIPE_SECRET_KEY are test keys"),
+        ({"CLERK_SECRET_KEY": "sk_test_abc"}, "CLERK_SECRET_KEY is a test key"),
+    ],
+)
+def test_production_refuses_test_keys(overrides, fragment):
+    """Live everywhere but one key still takes orders and collects nothing."""
+    with pytest.raises(RuntimeError) as caught:
+        startup_checks.enforce(_production(**overrides))
+    assert fragment in str(caught.value)
+
+
+def test_staging_may_run_on_test_keys_when_it_says_so():
+    staging = _production(
+        ALLOW_TEST_KEYS=True,
+        STRIPE_SECRET_KEY="sk_test_abc",
+        STRIPE_PUBLISHABLE_KEY="pk_test_abc",
+        CLERK_SECRET_KEY="sk_test_abc",
+    )
+    assert startup_checks.configuration_problems(staging) == []
+
+
+@pytest.mark.parametrize("allow_test_keys", [False, True])
+def test_stripe_keys_from_different_modes_are_refused(allow_test_keys):
+    """The browser and the server would be talking to different Stripes."""
+    problems = startup_checks.configuration_problems(
+        _production(
+            ALLOW_TEST_KEYS=allow_test_keys,
+            STRIPE_SECRET_KEY="sk_live_abc",
+            STRIPE_PUBLISHABLE_KEY="pk_test_abc",
+        )
+    )
+    assert any("different modes" in p for p in problems)
 
 
 def test_every_problem_is_reported_at_once():

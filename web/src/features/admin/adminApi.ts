@@ -93,6 +93,14 @@ export type StripeSync = {
   currently_due: string[];
   past_due: string[];
   changed: boolean;
+  /** The storefront's Apple Pay / Google Pay registration on this account.
+   *  Null until the account can charge, and on a development domain. */
+  wallet_domain: {
+    domain: string;
+    apple_pay: string;
+    google_pay: string;
+    problem: string | null;
+  } | null;
 };
 
 export type RestaurantPatch = Partial<{

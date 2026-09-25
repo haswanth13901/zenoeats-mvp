@@ -920,10 +920,15 @@ def refresh_stripe_status(
                 "This restaurant has no connected account yet. Start onboarding first.",
             )
         account_id = account.stripe_account_id
+        slug = restaurant.slug
 
     # Outside the transaction: a Stripe round trip must never hold a database
     # lock open.
     status = stripe_service.retrieve_account_status(account_id)
+    # Also how a restaurant activated before wallets were registered gets
+    # them: one press of "Refresh Stripe". Only once it can take charges.
+    wallets = (stripe_service.ensure_wallet_domain(account_id, slug)
+               if status["charges_enabled"] else None)
 
     with tenant_session(restaurant_id) as session:
         account = session.execute(select(RestaurantPaymentAccount)).scalar_one()
@@ -959,6 +964,7 @@ def refresh_stripe_status(
         currently_due=status["currently_due"],
         past_due=status["past_due"],
         changed=changed,
+        wallet_domain=wallets,
     )
 
 
@@ -990,6 +996,7 @@ def activate_restaurant(restaurant_id: UUID, admin: User = Depends(require_platf
         uses_stripe_tax = restaurant.tax_mode == TaxMode.STRIPE_TAX.value
         tax_view = dict(_tax_fields(restaurant))
         account_id = account.stripe_account_id if account else None
+        slug = restaurant.slug
 
     # A Stripe Tax restaurant that went live without working tax settings
     # would refuse every checkout. Asked outside the transaction (rule 6).
@@ -1007,11 +1014,17 @@ def activate_restaurant(restaurant_id: UUID, admin: User = Depends(require_platf
             raise errors.ApiError(404, "RESTAURANT_NOT_FOUND", "No such restaurant.")
         restaurant.status = RestaurantStatus.ACTIVE.value
 
+    # After the restaurant is live, and never a reason for it not to be:
+    # without this the storefront takes cards but never offers Apple Pay or
+    # Google Pay. Outside any transaction (rule 6).
+    wallets = stripe_service.ensure_wallet_domain(account_id, slug)
+
     with system_session() as session:
         _audit(session, admin, "SUPER_ADMIN_ACTIVATE_RESTAURANT",
-               {"restaurant_id": str(restaurant_id)})
+               {"restaurant_id": str(restaurant_id), "wallet_domain": wallets})
 
-    return {"restaurant_id": str(restaurant_id), "status": RestaurantStatus.ACTIVE.value}
+    return {"restaurant_id": str(restaurant_id), "status": RestaurantStatus.ACTIVE.value,
+            "wallet_domain": wallets}
 
 
 @router.post("/restaurants/{restaurant_id}/suspend", response_model=dict)

@@ -674,6 +674,10 @@ class StripeSyncOut(BaseModel):
     currently_due: list[str] = []
     past_due: list[str] = []
     changed: bool = False
+    # Apple Pay / Google Pay registration of the storefront's domain on this
+    # account: {domain, apple_pay, google_pay, problem}. None when the account
+    # cannot charge yet, or the domain is a development one.
+    wallet_domain: dict | None = None
 
 
 class AdminOrderOut(BaseModel):

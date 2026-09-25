@@ -1,33 +1,52 @@
-# Zenoeats MVP — pickup ordering through successful payment
+# Zenoeats — online ordering for restaurants, from menu to handover
 
-A working slice of the v3.0 architecture baseline: multi-tenant subdomain
-portals, Clerk-backed customer sign-in on our own pages, an Item → Modifier menu served by meal periods, and Stripe
-Connect checkout that ends with a webhook-confirmed paid order on the kitchen
-board.
+A multi-restaurant ordering platform built on the v3.0 architecture
+baseline. Each restaurant gets its own subdomain storefront, with an Item →
+Modifier menu served by meal periods. Customers sign in with Clerk on our
+own pages, or check out as a guest, for pickup or delivery. Payment is a
+Stripe Connect direct charge, confirmed by webhook, and the paid order lands
+on the restaurant's kitchen board. There it is handed over with a pickup
+PIN, or cancelled and refunded from the same screen.
+
+**Status (25 September 2026):** the application is feature-complete for
+launch, and an end-to-end pass against the running stack found no bugs in
+the ordering path. It covered:
+
+- guest checkout with a Stripe test-card payment
+- the kitchen board, the PIN handover, and cancel and refund
+- the admin portal
+- the security checks
+
+What remains before real money is accounts, the domain, the server and a
+legal review, tracked in
+[`STEPS_BEFORE_PRODUCTION.md`](STEPS_BEFORE_PRODUCTION.md). See
+[Production](#production) below.
 
 ## What is in this build
 
 | Area | Included |
 |---|---|
 | Tenancy | Wildcard subdomain resolution, PostgreSQL RLS, three-role DB model |
-| Identity | Customers: Clerk (email/password, Google) behind our own `/account` pages. Staff: platform-issued passwords. Admins: `ADMIN_USERS` |
-| Customer profile | `/profile`: name, phone and address; order history at this restaurant; favourite items (accounts only), saved from a heart on the menu |
-| Menu | Item types the restaurant names itself, items, meal periods that serve them, combos, reusable modifier groups |
+| Identity | Customers: Clerk (email and password, plus Google, Apple and Facebook when enabled in Clerk) behind our own `/account` pages, or **guest checkout** with just an email. Staff: platform-issued passwords. Admins: `ADMIN_USERS` |
+| Customer profile | `/profile`: name, phone and address, a change-email link beside the email, order history at this restaurant, favourite items saved from a heart on the menu, and **Close my account**, which removes the sign-in and personal details and keeps paid orders. Accounts only; a guest sees their orders |
+| Menu | Item types the restaurant names itself, items, meal periods that serve them, combos with their own photo, reusable modifier groups, and **calories** per item and per size or option, summed for combos. One card size for every item and combo |
 | Brand | Each restaurant uploads its logo and chooses how its name is shown — typed in one of six fonts, or its own lettering as an image — in Settings; shown in every customer header and on the sign-in pages, with or without storefront customization |
 | Delivery map | Each restaurant chooses how its tracking map is coloured -- Google standard, light, dark, or built from its own palette -- and whether the pins take its colours |
 | Storefront | Each restaurant sets its own palette, font pairing, rotating banners with their own framing, category shortcuts and collections — behind a platform switch |
-| Checkout | Server-authoritative repricing, TaxService, idempotent order creation |
-| Payments | Stripe Connect direct charges, durable webhook inbox, account-match guard |
-| Ops | Kitchen board, pickup PIN, menu builder, staff invitations, reports, deliveries the restaurant runs itself, self-service settings, storefront editor |
-| Admin | Super admin portal: onboarding, activation, platform reports, CSV |
+| Cart and checkout | A **cart page** (`/cart`) before anything is asked. Then checkout: pickup or delivery, contact details, server-authoritative repricing, TaxService (flat rate or Stripe Tax), idempotent order creation |
+| Payments | Stripe Connect direct charges, a durable webhook inbox, an account-match guard, a Stripe read-back fallback when a webhook is late, and **Apple Pay / Google Pay** domains registered per restaurant |
+| Ops | Kitchen board, pickup PIN, **cancel and refund**, menu builder, stock, staff invitations, reports, deliveries the restaurant runs itself with live driver tracking, self-service settings, storefront editor |
+| Admin | Super admin portal: onboarding, activation, Stripe refresh, platform reports, CSV |
 | Policies | Privacy, terms, refunds and data deletion as files outside React, linked from sign-up, checkout and every customer page; agreement recorded per customer |
-| Infra | Docker Compose, Nginx, two Redis instances, Celery, Alembic, GitHub Actions |
+| Infra | Docker Compose (development, plus a production override), Nginx, two Redis instances, Celery, Alembic, GitHub Actions publishing images to GHCR |
+| Operations | `/health`, `/health/ready`, `/health/operations`, nightly encrypted off-site backups with a restore drill, Sentry, a production `.env` generator |
 
 ## What is deliberately not here
 
 Route planning, a native driver app, WebSockets, cash payments, reconciliation, promotions,
 reviews, SMS, push, PITR. All of it stays in the v3.0 baseline for later
-releases. See "Adding delivery" at the bottom.
+releases. What delivery does and does not do yet is under "Delivery" at the
+bottom.
 
 Checkout requires a name, phone number and address on every order, plus the
 email the customer signed in or started their guest session with. A customer
@@ -111,13 +130,19 @@ system read surface.
   fifteen minutes. "Done today" lists today's handed-over and cancelled
   orders, searchable by number, with who did it and any reason given. "Collect with PIN" needs the customer's six digits;
   five wrong attempts locks that order. A manager can hand an order over
-  without the PIN or cancel a paid one, each with a reason; cancelling does
-  not refund, which stays in the restaurant's Stripe Dashboard. A ticket
-  refunded there is marked "refunded".
-- **Deliveries** is for the orders a restaurant runs out itself. Customers
-  cannot order a delivery: a manager assigns a paid order to one of the
-  restaurant's drivers and types the address taken by phone, which is what
-  makes it a delivery. The kitchen's "ready" then means ready for the driver,
+  without the PIN or cancel a paid one, each with a reason. **Cancel and
+  refund** sends the whole amount back to the customer's card, Zenoeats' fee
+  included. Untick it for a no-show the restaurant is still charging for. A
+  cancelled order not yet refunded waits under **Refunds to issue**, one
+  click from refunding. Partial refunds, and refunds after collection, are
+  made in the restaurant's own Stripe Dashboard, and a ticket refunded there
+  is marked "refunded" too.
+- **Deliveries** is for the orders a restaurant runs out itself. A delivery
+  starts one of two ways. A customer chooses Delivery at checkout, which a
+  restaurant offers once it has set its delivery rings. Or a manager sends a
+  paid collection out and types the address taken by phone. Either way a
+  manager assigns one of the restaurant's drivers. The kitchen's "ready" then
+  means ready for the driver,
   and the driver marks it picked up, then delivered -- no PIN at a doorstep,
   so the driver saying so is what completes it, recorded against them. A
   driver sees their own deliveries and nothing else; a manager sees them all
@@ -177,8 +202,8 @@ system read surface.
   because Stripe is handed the amount and decides for the jurisdiction.
 - **Reports** covers today, yesterday, the last 7 days, this month or chosen
   dates -- the restaurant's own days, in its timezone, with each order counted
-  on the day it was paid there. It shows net sales (gross less refunds made
-  from the Stripe Dashboard), paid orders, average order, tax net of refunds,
+  on the day it was paid there. It shows net sales (gross less refunds, whether
+  made from the board or the Stripe Dashboard), paid orders, average order, tax net of refunds,
   combo discounts, cancelled orders, a by-day breakdown, top items (leaving out
   cancelled and fully refunded orders), and checkouts that expired unpaid.
   Deliveries are counted apart from collections and per driver -- the same
@@ -299,10 +324,19 @@ is caught even if the map was edited to allow it.
 
 ### Super admin screen
 
-Create a restaurant (starts in draft), connect its Stripe account through
-hosted onboarding, then activate. Activation is gated on payments only: it
-refuses unless the connected account has charges enabled. The menu is not
+Create a restaurant (starts in draft), create its owner, connect its Stripe
+account through hosted onboarding, then activate. Activation is gated on
+payments only: it refuses unless the connected account has charges enabled
+(and, for a Stripe Tax restaurant, working tax settings). The menu is not
 part of the gate, so a restaurant can go live and fill its menu afterwards.
+
+Activating also registers the storefront's domain for **Apple Pay and Google
+Pay** on the restaurant's connected account. Without that registration Stripe
+shows only the card form. **Refresh Stripe** re-reads the account from
+Stripe, and does the same registration for a restaurant already live. The
+row then shows "Apple Pay active · Google Pay active", or Stripe's reason if
+not. A wallet problem never blocks activation, because cards work
+regardless.
 Every read on this page writes to `platform_audit_logs` with your user, the
 scope requested, and a correlation id.
 
@@ -310,7 +344,8 @@ scope requested, and a correlation id.
 
 ### 1. Local DNS
 
-Wildcard subdomains need to resolve. Add to `/etc/hosts`:
+Wildcard subdomains need to resolve. Add to `/etc/hosts`
+(`C:\Windows\System32\drivers\etc\hosts` on Windows, edited as administrator):
 
 ```
 127.0.0.1  zenoeats.local
@@ -406,12 +441,24 @@ different secret from the platform endpoint's.
 
 ### 3. Start
 
+Two ways, and only one at a time (`scripts/dev_preflight.py` refuses a
+second):
+
 ```bash
-make up
-make seed
+# Everything in Docker -- closest to production, slowest to rebuild
+make up-all                # = docker compose --profile app up -d --build
+make seed                  # the demo restaurant and menu, once
+
+# Or infrastructure in Docker, the app native -- fastest for daily work
+make infra                 # postgres, both Redis, nginx
+make migrate && make seed
+make api                   # each in its own terminal
+make web
+make worker                # only needed for payments and emails
 ```
 
-Open `http://spicehouse.zenoeats.local:8080`.
+Open `http://spicehouse.zenoeats.local:8080`. `make fresh` wipes the
+database and starts again from migrations and the seed.
 
 ### 4. Connect a real test-mode restaurant account
 
@@ -446,10 +493,17 @@ confirmation locally usually means one of the two is not running.
 
 ### 6. Pay
 
-Card `4242 4242 4242 4242`, any future expiry, any CVC. The order page will
-sit on "Confirming your payment" for a second or two and then flip to
-"Being made now" when the webhook lands. That pause is the system working
-correctly, not a bug.
+Add something to the cart, open the cart and **Go to checkout**. Sign in, or
+use **Continue as guest** with any email. Pay with card
+`4242 4242 4242 4242`, any future expiry, any CVC and ZIP. The order page
+will sit on "Confirming your payment" for a second or two and then flip to
+"Being made now", with the pickup PIN, when the webhook lands. That pause is
+the system working correctly, not a bug. If `stripe listen` is not running,
+the page gets there anyway after about 10 seconds by asking Stripe itself.
+
+Then, signed in as staff at `/manage`: the order is on the board. **Mark
+ready for pickup**, then **Collect with PIN** with the customer's six digits.
+Or **cancel order** → **Cancel and refund** to see a test-mode refund.
 
 ## Verifying tenant isolation
 
@@ -457,7 +511,7 @@ correctly, not a bug.
 make rls
 ```
 
-Six gates run. The important one creates two restaurants, writes a menu into
+Seven gates run. The important one creates two restaurants, writes a menu into
 tenant B, then queries for it from a tenant A session with no application
 filter at all. It must return zero rows. The others assert that no runtime
 role has `BYPASSRLS`, that no runtime role owns a table, and that
@@ -475,8 +529,17 @@ directly -- no Clerk component is rendered.
 
 * **Sign-up** sends a 6-digit code, entered on the same page.
 * **Forgot password** sends a 6-digit code, entered with the new password.
-* **Google** goes through Clerk and returns to `/account/sso-callback`, which
-  finishes the sign-in (or sign-up) and continues to checkout.
+* **Google, Apple and Facebook** each get a button when enabled in the Clerk
+  dashboard. They go through Clerk and return to `/account/sso-callback`,
+  which finishes the sign-in (or sign-up) and continues to checkout. A
+  provider that did not supply everything, such as a Facebook account with
+  no email, lands on a step that asks for exactly what is missing.
+* **Two-step verification** is handled on the sign-in page: authenticator
+  app, text, email or a backup code.
+* **Guests** skip all of it. **Continue as guest** on the sign-in page takes
+  an email (and optionally a name) and signs the browser in to a guest
+  session. The confirmation email carries a private link that reopens the
+  order and its pickup PIN, and that browser keeps them for 30 days.
 * **The API** verifies Clerk's session token on every order request, checks it
   was minted for one of our own hosts, and keeps one `users` row per Clerk
   user. A new customer's email and name are read from Clerk's Backend API the
@@ -675,11 +738,13 @@ backend/
                     stall-watch (says which line blocked the event loop)
   app/db/           engines and the SET LOCAL tenant session; every wait bounded
   app/models/       SQLAlchemy models, frozen enums, transition matrix
-  app/services/     pricing, orders, tax, Stripe, storefront, images, terms
+  app/services/     pricing, orders, tax, Stripe, storefront, images, terms,
+                    ops_health (what /health/operations checks)
   app/api/v1/       portal, orders, customer, restaurant, admin, webhooks
   app/workers/      Celery app and tasks
   alembic/          schema, RLS policies, role grants
-  tests/            unit tests plus the RLS gates
+  tests/            unit and integration tests plus the RLS gates
+  scripts/          seed.py (demo data), hash_password.py (ADMIN_USERS entries)
 web/
   src/routes/             the route table, and one lazy area per portal
   src/pages/storefront/   customer: menu, checkout, order tracking
@@ -695,10 +760,21 @@ web/
   nginx.conf              static serving: SPA fallback, real files for
                           /login and /legal
 infra/
-  postgres/         role creation, runs on first boot
-  nginx/            origin edge with subdomain routing
+  postgres/         role creation, runs on first boot; passwords from the
+                    environment in production
+  nginx/            development edge; production/ is the HTTPS edge
+  systemd/          the nightly backup timer for the production server
 scripts/
   dev_preflight.py  refuses to run the app natively and in Docker at once
+  check_storefront.py  read-only latency check through the edge
+  make_prod_env.py  writes a production .env with fresh secrets; --check
+  backup.sh         nightly encrypted backup of the database and images
+  restore_drill.sh  restores a backup into a scratch database and proves it
+docker-compose.yml       development: infrastructure, plus the app behind
+                         --profile app
+docker-compose.prod.yml  production override: GHCR images, passwords, no
+                         internal ports, HTTPS edge
+STEPS_BEFORE_PRODUCTION.md  the launch checklist and first-deploy runbook
 ```
 
 ### What a customer downloads
@@ -724,30 +800,84 @@ the manage shell, so they live behind the boundary rather than beside it.
 CI asserts it, since one static import undoes the whole thing and leaves no
 other trace.
 
-## Licence
+## Tests
 
-MIT. See [`LICENSE`](LICENSE).
+| Suite | Run | What |
+|---|---|---|
+| Backend | `make test` (native), or in a container, below | 861 tests: pricing, orders, payments and webhooks, refunds, tax, roles, the seven RLS gates, health, startup checks |
+| Tenant isolation | `make rls` | The RLS gates alone (see above) |
+| Web | `node --test tests/*.test.mjs` in `web/` | Storefront presentation, calories, maps, profile |
+| Web checks | `npm run lint`, `npx tsc --noEmit`, `npm run build` in `web/` | |
 
-That covers this source code and nothing else. The policy pages under
-`web/legal/` are unreviewed drafts written for this deployment, not legal
-advice and not reusable as such, and the MIT warranty disclaimer is not a
-substitute for taking your own advice on them. Running this software means
-handling other people's payment and contact details under whatever law
-applies to you.
+With the app running in Docker, the backend suite runs in a one-off
+container against the same Postgres and Redis:
 
-## Before real money
+```bash
+docker compose --profile app run --rm --no-deps   -e ROOT_DOMAIN=zenoeats.local -e IMAGES_DIR=/tmp/images   -e REDIS_RUNTIME_URL=redis://redis-runtime:6379/0   -e CELERY_BROKER_URL=redis://redis-broker:6379/0   -v "$PWD/backend:/srv" migrate sh -c "mkdir -p /tmp/images && python -m pytest tests -q"
+```
 
-`STEPS_BEFORE_PRODUCTION.md` is the checklist: every code change, account,
-infrastructure, legal and rehearsal step before launch, with what has been done
-and what is still open. Keep it current rather than a list here.
+CI (`.github/workflows/ci.yml`) runs all of it on every push and pull request,
+plus a dependency audit, the reversible-migration check and a bundle-size
+guard. On `main` and on version tags it publishes the `api` and `web` images
+to GHCR.
 
-The production edge and deployment shape are in `docker-compose.prod.yml` and
-`infra/nginx/production/`.
+## Health checks
 
-## Adding delivery later
+| Path | Answers | Use |
+|---|---|---|
+| `/health` | always 200 while the process runs | container liveness |
+| `/health/ready` | 503 unless the database answers as the app role | uptime monitor |
+| `/health/operations` | 503 naming what is failing: `worker_heartbeat`, `webhooks_stuck`, `webhooks_failed`, `stale_checkouts`, `redis_runtime`, `redis_broker`, `database`, `disk` | uptime monitor |
 
-Customers can choose delivery at checkout. What is missing is everything after
-the driver sets off.
+`/health/operations` watches the parts that fail without an error:
+- a stopped worker leaves payment webhooks unprocessed
+- a stopped beat leaves abandoned checkouts unexpired
+- a Redis outage turns the rate limiter off
+- a full disk stops Postgres
+
+Beat schedules a heartbeat task every minute, and the worker records it, so
+a stale heartbeat means either has stopped. The endpoint gives names only,
+never counts, because it is public. All three paths answer on every host.
+
+## Production
+
+The target is a single Linux VM (2 vCPU / 4 GB is a sensible floor) running
+the images CI publishes. Nothing is built on the server:
+
+```bash
+python3 scripts/make_prod_env.py --domain <domain> --release v1.0.0   # once
+python3 scripts/make_prod_env.py --check .env                         # until clean
+export COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+docker compose --profile app pull && docker compose --profile app up -d
+```
+
+What the production shape guarantees:
+
+- **Configuration.** The API refuses to start with an unsafe configuration:
+  a short session secret, missing Clerk or Stripe keys, **test keys**, a dev
+  domain, or the owner's database URL. `docker-compose.prod.yml` refuses to
+  start without real database and Redis passwords.
+- **Network.** Only nginx listens, on 80/443 with HTTPS and HSTS. Postgres,
+  Redis, the API and web publish no port. The API trusts forwarding headers
+  from nginx's fixed address alone, and the edge takes the visitor's IP from
+  Cloudflare only on Cloudflare's ranges.
+- **Migrations.** They run as a one-off job with the owner's credentials,
+  before the API starts. Runtime processes never hold them.
+- **Backups.** `scripts/backup.sh`, nightly by systemd, takes the database
+  and the images together, encrypted with age to a key the server does not
+  hold, off-site with rclone. `scripts/restore_drill.sh` proves a backup
+  restores whole.
+
+[`STEPS_BEFORE_PRODUCTION.md`](STEPS_BEFORE_PRODUCTION.md) is the launch
+checklist, with what is done and what is open: accounts, the domain, backups,
+monitoring, legal, a staging rehearsal. Its §11 is the first deploy, command
+by command. Keep it current rather than a list here.
+
+## Delivery
+
+Customers can choose delivery at checkout, and a paid order can be followed
+to the door on a live map. What is missing is below, under "What a
+customer-facing release still needs".
 
 **What works.** `Order.fulfillment_type` is `DELIVERY` when the customer chose
 it at checkout, or when a manager sends a paid collection out, and the transition matrix in `app/models/commerce.py` carries
@@ -799,7 +929,8 @@ about every photograph on every view and was told 304 — thirty round trips
 for a thirty-photo menu, and nothing a CDN could answer on its own.
 
 Storage stays on the API host's disk for launch, which caps the deployment at
-one API machine and makes backing up `IMAGES_DIR` non-negotiable. Rows hold
+one API machine and makes backing up `IMAGES_DIR` non-negotiable
+(`scripts/backup.sh` takes it with every database dump). Rows hold
 keys and never URLs and `IMAGES_PUBLIC_BASE` already takes an absolute URL,
 so moving to a bucket later is one class and one setting. The triggers for
 doing so are in `STEPS_BEFORE_PRODUCTION.md` §4.
@@ -836,8 +967,8 @@ which kind of silence it was: `the whole API process was paused` means the
 host, not the code; `event loop blocked` is a real bug and prints the line
 responsible. The portal pages now retry and reconnect on their own either way.
 Local Compose defaults to one API worker to reduce memory usage and avoid
-multiprocess watchdog restarts on a busy laptop. Set `API_WORKERS` explicitly
-for a production host after sizing its resources and database pools.
+multiprocess watchdog restarts on a busy laptop. The production file defaults
+to two; size `API_WORKERS` against the host and the database pools.
 
 **What a customer-facing release still needs.** Stripe Tax
 sources tax at the restaurant's address, which is right for collection and
@@ -885,3 +1016,14 @@ font pairing. Staff and platform screens keep their own theme.
 Custom domains, custom CSS or HTML, per-page layouts and object storage are
 out of scope. Applying restaurant themes to the separate `web/login/`
 customer sign-in pages remains a follow-up.
+
+## Licence
+
+MIT. See [`LICENSE`](LICENSE).
+
+That covers this source code and nothing else. The policy pages under
+`web/legal/` are unreviewed drafts written for this deployment, not legal
+advice and not reusable as such, and the MIT warranty disclaimer is not a
+substitute for taking your own advice on them. Running this software means
+handling other people's payment and contact details under whatever law
+applies to you.

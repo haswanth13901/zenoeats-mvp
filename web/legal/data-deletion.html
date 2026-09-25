@@ -25,17 +25,27 @@
         >
         <h1>Deleting your data</h1>
         <p class="legal-meta">
-          Last updated <time datetime="2026-09-21">21 September 2026</time>
+          Last updated <time datetime="2026-09-25">25 September 2026</time>
         </p>
       </header>
 
       <p>
-        You can ask for your Zenoeats account and the personal information held
-        with it to be deleted. This page explains how, and what happens to your
-        past orders.
+        You can close your Zenoeats account yourself, at any time, and the
+        personal information held with it is deleted. This page explains how,
+        and what happens to your past orders.
       </p>
 
-      <h2>How to ask</h2>
+      <h2>Close it yourself</h2>
+      <p>
+        Sign in on any restaurant’s ordering page, open
+        <strong>Manage profile</strong>, and under
+        <strong>Personal details</strong> choose
+        <strong>Close my account</strong> at the foot. It asks once
+        more before doing anything, and then takes effect straight away, for
+        every restaurant on Zenoeats at once. It cannot be undone.
+      </p>
+
+      <h2>If you cannot sign in</h2>
       <p>
         Email
         <a href="mailto:PLACEHOLDER@example.com">PLACEHOLDER@example.com</a>
@@ -58,7 +68,8 @@
       <p>
         Removing Zenoeats from your Google, Apple or Facebook account stops it
         being used to sign in, but it does not by itself delete what Zenoeats
-        holds. Email us as above to have that removed.
+        holds. Close your account from Manage profile first, or email us as
+        above if you can no longer sign in.
       </p>
 
       <h2>What gets deleted</h2>
@@ -117,10 +128,12 @@
           beyond replacing the placeholders. First, a monitored mailbox and a
           named person behind it — a deletion page with no process behind it is
           worse than none, and the response windows above are a commitment.
-          Second, note that the software has <em>no self-service account
-          deletion</em>: the only route today is a Clerk-side delete, which
-          soft-deletes the customer through the <code>user.deleted</code>
-          webhook. Everything above is therefore a manual procedure. A lawyer
+          Second, the two routes are not the same kind of thing. Closing from
+          Manage profile is automatic: it deletes the Clerk sign-in first, then
+          the details and favourites, and keeps paid orders. The email route is
+          a manual procedure a person carries out once the request is
+          confirmed, by deleting the user in Clerk, whose
+          <code>user.deleted</code> webhook runs the same removal. A lawyer
           should also confirm that retaining paid orders, and the contact
           details on them, is justified under the law that applies to you, and
           that the stated windows meet its deadlines. Delete this paragraph and
