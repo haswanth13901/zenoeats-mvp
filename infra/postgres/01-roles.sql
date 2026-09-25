@@ -5,12 +5,24 @@
 --   zenoeats_system   narrow cross-tenant discovery + platform inboxes.
 --
 -- None of these has BYPASSRLS. The CI privilege gate asserts that.
--- Passwords here are for local development. Production injects them from
--- protected secret files on the VM (section 16.5).
+--
+-- Passwords come from ZENOEATS_{MIGRATE,APP,SYSTEM}_PASSWORD in the
+-- environment of whoever runs this file (the postgres container, on first
+-- start of an empty volume). Unset, each falls back to its *_dev_pw, which is
+-- what development and CI use. docker-compose.prod.yml refuses to start
+-- without all three, so production never gets a dev password by omission.
+-- This runs once per volume: changing a password later is an ALTER ROLE.
 
-CREATE ROLE zenoeats_migrate LOGIN PASSWORD 'migrate_dev_pw' NOBYPASSRLS;
-CREATE ROLE zenoeats_app     LOGIN PASSWORD 'app_dev_pw'     NOBYPASSRLS;
-CREATE ROLE zenoeats_system  LOGIN PASSWORD 'system_dev_pw'  NOBYPASSRLS;
+\getenv migrate_pw ZENOEATS_MIGRATE_PASSWORD
+\getenv app_pw ZENOEATS_APP_PASSWORD
+\getenv system_pw ZENOEATS_SYSTEM_PASSWORD
+\if :{?migrate_pw} \else \set migrate_pw migrate_dev_pw \endif
+\if :{?app_pw} \else \set app_pw app_dev_pw \endif
+\if :{?system_pw} \else \set system_pw system_dev_pw \endif
+
+CREATE ROLE zenoeats_migrate LOGIN PASSWORD :'migrate_pw' NOBYPASSRLS;
+CREATE ROLE zenoeats_app     LOGIN PASSWORD :'app_pw'     NOBYPASSRLS;
+CREATE ROLE zenoeats_system  LOGIN PASSWORD :'system_pw'  NOBYPASSRLS;
 
 GRANT CONNECT ON DATABASE zenoeats TO zenoeats_migrate, zenoeats_app, zenoeats_system;
 

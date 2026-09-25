@@ -1,22 +1,142 @@
 # Production shape, layered over docker-compose.yml:
 #
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile app pull
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile app up -d
 #
 # Only what differs from development lives here. The base file's nginx fronts
 # the api and web processes running natively on a developer's machine; this
 # one fronts the api and web containers, over HTTPS, for the real domain.
 #
-# Needs, next to this file or wherever the variables point:
-#   ROOT_DOMAIN      in .env, e.g. zenoeats.com
-#   TLS_CERT_DIR     a directory holding fullchain.pem and privkey.pem for
-#                    ROOT_DOMAIN and *.ROOT_DOMAIN (default ./infra/certs,
-#                    which is git-ignored)
+# Needs, in the .env next to this file (compose reads it for the ${...} below;
+# `up` refuses to start while any required one is missing or empty):
+#
+#   ROOT_DOMAIN                  e.g. zenoeats.com
+#   API_IMAGE, WEB_IMAGE         the images CI published for the release, e.g.
+#                                ghcr.io/<owner>/zenoeats-mvp/api:v1.0.0 --
+#                                never built on the server (rule 12)
+#   POSTGRES_PASSWORD            the postgres superuser
+#   ZENOEATS_MIGRATE_PASSWORD    \
+#   ZENOEATS_APP_PASSWORD         } the three roles infra/postgres/01-roles.sql
+#   ZENOEATS_SYSTEM_PASSWORD     /  creates on first start of an empty volume
+#   REDIS_BROKER_PASSWORD        the Celery broker
+#   REDIS_RUNTIME_PASSWORD       cache and rate limiter
+#   TLS_CERT_DIR                 optional; a directory holding fullchain.pem and
+#                                privkey.pem for ROOT_DOMAIN and *.ROOT_DOMAIN
+#                                (default ./infra/certs, which is git-ignored)
+#
+# Generate every password with `openssl rand -hex 32`. They are spliced into
+# connection URLs below, and hex needs no escaping there.
+#
+# The database and Redis URLs are built here from those passwords, so they
+# live in one place. The DATABASE_URL_* / DOCKER_* / CELERY_* / REDIS_* URL
+# lines in .env are ignored by these containers. Leave the DOCKER_* ones out
+# of a production .env; compose then warns they are unset, which is harmless.
+
+x-runtime-urls: &runtime-urls
+  DATABASE_URL_APP: postgresql+psycopg2://zenoeats_app:${ZENOEATS_APP_PASSWORD:?set ZENOEATS_APP_PASSWORD}@postgres:5432/zenoeats
+  DATABASE_URL_SYSTEM: postgresql+psycopg2://zenoeats_system:${ZENOEATS_SYSTEM_PASSWORD:?set ZENOEATS_SYSTEM_PASSWORD}@postgres:5432/zenoeats
+  CELERY_BROKER_URL: redis://:${REDIS_BROKER_PASSWORD:?set REDIS_BROKER_PASSWORD}@redis-broker:6379/0
+  CELERY_RESULT_BACKEND: redis://:${REDIS_BROKER_PASSWORD}@redis-broker:6379/1
+  REDIS_RUNTIME_URL: redis://:${REDIS_RUNTIME_PASSWORD:?set REDIS_RUNTIME_PASSWORD}@redis-runtime:6379/0
+
+# env_file hands a runtime container every line of .env, the role passwords
+# included. Only postgres and the migrate job may hold the owner's; the
+# runtime roles' own passwords are already in their URLs above.
+x-runtime-env: &runtime-env
+  <<: *runtime-urls
+  ZENOEATS_MIGRATE_PASSWORD: ""
+  REDIS_BROKER_PASSWORD: ""
+  REDIS_RUNTIME_PASSWORD: ""
 
 services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      # Read by infra/postgres/01-roles.sql, once, when the volume is empty.
+      ZENOEATS_MIGRATE_PASSWORD: ${ZENOEATS_MIGRATE_PASSWORD:?set ZENOEATS_MIGRATE_PASSWORD}
+      ZENOEATS_APP_PASSWORD: ${ZENOEATS_APP_PASSWORD}
+      ZENOEATS_SYSTEM_PASSWORD: ${ZENOEATS_SYSTEM_PASSWORD}
+    # Reached only over the compose network. Nothing on the host, let alone
+    # the internet, needs the database port.
+    ports: !reset []
+    restart: unless-stopped
+
+  redis-broker:
+    command: >
+      redis-server --appendonly yes --maxmemory-policy noeviction
+      --save 60 1000 --requirepass ${REDIS_BROKER_PASSWORD:?set REDIS_BROKER_PASSWORD}
+    environment:
+      REDISCLI_AUTH: ${REDIS_BROKER_PASSWORD}
+    # redis-cli exits 0 on an error reply too, so a NOAUTH would read as
+    # healthy. Look for the PONG.
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+    ports: !reset []
+    restart: unless-stopped
+
+  redis-runtime:
+    command: >
+      redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_RUNTIME_PASSWORD:?set REDIS_RUNTIME_PASSWORD}
+    environment:
+      REDISCLI_AUTH: ${REDIS_RUNTIME_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+    ports: !reset []
+    restart: unless-stopped
+
+  migrate:
+    image: ${API_IMAGE:?set API_IMAGE to the api image CI published}
+    build: !reset null
+    environment:
+      <<: *runtime-urls
+      DATABASE_URL_MIGRATE: postgresql+psycopg2://zenoeats_migrate:${ZENOEATS_MIGRATE_PASSWORD}@postgres:5432/zenoeats
+
+  api:
+    image: ${API_IMAGE:?set API_IMAGE to the api image CI published}
+    environment:
+      <<: *runtime-env
+      # Forwarding headers are believed from nginx's own address and nothing
+      # else -- not from the rest of the private ranges, where any other
+      # container on this network could otherwise claim to be any client.
+      # uvicorn reads the first, the rate limiter the second.
+      FORWARDED_ALLOW_IPS: ${EDGE_IP:-172.31.250.10}
+      TRUSTED_PROXY_CIDRS: ${EDGE_IP:-172.31.250.10}/32
+      # Two processes by default. Each holds its own database pool; keep
+      # API_WORKERS x pool size under Postgres' max_connections.
+      WEB_CONCURRENCY: ${API_WORKERS:-2}
+    ports: !reset []
+    restart: unless-stopped
+
+  worker:
+    image: ${API_IMAGE:?set API_IMAGE to the api image CI published}
+    environment:
+      <<: *runtime-env
+    restart: unless-stopped
+
+  # Exactly one, always. Two beats schedule every task twice; none means
+  # abandoned checkouts never expire. Never `--scale beat=`.
+  beat:
+    image: ${API_IMAGE:?set API_IMAGE to the api image CI published}
+    environment:
+      <<: *runtime-env
+    restart: unless-stopped
+
+  web:
+    image: ${WEB_IMAGE:?set WEB_IMAGE to the web image CI published}
+    build: !reset null
+    ports: !reset []
+    restart: unless-stopped
+
   nginx:
     # The development edge pins the host gateway; production proxies to the
     # api and web containers on the compose network instead.
     extra_hosts: !reset []
+    # A fixed address, so the api can trust exactly this container's
+    # forwarding headers (FORWARDED_ALLOW_IPS above).
+    networks:
+      default:
+        ipv4_address: ${EDGE_IP:-172.31.250.10}
     environment:
       ROOT_DOMAIN: ${ROOT_DOMAIN}
     volumes: !override
@@ -32,3 +152,11 @@ services:
       - api
       - web
     restart: unless-stopped
+
+# A fixed subnet, so nginx's address above is known in advance. Change both
+# EDGE_SUBNET and EDGE_IP together if 172.31.250.0/24 is taken on the host.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${EDGE_SUBNET:-172.31.250.0/24}
