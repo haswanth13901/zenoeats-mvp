@@ -180,11 +180,13 @@ def test_an_override_skips_the_pin_and_nothing_else(shop):
 def test_a_manager_cancels_a_paid_order_and_is_told_to_refund(shop):
     order_id = shop.order(status="PREPARING")
 
-    res = _post(shop.manager, order_id, "cancel", reason="Customer called to cancel")
+    # Without the refund: the money is a separate decision, and this test is
+    # about the order leaving the board. test_order_refund.py has the money.
+    res = _post(shop.manager, order_id, "cancel", reason="Customer called to cancel", refund=False)
     assert res.status_code == 200, res.text
     assert res.json() == {
         "order_id": order_id, "status": "CANCELLED", "payment_status": "PAID",
-        "refund_needed": True,
+        "refund_needed": True, "refund_problem": None,
     }
     row = shop.row(order_id)
     assert row.status == "CANCELLED" and row.cancelled_reason == "CANCELLED_BY_RESTAURANT"
@@ -206,6 +208,8 @@ def test_a_refunded_order_is_flagged_on_the_board_and_needs_no_refund(shop):
     res = _post(shop.manager, order_id, "cancel", reason="Refunded in Stripe")
     assert res.status_code == 200
     assert res.json()["refund_needed"] is False
+    # Nothing was asked of Stripe: there is nothing left to give back.
+    assert res.json()["refund_problem"] is None
 
 
 def test_cancel_is_refused_for_kitchen_staff_and_unpaid_orders(shop):
@@ -213,7 +217,7 @@ def test_cancel_is_refused_for_kitchen_staff_and_unpaid_orders(shop):
     assert _post(shop.cook, paid, "cancel", reason="never came").status_code == 403
 
     unpaid = shop.order(status="PENDING_PAYMENT", payment="PENDING", paid=False)
-    res = _post(shop.manager, unpaid, "cancel", reason="never came")
+    res = _post(shop.manager, unpaid, "cancel", reason="never came", refund=False)
     assert res.status_code == 409
     assert "has not been paid" in res.json()["detail"]["message"]
 

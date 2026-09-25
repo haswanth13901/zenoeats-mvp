@@ -9,6 +9,9 @@ import { ManageShell } from "@/features/restaurant/components/ManageShell";
 import {
   useAssignDriverMutation,
   useCancelOrderMutation,
+  useRefundOrderMutation,
+  useRefundsDueQuery,
+  type RefundDue,
   useCompleteOrderMutation,
   useMarkReadyMutation,
   useOrderBoardQuery,
@@ -21,10 +24,11 @@ import {
 } from "@/features/restaurant/restaurantApi";
 import { useNewOrderAlert } from "@/features/restaurant/newOrderAlert";
 import { canActOnOrders, canManage as roleCanManage } from "@/features/restaurant/nav";
+import { money } from "@/utils/format";
 import { selectSession } from "@/features/session/sessionSlice";
 import { ApiError, errorMessage } from "@/services/apiClient";
 
-type Acting = { orderId: string; kind: "override" | "cancel" | "assign" | "unassign" };
+type Acting = { orderId: string; kind: "override" | "cancel" | "refund" | "assign" | "unassign" };
 
 /** The board's heading, by who is looking at it. The page is the same for
  *  every floor role; what they came to it for is not. */
@@ -52,6 +56,8 @@ export function KitchenBoardPage() {
   const [completeOrder] = useCompleteOrderMutation();
   const [overrideComplete] = useOverrideCompleteMutation();
   const [cancelOrder] = useCancelOrderMutation();
+  const [refundOrder] = useRefundOrderMutation();
+  const [refundOnCancel, setRefundOnCancel] = useState(true);
   const [assignDriver] = useAssignDriverMutation();
   const [unassignDriver] = useUnassignDriverMutation();
   const { roleCode } = useAppSelector(selectSession);
@@ -140,17 +146,27 @@ export function KitchenBoardPage() {
       if (acting.kind === "override") {
         await overrideComplete({ orderId: order.order_id, reason: reason.trim() }).unwrap();
         setNotice({ text: `#${order.order_number} handed over without a PIN.`, tone: "neutral" });
+      } else if (acting.kind === "refund") {
+        await refundOrder({ orderId: order.order_id, reason: reason.trim() }).unwrap();
+        setNotice({ text: `#${order.order_number} refunded in full.`, tone: "neutral" });
       } else {
-        const out = await cancelOrder({ orderId: order.order_id, reason: reason.trim() }).unwrap();
-        // The unrefunded case is a money consequence, so it reads as a warning
-        // and stays until the next action.
+        const out = await cancelOrder({
+          orderId: order.order_id,
+          reason: reason.trim(),
+          refund: refundOnCancel,
+        }).unwrap();
+        // Money that did not move is a consequence, so it reads as a warning
+        // and stays until the next action. Stripe's own refusal is quoted:
+        // "balance too low" is something the restaurant can act on.
         setNotice(
-          out.refund_needed
-            ? {
-                text: `#${order.order_number} cancelled. The customer has not been refunded: issue the refund from your Stripe Dashboard.`,
-                tone: "warning",
-              }
-            : { text: `#${order.order_number} cancelled. Its payment was already refunded.`, tone: "neutral" },
+          out.refund_problem
+            ? { text: `#${order.order_number} cancelled, but the refund did not go through. ${out.refund_problem}`, tone: "warning" }
+            : !out.refund_needed
+              ? { text: `#${order.order_number} cancelled and refunded in full.`, tone: "neutral" }
+              : {
+                  text: `#${order.order_number} cancelled. The customer has not been refunded — use "refund" on the order, or your Stripe Dashboard.`,
+                  tone: "warning",
+                },
         );
       }
       setActing(null);
@@ -245,6 +261,8 @@ export function KitchenBoardPage() {
       <ReasonForm
         kind={acting.kind}
         order={order}
+        refund={refundOnCancel}
+        onRefund={setRefundOnCancel}
         reason={reason}
         busy={isBusy}
         error={formError}
@@ -477,6 +495,8 @@ export function KitchenBoardPage() {
         </div>
       )}
 
+      {canManage && <RefundsDue onDone={(text) => setNotice({ text, tone: "neutral" })} />}
+
       <TodayHistory />
 
       <p className="mt-[22px] max-w-[780px] text-caption text-muted">
@@ -484,6 +504,104 @@ export function KitchenBoardPage() {
         confirms the payment by webhook.
       </p>
     </ManageShell>
+  );
+}
+
+/**
+ * Cancelled orders whose money is still with the restaurant.
+ *
+ * A cancellation leaves the board, so a refund nobody issued -- the box left
+ * unticked, or the one Stripe refused for want of balance -- would otherwise
+ * be invisible from the moment it happened. Managers only: it is a list of
+ * money owed.
+ *
+ * Absent rather than empty when there is nothing owed. A permanent "no
+ * refunds due" panel is furniture on a screen that is read at a glance.
+ */
+function RefundsDue({ onDone }: { onDone: (text: string) => void }) {
+  const due = useRefundsDueQuery();
+  const [refundOrder] = useRefundOrderMutation();
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const orders = due.data ?? [];
+  if (!orders.length) return null;
+
+  async function refund(order: RefundDue) {
+    setBusy(true);
+    setError(null);
+    try {
+      await refundOrder({ orderId: order.order_id, reason: reason.trim() }).unwrap();
+      onDone(`#${order.order_number} refunded in full.`);
+      setChosen(null);
+      setReason("");
+    } catch (e) {
+      // Stripe's own words: "balance too low" is something to act on.
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="mt-8 rounded-card border border-hairline bg-surface p-5" aria-label="Refunds to issue">
+      <h2 className="font-display text-xl">Refunds to issue</h2>
+      <p className="mb-4 mt-1 text-caption text-muted">
+        Cancelled, and the customer still has not had their money back.
+      </p>
+      <ul className="flex flex-col divide-y divide-hairline">
+        {orders.map((order) => (
+          <li key={order.order_id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
+            <strong className="font-semibold">#{order.order_number}</strong>
+            <span className="tnum text-sm">{money(order.total_minor, order.currency)}</span>
+            {order.cancelled_reason && (
+              <span className="min-w-0 flex-1 truncate text-caption text-muted">
+                {order.cancelled_reason}
+              </span>
+            )}
+            {chosen === order.order_id ? (
+              <form
+                className="flex w-full flex-wrap items-center gap-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!busy && reason.trim().length >= 3) void refund(order);
+                }}
+              >
+                <input
+                  className="field min-w-[12rem] flex-1"
+                  value={reason}
+                  autoFocus
+                  maxLength={200}
+                  placeholder="Why? e.g. agreed on the phone"
+                  aria-label={`Reason for refunding order ${order.order_number}`}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+                <button type="submit" className="btn-danger" disabled={busy || reason.trim().length < 3}>
+                  {busy && <Spinner />}
+                  Refund {money(order.total_minor, order.currency)}
+                </button>
+                <button type="button" className="link" disabled={busy} onClick={() => setChosen(null)}>
+                  back
+                </button>
+                <ErrorNote message={error} className="basis-full" />
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="link-danger ml-auto"
+                onClick={() => {
+                  setChosen(order.order_id);
+                  setReason("");
+                  setError(null);
+                }}
+              >
+                refund
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -602,15 +720,20 @@ function ReasonForm({
   reason,
   busy,
   error,
+  refund,
+  onRefund,
   onReason,
   onConfirm,
   onBack,
 }: {
-  kind: "override" | "cancel";
+  kind: "override" | "cancel" | "refund";
   order: BoardOrder;
   reason: string;
   busy: boolean;
   error: string | null;
+  /** Whether a cancellation also gives the money back. Ignored elsewhere. */
+  refund: boolean;
+  onRefund: (value: boolean) => void;
   onReason: (value: string) => void;
   onConfirm: () => void;
   onBack: () => void;
@@ -625,7 +748,17 @@ function ReasonForm({
         if (!busy && reason.trim().length >= 3) onConfirm();
       }}
     >
-      {cancel ? (
+      {kind === "refund" ? (
+        <>
+          <p className="text-caption">
+            Refund <strong>#{order.order_number}</strong> in full, back to the card the customer
+            paid with.
+          </p>
+          <p className="note">
+            Your Zenoeats fee comes back too. The order stays cancelled either way.
+          </p>
+        </>
+      ) : cancel ? (
         <>
           <p className="text-caption">
             Cancel <strong>#{order.order_number}</strong>.
@@ -633,9 +766,21 @@ function ReasonForm({
           {refunded ? (
             <p className="note">Its payment has already been refunded.</p>
           ) : (
-            <p className="note-warning">
-              This does not refund the customer. Issue the refund from your Stripe Dashboard.
-            </p>
+            <label className="flex items-start gap-2.5 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-5 w-5 shrink-0"
+                checked={refund}
+                onChange={(e) => onRefund(e.target.checked)}
+              />
+              <span>
+                <span className="font-semibold">Refund the customer in full</span>
+                <span className="field-hint block">
+                  Straight back to their card, your Zenoeats fee included. Leave it unticked for a
+                  no-show you are charging for.
+                </span>
+              </span>
+            </label>
           )}
         </>
       ) : (
@@ -652,7 +797,13 @@ function ReasonForm({
           value={reason}
           autoFocus
           maxLength={200}
-          placeholder={cancel ? "Why? e.g. never collected" : "Why? e.g. phone died, checked name"}
+          placeholder={
+            kind === "refund"
+              ? "Why? e.g. agreed on the phone"
+              : cancel
+                ? "Why? e.g. never collected"
+                : "Why? e.g. phone died, checked name"
+          }
           onChange={(e) => onReason(e.target.value)}
         />
       </label>
@@ -664,7 +815,13 @@ function ReasonForm({
           disabled={busy || reason.trim().length < 3}
         >
           {busy && <Spinner />}
-          {cancel ? "Cancel order" : "Hand over without PIN"}
+          {kind === "refund"
+            ? "Refund in full"
+            : cancel
+              ? refund && !refunded
+                ? "Cancel and refund"
+                : "Cancel order"
+              : "Hand over without PIN"}
         </button>
         <button type="button" className="link" disabled={busy} onClick={onBack}>
           back

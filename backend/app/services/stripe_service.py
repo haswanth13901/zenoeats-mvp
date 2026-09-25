@@ -43,6 +43,121 @@ def platform_fee_minor(total_minor: int) -> int:
     return min(total_minor, percentage + fixed)
 
 
+def refund_order(payment, reason: str | None = None) -> dict:
+    """Give a paid order's money back, on the restaurant's own account.
+
+    The whole charge, including Zenoeats' fee: the sale did not happen, and
+    a restaurant should not carry a commission on an order it cancelled.
+    `refund_application_fee` is what returns the fee from the platform's
+    balance rather than leaving it against the restaurant's.
+
+    The idempotency key is the order and the fee flag, so a manager who
+    presses twice, or a retry after a timeout nobody saw the answer to,
+    produces one refund and not two. Stripe's own reply is returned rather
+    than interpreted here; the webhook remains the authority on what was
+    refunded in the end.
+
+    Raises an ApiError a manager can read. The common refusal is a connected
+    account whose balance has already been paid out, which Stripe answers
+    with `balance_insufficient` -- worth saying plainly, because the money
+    has to come from somewhere before the refund can go through.
+    """
+    if not payment.stripe_payment_intent_id or not payment.stripe_account_id:
+        raise errors.validation_error("This order has no Stripe payment to refund.")
+
+    # Only where there is one to give back. Stripe refuses the flag outright
+    # on a charge with no application fee -- which is every charge while
+    # PLATFORM_FEE_BPS and _FIXED_MINOR are 0 -- so sending it
+    # unconditionally would make every refund fail on a platform that takes
+    # no commission.
+    reclaim_fee = _charged_a_fee(payment)
+    try:
+        refund = stripe.Refund.create(
+            payment_intent=payment.stripe_payment_intent_id,
+            **({"refund_application_fee": True} if reclaim_fee else {}),
+            metadata={
+                "order_id": str(payment.order_id),
+                **({"reason": reason[:200]} if reason else {}),
+            },
+            stripe_account=payment.stripe_account_id,
+            # The fee flag is part of the key, for the same reason it is part
+            # of the intent's: Stripe refuses to replay a key with different
+            # parameters, so an attempt that asked for the fee back would
+            # poison the retry that must not. Identical attempts still share
+            # a key, which is what stops a double press refunding twice.
+            idempotency_key=f"order:{payment.order_id}:refund:v1:fee{int(reclaim_fee)}",
+        )
+    except stripe.error.StripeError as exc:
+        code = getattr(exc, "code", None)
+        log.warning(
+            "refund failed for order %s: %s (%s)", payment.order_id, exc.user_message or exc, code
+        )
+        raise errors.ApiError(502, "REFUND_FAILED", _refund_problem(code, exc)) from exc
+
+    log.info("refunded order %s: %s", payment.order_id, _value(refund, "id"))
+    # A plain dict, not Stripe's object: the caller reads two fields, and a
+    # StripeObject is not a dict however much it looks like one -- `.get` on
+    # it raises, which is how this was found.
+    return {
+        "id": _value(refund, "id"),
+        "status": _value(refund, "status"),
+        "amount": _value(refund, "amount"),
+    }
+
+
+def _value(obj, name):
+    """One field, whether Stripe handed us an object or a test a dict."""
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
+def _charged_a_fee(payment) -> bool:
+    """Whether this charge actually carried Zenoeats' fee.
+
+    Asked of Stripe rather than recomputed from the current settings: the fee
+    is whatever was taken when the customer paid, and a rate changed since
+    then must not decide what comes back now. One extra call, on an operation
+    that happens once per cancelled order.
+
+    A failure here is answered with False. Refunding the customer without
+    reclaiming our fee is a smaller wrong than refusing the refund, and it is
+    a difference the platform can settle afterwards.
+    """
+    try:
+        intent = stripe.PaymentIntent.retrieve(
+            payment.stripe_payment_intent_id,
+            expand=["latest_charge"],
+            stripe_account=payment.stripe_account_id,
+        )
+    except stripe.error.StripeError:
+        log.warning("could not read the fee on order %s; refunding without it", payment.order_id)
+        return False
+    charge = _value(intent, "latest_charge")
+    # Unexpanded, Stripe sends the id alone; the intent still carries what it
+    # asked for, which is the same figure.
+    if charge is None or isinstance(charge, str):
+        return bool(_value(intent, "application_fee_amount"))
+    return bool(_value(charge, "application_fee_amount") or _value(charge, "application_fee"))
+
+
+def _refund_problem(code: str | None, exc: Exception) -> str:
+    """Stripe's refusal, in words a manager can act on.
+
+    Its own message names API objects and the connected account, which is
+    the restaurant's own but still reads as somebody else's plumbing. Only
+    the cases a restaurant can do something about are worded here; the rest
+    keep Stripe's message, which is better than a shrug.
+    """
+    if code == "balance_insufficient":
+        return (
+            "Stripe refused the refund: this restaurant's Stripe balance is too low. "
+            "Add funds in Stripe, or refund it there once the next payout clears."
+        )
+    if code == "charge_already_refunded":
+        return "This order has already been refunded."
+    message = getattr(exc, "user_message", None) or "Stripe could not process the refund."
+    return str(message)[:200]
+
+
 def create_payment_intent(
     order: Order, account: RestaurantPaymentAccount, receipt_email: str | None
 ) -> stripe.PaymentIntent:
