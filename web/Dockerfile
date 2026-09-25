@@ -28,6 +28,18 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY docker-entrypoint.d/40-zenoeats-config.sh /docker-entrypoint.d/40-zenoeats-config.sh
 RUN chmod +x /docker-entrypoint.d/40-zenoeats-config.sh
 
+# Run as nginx, not root. A foothold in this container -- a bug in nginx, a
+# crafted request -- then owns nothing but the two files the entrypoint
+# rewrites at start (config.js and the CSP), rather than the whole image.
+# The port is 3000, so no privilege is needed to bind it; the pid file moves
+# to /tmp because /var/run is root's.
+RUN mkdir -p /etc/nginx/zenoeats \
+ && touch /usr/share/nginx/html/config.js \
+ && chown nginx:nginx /usr/share/nginx/html/config.js /etc/nginx/zenoeats \
+ && chown -R nginx:nginx /var/cache/nginx \
+ && sed -i -e 's#^pid .*#pid /tmp/nginx.pid;#' -e '/^user /d' /etc/nginx/nginx.conf
+USER nginx
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
