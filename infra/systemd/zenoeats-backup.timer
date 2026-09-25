@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Zenoeats backup nightly
+
+[Timer]
+# 03:30 on the server's clock, when a restaurant is least likely to be busy.
+OnCalendar=*-*-* 03:30:00
+# Up to 10 minutes' jitter, and a missed run (server off at 03:30) runs at boot.
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

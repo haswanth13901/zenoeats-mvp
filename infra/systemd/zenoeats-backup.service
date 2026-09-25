@@ -1,0 +1,26 @@
+# Nightly backup of this Zenoeats host. See scripts/backup.sh for what it
+# takes and where it goes, and STEPS_BEFORE_PRODUCTION.md for installing it:
+#
+#   sudo cp infra/systemd/zenoeats-backup.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now zenoeats-backup.timer
+#   sudo systemctl start zenoeats-backup.service   # one run now, to check
+#   journalctl -u zenoeats-backup.service          # what it said
+#
+# WorkingDirectory and ExecStart assume the repository lives at /opt/zenoeats.
+# Change both if it does not.
+[Unit]
+Description=Zenoeats nightly backup (database + images, encrypted, off-site)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/zenoeats
+EnvironmentFile=/etc/zenoeats/backup.env
+ExecStart=/opt/zenoeats/scripts/backup.sh
+# A dump must not compete with orders for the CPU or the disk.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
