@@ -20,6 +20,17 @@ log = logging.getLogger(__name__)
 # shorter was typed by a person.
 MIN_SESSION_SECRET_LENGTH = 32
 
+# Secrets this repository publishes on purpose, for CI and the QA runner
+# (.github/workflows/ci.yml, scripts/verify_redesign.py). The repository is
+# public, so each is known to everyone; copied into a production .env, one
+# makes every session forgeable or every pickup PIN readable. Long and
+# well-formed, so no other check here would notice.
+PUBLISHED_SECRETS = frozenset({
+    "kZ0nQx3Yk8vJ9pL2mN7bR4tS6wU1cE5gH8jK0aD3fI4=",
+    "ci-only-session-secret-not-used-anywhere-real-000",
+    "redesign-isolated-tests-only-no-production-access",
+})
+
 
 def configuration_problems(settings: Settings) -> list[str]:
     """Everything wrong with a production configuration, worst first."""
@@ -40,6 +51,20 @@ def configuration_problems(settings: Settings) -> list[str]:
             "(generate one with: openssl rand -base64 32). Admin and staff session "
             "cookies are forgeable without it."
         )
+
+    for name in ("SESSION_SECRET", "FIELD_ENCRYPTION_KEY"):
+        if getattr(settings, name) in PUBLISHED_SECRETS:
+            problems.append(
+                f"{name} is a value published in this repository for CI; "
+                "anyone can read it. Generate a new one (scripts/make_prod_env.py)."
+            )
+
+    for name in ("DATABASE_URL_APP", "DATABASE_URL_SYSTEM"):
+        if "_dev_pw" in getattr(settings, name):
+            problems.append(
+                f"{name} uses a development password (*_dev_pw), which is in "
+                "infra/postgres/01-roles.sql for anyone to read."
+            )
 
     try:
         Fernet(settings.FIELD_ENCRYPTION_KEY.encode())
