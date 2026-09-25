@@ -8,6 +8,7 @@ import { itemAdded, selectCartCount } from "@/features/cart/cartSlice";
 import { ModifierSheet } from "@/features/cart/components/ModifierSheet";
 import { useOpenCart } from "@/features/cart/useOpenCart";
 import { ChangeEmail } from "@/features/storefront/components/ChangeEmail";
+import { CloseAccount } from "@/features/storefront/components/CloseAccount";
 import { refreshDraftContact } from "@/features/storefront/checkoutDraft";
 import { ContactFields } from "@/features/storefront/components/ContactFields";
 import { CustomerAccountBar } from "@/features/storefront/components/CustomerAccountBar";
@@ -188,6 +189,9 @@ function DetailsTab({ session, slug }: { session: CustomerSession; slug: string 
   const [showErrors, setShowErrors] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // Held here rather than inside ChangeEmail: the link that opens it sits
+  // beside the email field, and the form it opens sits under the card.
+  const [changingEmail, setChangingEmail] = useState(false);
   const errors = contactErrors(contact);
   // What Discard goes back to: the details as last saved, which the session
   // reflects once a save has landed.
@@ -255,7 +259,14 @@ function DetailsTab({ session, slug }: { session: CustomerSession; slug: string 
           emailHint={
             session.is_guest
               ? "Where this guest session's receipts go. Create an account to keep your details."
-              : "The email you sign in with. Use Change email address below to verify a new one."
+              : "The email you sign in with. A new one is verified before it replaces it."
+          }
+          emailAction={
+            session.is_guest || changingEmail ? null : (
+              <button type="button" className="link" onClick={() => setChangingEmail(true)}>
+                Change
+              </button>
+            )
           }
           disabled={isLoading}
         />
@@ -296,7 +307,13 @@ function DetailsTab({ session, slug }: { session: CustomerSession; slug: string 
           </button>
         </div>
       </form>
-      <ChangeEmail session={session} slug={slug} />
+      <ChangeEmail
+        session={session}
+        slug={slug}
+        open={changingEmail}
+        onOpenChange={setChangingEmail}
+      />
+      <CloseAccount session={session} />
     </section>
   );
 }

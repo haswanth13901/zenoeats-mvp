@@ -19,6 +19,7 @@ export function ContactFields({
   errors,
   email,
   emailHint,
+  emailAction,
   onEmailChange,
   emailError,
   addressLabel = "Address",
@@ -34,6 +35,9 @@ export function ContactFields({
   errors: ContactErrors;
   email: string;
   emailHint?: ReactNode;
+  /** Something to do to this address -- changing it -- beside its label,
+   *  where the address it acts on is. */
+  emailAction?: ReactNode;
   onEmailChange?: (email: string) => void;
   emailError?: string;
   addressLabel?: string;
@@ -76,7 +80,10 @@ export function ContactFields({
         hint="The restaurant or your driver will call this if something comes up."
       />
       <label className={`block ${columns ? "sm:col-start-1" : ""}`}>
-        <span className="label">Email</span>
+        <span className="flex items-baseline justify-between gap-3">
+          <span className="label">Email</span>
+          {emailAction}
+        </span>
         <input
           className="field mt-[7px]"
           type="email"

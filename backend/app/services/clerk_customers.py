@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
@@ -183,14 +183,79 @@ def upsert_customer(
 
 
 def deactivate(session, clerk_user_id: str) -> None:
-    """A user deleted in Clerk. Soft delete: their orders and the tax history
-    hanging off them are retained."""
+    """A user deleted in Clerk, by them or by us. Closes the account here."""
     user = session.execute(
         select(User).where(User.clerk_user_id == clerk_user_id)
     ).scalar_one_or_none()
     if user is not None and user.kind == UserKind.CUSTOMER.value:
-        user.is_active = False
-        user.deleted_at = user.deleted_at or utcnow()
+        close_account(session, user)
+
+
+def close_account(session, user: User) -> None:
+    """Close a customer's account and take their details off it.
+
+    What legal/data-deletion.html promises, and no more: the name, phone
+    number, address and email go, the favourites go, and the account can no
+    longer be signed in to. Orders stay, with the name and address that were
+    on them when they were placed -- they are the restaurant's record of a
+    sale, and the page says so.
+
+    The row itself stays because orders, audit trails and tax records point
+    at it with NOT NULL keys. Emptied of everything personal, it is an
+    anchor rather than a profile.
+
+    Idempotent: a customer who deletes their account here and a user.deleted
+    webhook arriving afterwards are the same operation twice, and the second
+    must be harmless.
+    """
+    from app.models import CustomerFavourite
+
+    user.is_active = False
+    user.deleted_at = user.deleted_at or utcnow()
+    user.full_name = None
+    user.phone = None
+    user.address = None
+    # Email is NOT NULL and unique, so it is replaced rather than emptied.
+    # The placeholder is the one a customer awaiting verification already
+    # gets, so nothing downstream meets a shape it has not seen.
+    if user.clerk_user_id and not has_placeholder_email(user):
+        user.email = _placeholder_email(user.clerk_user_id)
+    session.execute(delete(CustomerFavourite).where(CustomerFavourite.user_id == user.id))
+    session.flush()
+    log.info("closed customer account %s", user.id)
+
+
+def delete_clerk_user(clerk_user_id: str) -> None:
+    """Remove the sign-in itself, which Clerk owns.
+
+    Raises rather than shrugging: an account whose details were emptied here
+    but which can still be signed in to is the worst of both, so the caller
+    stops before touching anything local.
+    """
+    if not settings.CLERK_SECRET_KEY:
+        raise errors.ApiError(
+            503, "IDENTITY_UNAVAILABLE",
+            "Accounts cannot be closed right now. Try again later.",
+        )
+    try:
+        res = httpx.delete(
+            f"{CLERK_API}/users/{clerk_user_id}",
+            headers={"Authorization": f"Bearer {settings.CLERK_SECRET_KEY}"},
+            timeout=10.0,
+        )
+    except httpx.HTTPError as exc:
+        log.warning("clerk could not be reached to delete a user: %s", type(exc).__name__)
+        raise errors.ApiError(
+            503, "IDENTITY_UNAVAILABLE",
+            "Accounts cannot be closed right now. Try again later.",
+        ) from exc
+    # 404 means Clerk has no such user, which is the state being asked for.
+    if res.status_code not in (200, 204, 404):
+        log.error("clerk answered %s deleting a user", res.status_code)
+        raise errors.ApiError(
+            503, "IDENTITY_UNAVAILABLE",
+            "Accounts cannot be closed right now. Try again later.",
+        )
 
 
 def _ensure_customer(user: User) -> None:

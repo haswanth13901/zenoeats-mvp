@@ -130,6 +130,45 @@ def sync_verified_email(
     return _session_out(user)
 
 
+@router.delete(
+    "/account",
+    status_code=204,
+    dependencies=[Depends(per_user("customer_close_account", limit=5))],
+)
+def close_account(
+    user: User = Depends(get_current_user),
+    _restaurant: Restaurant = Depends(current_restaurant),
+):
+    """Close the caller's account and take their details off it.
+
+    Exactly what legal/data-deletion.html promises: the sign-in goes, and
+    with it the name, phone number, address, email and favourites. Orders
+    already placed are kept, carrying the details they were placed with,
+    because they are the restaurant's record of a sale -- the page a
+    customer is sent to before pressing this says so in those words.
+
+    Clerk first. An account emptied here but still signed in to would be the
+    worst of both, so a Clerk that cannot be reached stops the whole thing
+    and nothing local changes. The user.deleted webhook then arrives and
+    finds the work already done, which is why closing is idempotent.
+
+    Guests have no account to close: their session expires on its own, and
+    the record behind it is cleared out with the rest after 45 days.
+    """
+    if user.kind != UserKind.CUSTOMER.value or not user.clerk_user_id:
+        raise errors.ApiError(403, "ACCOUNT_REQUIRED", "There is no account here to close.")
+
+    clerk_customers.delete_clerk_user(user.clerk_user_id)
+
+    from app.db.session import system_session
+
+    with system_session() as db:
+        current = db.get(User, user.id)
+        if current is not None:
+            clerk_customers.close_account(db, current)
+    return Response(status_code=204)
+
+
 # -------------------------------------------------------------- orders ---
 
 class OrderSummaryOut(BaseModel):
