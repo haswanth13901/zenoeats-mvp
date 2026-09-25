@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_CONNECT_WEBHOOK_SECRET: str = ""
+    # Staging runs with ENV=production and test-mode Stripe and Clerk keys.
+    # Production must not: an API on test keys starts, takes orders, and
+    # collects no money. So a production start refuses test keys unless this
+    # says the environment is meant to run on them. Staging only.
+    ALLOW_TEST_KEYS: bool = False
     # Zenoeats' cut of each order, taken as a Stripe application fee on the
     # restaurant's direct charge: a percentage in basis points (250 = 2.5%)
     # plus a fixed amount in minor units (30 = $0.30). Both 0 means no fee.
