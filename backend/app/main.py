@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from app.api.v1.router import api_router
 from app.config import settings
-from app.core import errors, observability, stall_watch, startup_checks
+from app.core import errors, logsafe, observability, stall_watch, startup_checks
 from app.db.session import app_engine, system_engine
 from app.services import ops_health
 
@@ -23,6 +23,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 log = logging.getLogger("zenoeats")
+# uvicorn has configured its loggers by the time this module is imported, so
+# the filter attaches to the logger it already built.
+logging.getLogger("uvicorn.access").addFilter(logsafe.DropQueryStrings())
 
 startup_checks.enforce(settings)
 observability.init_error_tracking("api")

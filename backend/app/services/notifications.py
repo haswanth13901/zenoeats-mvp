@@ -117,7 +117,11 @@ def compose_order_confirmation(
     """
     path = f"/orders/{order.id}"
     if for_guest:
-        path += f"?t={guest_auth.issue_order_token(order.id)}"
+        # In the fragment, never the query. A browser does not send the part
+        # after "#" to any server, so the token stays out of every access log
+        # and Referer on the way; the page reads it from there and hands it to
+        # the API in a header.
+        path += f"#t={guest_auth.issue_order_token(order.id)}"
     order_url = storefront_url(slug, path)
     subject = f"Order #{order.order_number} confirmed at {restaurant_name}"
     greeting = f"Hi {customer_name}," if customer_name else "Hi,"

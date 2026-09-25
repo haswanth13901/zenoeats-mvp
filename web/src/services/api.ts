@@ -14,6 +14,8 @@ export type QueryArgs = {
    *  where most visitors are neither. */
   customerAuth?: boolean | "if-signed-in";
   idempotencyKey?: string;
+  /** A guest's order-view token, sent as the X-Order-Token header. */
+  orderToken?: string | null;
 };
 
 /**
@@ -85,6 +87,7 @@ async function attempt(
       body: opts.body,
       token,
       idempotencyKey: opts.idempotencyKey,
+      orderToken: opts.orderToken,
       // RTK Query aborts on unmount and on refetch; passing its signal through
       // is what makes a superseded request stop rather than land late.
       signal,

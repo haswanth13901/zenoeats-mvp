@@ -25,6 +25,9 @@ export type RequestOptions = {
    *  the browser sends itself. */
   token?: string | null;
   idempotencyKey?: string;
+  /** A guest's order-view token. Sent as a header, never in the URL: a query
+   *  string is written to every access log the request passes through. */
+  orderToken?: string | null;
   signal?: AbortSignal;
   timeoutMs?: number;
 };
@@ -45,6 +48,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   const headers: Record<string, string> = isForm ? {} : { "Content-Type": "application/json" };
   if (opts.token) headers["Authorization"] = `Bearer ${opts.token}`;
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
+  if (opts.orderToken) headers["X-Order-Token"] = opts.orderToken;
 
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);

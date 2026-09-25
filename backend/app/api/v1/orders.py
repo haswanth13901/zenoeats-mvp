@@ -410,6 +410,7 @@ def get_order(
     order_id: UUID,
     background: BackgroundTasks,
     t: str | None = None,
+    x_order_token: str | None = Header(default=None, alias="X-Order-Token"),
     user: User | None = Depends(optional_current_user),
     restaurant: Restaurant = Depends(current_restaurant),
     db: Session = TenantDb,
@@ -426,7 +427,14 @@ def get_order(
     in a guest's confirmation email, which is how someone who ordered without
     an account reaches their pickup PIN from a phone that is not the one they
     ordered on. It is checked against this order id, so it opens nothing else.
+
+    The token arrives in the X-Order-Token header. `?t=` still works, but it
+    puts a seven-day key to a pickup PIN into every access log the request
+    passes through -- uvicorn's and nginx's both record the query string --
+    so the page no longer sends it that way, and the email link carries it
+    in the fragment, which no server ever sees.
     """
+    t = x_order_token or t
     # Decided before the order is read: a caller with neither a session nor a
     # token has nothing to be told apart from a 404, and asking the database
     # first would only turn "sign in" into "no such order".

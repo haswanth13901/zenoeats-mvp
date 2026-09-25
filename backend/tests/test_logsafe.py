@@ -6,6 +6,7 @@ import uuid
 import pytest
 
 from app.config import settings
+from app.core import logsafe
 from app.core.logsafe import email_for_log
 
 
@@ -54,3 +55,34 @@ def test_a_failed_admin_sign_in_does_not_log_the_address(caplog, monkeypatch):
     assert "failed platform admin sign-in" in caplog.text
     assert address not in caplog.text
     assert address.split("@")[0] not in caplog.text
+
+
+# ------------------------------------------------- access log query strings ---
+
+def _access_record(path: str) -> logging.LogRecord:
+    """A record shaped as uvicorn.access emits it."""
+    return logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 0,
+        '%s - "%s %s HTTP/%s" %d', ("203.0.113.9:5000", "GET", path, "1.1", 200), None,
+    )
+
+
+def test_the_access_log_never_records_a_query_string():
+    record = _access_record("/api/v1/orders/abc?t=eyJ.secret.token")
+    assert logsafe.DropQueryStrings().filter(record) is True
+    line = record.getMessage()
+    assert "secret" not in line and "?" not in line
+    assert "/api/v1/orders/abc" in line
+
+
+def test_a_path_without_a_query_is_left_alone():
+    record = _access_record("/api/v1/menu")
+    logsafe.DropQueryStrings().filter(record)
+    assert record.getMessage() == '203.0.113.9:5000 - "GET /api/v1/menu HTTP/1.1" 200'
+
+
+def test_the_filter_is_on_uvicorns_access_logger():
+    import app.main  # noqa: F401  (attaches it)
+
+    filters = logging.getLogger("uvicorn.access").filters
+    assert any(isinstance(f, logsafe.DropQueryStrings) for f in filters)
