@@ -1154,6 +1154,18 @@ def platform_reports(admin: User = Depends(require_platform_admin)):
     ]
 
 
+# A spreadsheet runs a cell that starts with one of these as a formula. The
+# restaurant's name is typed by its own owner in Settings, so "=HYPERLINK(...)"
+# or a DDE payload would execute on the platform admin's machine the moment
+# the export is opened. Prefixed with an apostrophe, it is shown as text.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_text(value: object) -> str:
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(_FORMULA_PREFIXES) else text
+
+
 @router.get("/reports.csv")
 def platform_reports_csv(admin: User = Depends(require_platform_admin)):
     with system_session() as session:
@@ -1171,7 +1183,8 @@ def platform_reports_csv(admin: User = Depends(require_platform_admin)):
         paid = r["orders_paid"] or 0
         gross = int(r["gross_revenue_minor"] or 0)
         writer.writerow([
-            r["name"], r["slug"], r["status"], r["currency"], paid,
+            _csv_text(r["name"]), _csv_text(r["slug"]), _csv_text(r["status"]),
+            _csv_text(r["currency"]), paid,
             f"{gross / 100:.2f}",
             f"{int(r['tax_collected_minor'] or 0) / 100:.2f}",
             f"{(gross // paid) / 100:.2f}" if paid else "0.00",
