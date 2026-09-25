@@ -199,42 +199,136 @@ def test_the_kitchen_cannot_refund(shop, stripe_refunds):
 
 # --- what is actually asked of Stripe --------------------------------------
 
-def test_the_whole_charge_including_the_platform_fee_goes_back(monkeypatch):
+class FakePayment:
+    order_id = "00000000-0000-0000-0000-0000000000ab"
+    stripe_payment_intent_id = "pi_test"
+    stripe_account_id = "acct_test"
+
+
+@pytest.fixture
+def stripe_api(monkeypatch):
+    """Stripe at the network edge: what the charge says it carried, and what
+    we end up asking of it."""
+    import stripe
+
+    state = {"fee": 0, "sent": {}}
+
+    def retrieve(intent_id, **kwargs):
+        return {"latest_charge": {"application_fee_amount": state["fee"]}}
+
+    def create(**kwargs):
+        state["sent"] = kwargs
+        return {"status": "succeeded", "amount": 1500, "id": "re_test"}
+
+    monkeypatch.setattr(stripe.PaymentIntent, "retrieve", retrieve)
+    monkeypatch.setattr(stripe.Refund, "create", create)
+    return state
+
+
+def test_the_whole_charge_goes_back_with_the_platform_fee(stripe_api):
     """The sale did not happen, so Zenoeats' commission goes back with it --
     and one order can only ever produce one refund, however many times this
     is called."""
+    from app.services import stripe_service
+
+    stripe_api["fee"] = 75
+    stripe_service.refund_order(FakePayment(), "Kitchen closed")
+    sent = stripe_api["sent"]
+    assert sent["payment_intent"] == "pi_test"
+    assert sent["refund_application_fee"] is True
+    assert sent["stripe_account"] == "acct_test"
+    assert sent["idempotency_key"] == f"order:{FakePayment.order_id}:refund:v1:fee1"
+    assert sent["metadata"]["reason"] == "Kitchen closed"
+
+
+def test_a_charge_that_carried_no_fee_is_not_asked_to_return_one(stripe_api):
+    """Stripe refuses the flag outright on a charge with no application fee,
+    so a platform taking no commission would have every refund fail. Found by
+    refunding a real test-mode charge, not by reading the documentation."""
+    from app.services import stripe_service
+
+    stripe_api["fee"] = 0
+    stripe_service.refund_order(FakePayment())
+    assert "refund_application_fee" not in stripe_api["sent"]
+
+
+def test_the_key_changes_with_the_fee_so_a_failed_attempt_can_be_retried(stripe_api):
+    """Stripe refuses to replay an idempotency key with different
+    parameters. A first attempt that asked for a fee the charge never
+    carried would otherwise poison every retry for a day -- which is exactly
+    what the first real refund did."""
+    from app.services import stripe_service
+
+    stripe_api["fee"] = 75
+    stripe_service.refund_order(FakePayment())
+    with_fee = stripe_api["sent"]["idempotency_key"]
+
+    stripe_api["fee"] = 0
+    stripe_service.refund_order(FakePayment())
+    without_fee = stripe_api["sent"]["idempotency_key"]
+
+    assert with_fee != without_fee
+    assert without_fee.endswith(":fee0")
+
+
+def test_a_fee_that_cannot_be_read_refunds_the_customer_anyway(monkeypatch):
+    """The customer's money matters more than reclaiming our own."""
     import stripe
 
     from app.services import stripe_service
 
     sent = {}
 
-    def create(**kwargs):
-        sent.update(kwargs)
-        return {"status": "succeeded", "amount": 1500, "id": "re_test"}
+    def retrieve(*a, **k):
+        raise stripe.error.APIConnectionError("no route to Stripe")
 
-    monkeypatch.setattr(stripe.Refund, "create", create)
-
-    class FakePayment:
-        order_id = "00000000-0000-0000-0000-0000000000ab"
-        stripe_payment_intent_id = "pi_test"
-        stripe_account_id = "acct_test"
-
-    stripe_service.refund_order(FakePayment(), "Kitchen closed")
+    monkeypatch.setattr(stripe.PaymentIntent, "retrieve", retrieve)
+    monkeypatch.setattr(
+        stripe.Refund, "create",
+        lambda **kwargs: (sent.update(kwargs), {"status": "succeeded", "amount": 1500})[1],
+    )
+    stripe_service.refund_order(FakePayment())
     assert sent["payment_intent"] == "pi_test"
-    assert sent["refund_application_fee"] is True
-    assert sent["stripe_account"] == "acct_test"
-    assert sent["idempotency_key"] == f"order:{FakePayment.order_id}:refund:v1"
-    assert sent["metadata"]["reason"] == "Kitchen closed"
+    assert "refund_application_fee" not in sent
 
 
-def test_a_payment_with_no_stripe_charge_is_refused_before_the_network(monkeypatch):
+def test_stripe_objects_are_read_as_stripe_objects(monkeypatch):
+    """Stripe hands back its own object, not a dict, and `.get` on one
+    raises. Every test here stubbed dicts, so the first real refund was the
+    thing that found it -- this is that refund, in a test."""
+    import stripe
+
     from app.services import stripe_service
 
-    class FakePayment:
+    class StripeObject:
+        """Attributes only, exactly as awkward as the real one."""
+
+        def __init__(self, **fields):
+            self.__dict__.update(fields)
+
+        def get(self, *_args, **_kwargs):
+            raise AttributeError("'get' is a dict method, but a StripeObject is not a dict")
+
+    monkeypatch.setattr(
+        stripe.PaymentIntent, "retrieve",
+        lambda *a, **k: StripeObject(latest_charge=StripeObject(application_fee_amount=75)),
+    )
+    monkeypatch.setattr(
+        stripe.Refund, "create",
+        lambda **k: StripeObject(id="re_live_shaped", status="succeeded", amount=1500),
+    )
+
+    out = stripe_service.refund_order(FakePayment())
+    assert out == {"id": "re_live_shaped", "status": "succeeded", "amount": 1500}
+
+
+def test_a_payment_with_no_stripe_charge_is_refused_before_the_network():
+    from app.services import stripe_service
+
+    class Unpaid:
         order_id = "00000000-0000-0000-0000-0000000000ab"
         stripe_payment_intent_id = None
         stripe_account_id = None
 
     with pytest.raises(errors.ApiError):
-        stripe_service.refund_order(FakePayment())
+        stripe_service.refund_order(Unpaid())
