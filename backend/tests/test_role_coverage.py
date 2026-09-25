@@ -87,6 +87,8 @@ EXPECTED = {
     ("GET", "/restaurant/drivers"): MANAGERS,
     ("POST", "/restaurant/orders/{order_id}/override-complete"): MANAGERS,
     ("POST", "/restaurant/orders/{order_id}/cancel"): MANAGERS,
+    ("POST", "/restaurant/orders/{order_id}/refund"): MANAGERS,
+    ("GET", "/restaurant/orders/refunds-due"): MANAGERS,
     # Reports are managers alone: takings are not a support question.
     ("GET", "/restaurant/reports"): MANAGERS,
     ("POST", "/restaurant/images"): STOREFRONT,
@@ -267,6 +269,8 @@ def test_it_support_cannot_reach_the_money_or_the_team():
     """
     off_limits = {
         ("POST", "/restaurant/orders/{order_id}/cancel"),
+        # Money going back is money moving: the same answer as cancelling.
+        ("POST", "/restaurant/orders/{order_id}/refund"),
         ("POST", "/restaurant/orders/{order_id}/override-complete"),
         ("PATCH", "/restaurant/items/{item_id}"),
         ("PATCH", "/restaurant/items/{item_id}/availability"),

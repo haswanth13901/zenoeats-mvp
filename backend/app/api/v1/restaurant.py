@@ -39,7 +39,7 @@ from app.schemas.api import (
     ChangePasswordIn, MenuOut, StaffInviteOut, StaffLoginIn, StaffMeOut,
     StaffPasswordResetOut, known_timezone,
 )
-from app.services import geocoding, images, restaurant_profile, tracking, storefront
+from app.services import geocoding, images, restaurant_profile, stripe_service, tracking, storefront
 from app.services import email as email_service
 from app.schemas.storefront import ThemePatch, CategoryPatch, BannersIn, CollectionsIn, MapPatch, ShortcutsIn
 from app.services.images import ImageKind
@@ -3180,21 +3180,36 @@ def override_complete(
     return {"order_id": str(order.id), "status": order.status}
 
 
+class CancelOrderIn(OrderReasonIn):
+    """Why, and whether the customer gets their money back.
+
+    Refunding is the ordinary case and the portal ticks it, but not every
+    cancellation is one: a no-show the restaurant cooked for is cancelled
+    without a refund, and that has to stay expressible. The order keeps its
+    refund afterwards either way -- see POST /orders/{id}/refund.
+    """
+
+    refund: bool = True
+
+
 @router.post("/orders/{order_id}/cancel")
 def cancel_order(
     order_id: UUID,
-    body: OrderReasonIn,
+    body: CancelOrderIn,
     restaurant: Restaurant = Depends(current_restaurant_staff),
     db: Session = StaffDb,
     membership: RestaurantUser = Depends(MANAGE),
 ):
     """Take a paid order off the board: a no-show, a refund, a mistake.
 
-    This does not move money. Refunds are issued from the restaurant's own
-    Stripe Dashboard, where disputes also live, and the refund webhook
-    reconciles the payment. The response says whether that is still to do,
-    so the screen can tell the manager rather than leaving them to assume a
-    cancelled order was refunded.
+    With `refund` the customer's money goes back on the same card, whole,
+    including Zenoeats' fee. Without it nothing moves and the order keeps a
+    refund to issue, which the board says out loud.
+
+    The refund is asked of Stripe after the cancellation is written, never
+    inside the transaction (rule 6). A refund that fails therefore leaves the
+    order cancelled and the money where it was, which is the safe way round:
+    the manager is told, and can try again from the board or from Stripe.
 
     An unpaid order is refused. It never reached the board, it expires by
     itself, and cancelling one while the customer is still on the card step
@@ -3212,13 +3227,133 @@ def cancel_order(
 
     transition(order, OrderStatus.CANCELLED.value, reason="CANCELLED_BY_RESTAURANT")
     _record(db, order, membership, OrderEventAction.CANCELLED, reason)
+
+    problem = None
+    if body.refund and _refundable(payment):
+        db.flush()
+        problem = _refund(db, order, payment, membership, reason)
+
     return {
         "order_id": str(order.id),
         "status": order.status,
         "payment_status": payment.status,
-        "refund_needed": payment.status not in (
-            PaymentStatus.REFUNDED.value, PaymentStatus.REFUND_PENDING.value
-        ),
+        "refund_needed": _refundable(payment),
+        # Null unless the refund was asked for and Stripe refused it. The
+        # cancellation still stands; only the money did not move.
+        "refund_problem": problem,
+    }
+
+
+def _refundable(payment: Payment) -> bool:
+    """Whether there is still money to give back."""
+    return payment.status not in (
+        PaymentStatus.REFUNDED.value, PaymentStatus.REFUND_PENDING.value
+    )
+
+
+def _refund(db: Session, order: Order, payment: Payment, membership, reason: str) -> str | None:
+    """Ask Stripe for the refund and write down what came back.
+
+    Returns the problem to show the manager, or None when the refund is on
+    its way. The refund webhook remains the authority on the amount: this
+    records that one was accepted, and `charge.refunded` records what was
+    actually returned, cumulatively, however many times it is delivered.
+    """
+    try:
+        refund = stripe_service.refund_order(payment, reason)
+    except errors.ApiError as refused:
+        _record(db, order, membership, OrderEventAction.CANCELLED, f"Refund failed: {reason}")
+        return refused.detail["message"]
+
+    # succeeded is the ordinary answer for a card; pending happens on the
+    # slower methods, and the webhook finishes the story for both.
+    payment.status = (
+        PaymentStatus.REFUNDED.value if refund.get("status") == "succeeded"
+        else PaymentStatus.REFUND_PENDING.value
+    )
+    if refund.get("status") == "succeeded":
+        payment.refunded_minor = min(int(refund.get("amount") or 0), payment.amount_minor)
+    return None
+
+
+@router.get("/orders/refunds-due")
+def refunds_due(
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    _=Depends(MANAGE),
+):
+    """Cancelled orders whose money is still with the restaurant.
+
+    A cancellation leaves the board, so without this a refund nobody issued
+    has nowhere left to be seen: the manager who ticked the box, watched
+    Stripe refuse it and moved on would never be reminded. Managers only --
+    it is a list of money owed, and the counter has no use for it.
+
+    A fortnight is the window. Older than that and the refund has either
+    happened elsewhere or become a conversation rather than a button.
+    """
+    since = utcnow() - timedelta(days=14)
+    rows = db.execute(
+        select(Order, Payment)
+        .join(Payment, Payment.order_id == Order.id)
+        .where(
+            Order.status == OrderStatus.CANCELLED.value,
+            Order.created_at >= since,
+            Payment.succeeded_at.is_not(None),
+            Payment.status == PaymentStatus.PAID.value,
+        )
+        .order_by(Order.created_at.desc())
+        .limit(50)
+    ).all()
+    return [
+        {
+            "order_id": str(order.id),
+            "order_number": order.order_number,
+            "status": order.status,
+            "total_minor": order.total_minor,
+            "currency": order.currency,
+            "created_at": order.created_at.isoformat(),
+            "payment_status": payment.status,
+            "cancelled_reason": order.cancelled_reason,
+        }
+        for order, payment in rows
+    ]
+
+
+@router.post("/orders/{order_id}/refund")
+def refund_order(
+    order_id: UUID,
+    body: OrderReasonIn,
+    restaurant: Restaurant = Depends(current_restaurant_staff),
+    db: Session = StaffDb,
+    membership: RestaurantUser = Depends(MANAGE),
+):
+    """Give a cancelled order's money back, whole.
+
+    For the cancellation that was made without one, and for the refund that
+    Stripe refused the first time. Only a cancelled order: refunding an order
+    the kitchen is still cooking would leave a customer owed food they have
+    not paid for, and cancelling is the decision that comes first.
+    """
+    reason = _reason(body)
+    order = db.get(Order, order_id, with_for_update=True)
+    if order is None:
+        raise errors.order_not_found()
+    if order.status != OrderStatus.CANCELLED.value:
+        raise errors.order_state_conflict("Cancel this order before refunding it.")
+    payment = _require_paid(db, order)
+    if not _refundable(payment):
+        raise errors.order_state_conflict("This order has already been refunded.")
+
+    db.flush()
+    problem = _refund(db, order, payment, membership, reason)
+    if problem:
+        raise errors.ApiError(502, "REFUND_FAILED", problem)
+    return {
+        "order_id": str(order.id),
+        "status": order.status,
+        "payment_status": payment.status,
+        "refund_needed": _refundable(payment),
     }
 
 

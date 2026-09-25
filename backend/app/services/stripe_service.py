@@ -43,6 +43,68 @@ def platform_fee_minor(total_minor: int) -> int:
     return min(total_minor, percentage + fixed)
 
 
+def refund_order(payment, reason: str | None = None) -> dict:
+    """Give a paid order's money back, on the restaurant's own account.
+
+    The whole charge, including Zenoeats' fee: the sale did not happen, and
+    a restaurant should not carry a commission on an order it cancelled.
+    `refund_application_fee` is what returns the fee from the platform's
+    balance rather than leaving it against the restaurant's.
+
+    The idempotency key is the order, so a manager who presses twice, or a
+    retry after a timeout nobody saw the answer to, produces one refund and
+    not two. Stripe's own reply is returned rather than interpreted here;
+    the webhook remains the authority on what was refunded in the end.
+
+    Raises an ApiError a manager can read. The common refusal is a connected
+    account whose balance has already been paid out, which Stripe answers
+    with `balance_insufficient` -- worth saying plainly, because the money
+    has to come from somewhere before the refund can go through.
+    """
+    if not payment.stripe_payment_intent_id or not payment.stripe_account_id:
+        raise errors.validation_error("This order has no Stripe payment to refund.")
+
+    try:
+        refund = stripe.Refund.create(
+            payment_intent=payment.stripe_payment_intent_id,
+            refund_application_fee=True,
+            metadata={
+                "order_id": str(payment.order_id),
+                **({"reason": reason[:200]} if reason else {}),
+            },
+            stripe_account=payment.stripe_account_id,
+            idempotency_key=f"order:{payment.order_id}:refund:v1",
+        )
+    except stripe.error.StripeError as exc:
+        code = getattr(exc, "code", None)
+        log.warning(
+            "refund failed for order %s: %s (%s)", payment.order_id, exc.user_message or exc, code
+        )
+        raise errors.ApiError(502, "REFUND_FAILED", _refund_problem(code, exc)) from exc
+
+    log.info("refunded order %s: %s", payment.order_id, refund.get("id"))
+    return refund
+
+
+def _refund_problem(code: str | None, exc: Exception) -> str:
+    """Stripe's refusal, in words a manager can act on.
+
+    Its own message names API objects and the connected account, which is
+    the restaurant's own but still reads as somebody else's plumbing. Only
+    the cases a restaurant can do something about are worded here; the rest
+    keep Stripe's message, which is better than a shrug.
+    """
+    if code == "balance_insufficient":
+        return (
+            "Stripe refused the refund: this restaurant's Stripe balance is too low. "
+            "Add funds in Stripe, or refund it there once the next payout clears."
+        )
+    if code == "charge_already_refunded":
+        return "This order has already been refunded."
+    message = getattr(exc, "user_message", None) or "Stripe could not process the refund."
+    return str(message)[:200]
+
+
 def create_payment_intent(
     order: Order, account: RestaurantPaymentAccount, receipt_email: str | None
 ) -> stripe.PaymentIntent:

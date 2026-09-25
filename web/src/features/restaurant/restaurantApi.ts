@@ -216,6 +216,9 @@ export type CancelledOrder = {
   status: string;
   payment_status: string;
   refund_needed: boolean;
+  /** Stripe's refusal, when a refund was asked for and did not go through.
+   *  The cancellation still stands; only the money did not move. */
+  refund_problem?: string | null;
 };
 
 /** Shown once to the admin who reset it; only its hash is kept. */
@@ -277,6 +280,18 @@ export type LibraryItem = {
 };
 
 /** The fields an item form owns. Every one is optional on an edit. */
+/** A cancelled order still holding the customer's money. */
+export type RefundDue = {
+  order_id: string;
+  order_number: number;
+  status: string;
+  total_minor: number;
+  currency: string;
+  created_at: string;
+  payment_status: string;
+  cancelled_reason: string | null;
+};
+
 export type ItemDraft = {
   name: string;
   item_type_id: string;
@@ -632,9 +647,31 @@ export const restaurantApi = api.injectEndpoints({
       invalidatesTags: ["Board", "RestaurantReport"],
     }),
 
-    cancelOrder: build.mutation<CancelledOrder, { orderId: string; reason: string }>({
-      query: ({ orderId, reason }) => ({
+    cancelOrder: build.mutation<
+      CancelledOrder,
+      { orderId: string; reason: string; refund: boolean }
+    >({
+      query: ({ orderId, reason, refund }) => ({
         url: `/restaurant/orders/${orderId}/cancel`,
+        method: "POST",
+        body: { reason, refund },
+      }),
+      invalidatesTags: ["Board", "RestaurantReport"],
+    }),
+
+    // Cancelled orders whose money is still with the restaurant. A
+    // cancellation leaves the board, so this is the only place a refund
+    // nobody issued is still visible.
+    refundsDue: build.query<RefundDue[], void>({
+      query: () => ({ url: "/restaurant/orders/refunds-due" }),
+      providesTags: ["Board"],
+    }),
+
+    // For the cancellation made without a refund, and for the refund Stripe
+    // refused the first time. Only a cancelled order has one to give.
+    refundOrder: build.mutation<CancelledOrder, { orderId: string; reason: string }>({
+      query: ({ orderId, reason }) => ({
+        url: `/restaurant/orders/${orderId}/refund`,
         method: "POST",
         body: { reason },
       }),
@@ -1020,6 +1057,8 @@ export const {
   useCompleteOrderMutation,
   useOverrideCompleteMutation,
   useCancelOrderMutation,
+  useRefundOrderMutation,
+  useRefundsDueQuery,
   useMenuQuery,
   useItemTypesQuery,
   useCreateItemTypeMutation,
