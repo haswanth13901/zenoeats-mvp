@@ -71,6 +71,10 @@ def staff_login(
     and learn nothing about which subdomain they do belong to.
     """
     email = body.email.strip().lower()
+    # Before anything is looked up, so a spent account cannot keep guessing.
+    if ratelimit.sign_in_blocked("staff_login", email):
+        log.warning("staff sign-in throttled for %s", email_for_log(email))
+        raise ratelimit.sign_in_throttled()
 
     with system_session() as session:
         user = session.execute(
@@ -82,6 +86,11 @@ def staff_login(
         ).scalar_one_or_none()
         if user is None:
             staff_auth.dummy_verify(body.password)
+            # Logged and counted like a wrong password: a list of addresses
+            # tried one after another is the pattern worth seeing, and the
+            # budget must not tell a real account from an invented one.
+            log.warning("failed staff sign-in for unknown %s", email_for_log(email))
+            ratelimit.sign_in_failed("staff_login", email)
             raise errors.ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
         digest = user.password_hash
         user_id = user.id
@@ -91,6 +100,7 @@ def staff_login(
 
     if not staff_auth.verify_password(digest, body.password):
         log.warning("failed staff sign-in for %s", email_for_log(email))
+        ratelimit.sign_in_failed("staff_login", email)
         raise errors.ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
     if not active:
         raise errors.ApiError(403, "ACCOUNT_INACTIVE", "This account is not active.")
@@ -222,7 +232,13 @@ def staff_me(
     )
 
 
-@router.post("/change-password", status_code=204)
+@router.post(
+    "/change-password",
+    status_code=204,
+    # Checks the current password, so it is a password oracle for whoever
+    # holds a session. Rare for a person; limited for a script.
+    dependencies=[Depends(per_staff_user("change_password", limit=10, window_seconds=900))],
+)
 def change_password(
     body: ChangePasswordIn,
     response: Response,
@@ -377,7 +393,12 @@ def update_own_account(
     )
 
 
-@router.post("/change-email", status_code=204)
+@router.post(
+    "/change-email",
+    status_code=204,
+    # Also checks the current password; see change-password.
+    dependencies=[Depends(per_staff_user("change_email", limit=10, window_seconds=900))],
+)
 def change_email(
     body: ChangeEmailIn,
     user: User = Depends(current_staff_user_ready),
@@ -3730,7 +3751,14 @@ def list_staff(
     ]
 
 
-@router.post("/staff", status_code=201, response_model=StaffInviteOut)
+@router.post(
+    "/staff",
+    status_code=201,
+    response_model=StaffInviteOut,
+    # Each one sends an email from our domain; a hijacked session must not be
+    # able to turn that into a spam cannon or burn the sending reputation.
+    dependencies=[Depends(per_staff_user("staff_invite", limit=30, window_seconds=3600))],
+)
 def invite_staff(
     body: StaffInviteIn,
     background: BackgroundTasks,
@@ -4119,7 +4147,11 @@ def resend_staff_invitation(
     )
 
 
-@router.post("/staff/{membership_id}/reset-password", response_model=StaffPasswordResetOut)
+@router.post(
+    "/staff/{membership_id}/reset-password",
+    response_model=StaffPasswordResetOut,
+    dependencies=[Depends(per_staff_user("staff_reset_password", limit=20, window_seconds=3600))],
+)
 def reset_staff_password(
     membership_id: UUID,
     restaurant: Restaurant = Depends(current_restaurant_staff),

@@ -19,6 +19,8 @@ Design notes:
     is needed.
 """
 
+import hashlib
+import hmac
 import ipaddress
 import logging
 import time
@@ -173,6 +175,51 @@ def record_failure(bucket: str, window_seconds: int) -> None:
         pipe.execute()
     except RedisError:
         log.warning("rate limiter unavailable, not counting failure on %s", bucket, exc_info=True)
+
+
+# --- per account ------------------------------------------------------------
+#
+# The sign-in limits are per address, and an address is cheap: spread a
+# password list over a few hundred IPs and one owner's account can be guessed
+# at without end. So wrong answers are also counted against the account they
+# were aimed at.
+#
+# Generous on purpose. Anyone who knows an owner's email can spend this budget
+# with wrong passwords, and a tight one (five, ten) would let them lock the
+# owner out of their own restaurant at will. Fifty in fifteen minutes stops a
+# distributed guesser at a few hundred tries an hour -- against a twelve-
+# character minimum -- while making a lockout cost more than five addresses
+# every quarter of an hour. Sessions already signed in are untouched; only new
+# sign-ins wait. Unknown addresses are counted exactly like real ones, so the
+# limit says nothing about which accounts exist.
+SIGN_IN_FAILURES_PER_ACCOUNT = 50
+SIGN_IN_FAILURE_WINDOW_SECONDS = 900
+
+
+def _account_bucket(name: str, email: str) -> str:
+    # Keyed, so Redis never holds the address and the key cannot be reversed
+    # by anyone reading it.
+    key = (settings.SESSION_SECRET or "zenoeats-ratelimit").encode()
+    digest = hmac.new(key, email.strip().lower().encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{name}:account:{digest}"
+
+
+def sign_in_blocked(name: str, email: str) -> bool:
+    """Whether this account's budget of wrong passwords is spent. Fails open."""
+    return failures_exhausted(
+        _account_bucket(name, email), SIGN_IN_FAILURES_PER_ACCOUNT, SIGN_IN_FAILURE_WINDOW_SECONDS
+    )
+
+
+def sign_in_failed(name: str, email: str) -> None:
+    record_failure(_account_bucket(name, email), SIGN_IN_FAILURE_WINDOW_SECONDS)
+
+
+def sign_in_throttled() -> errors.ApiError:
+    return errors.ApiError(
+        429, "RATE_LIMITED",
+        "Too many sign-in attempts for this account. Wait 15 minutes and try again.",
+    )
 
 
 def per_ip(name: str, limit: int, window_seconds: int = 60) -> Callable:
