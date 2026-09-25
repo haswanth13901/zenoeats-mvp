@@ -159,6 +159,13 @@ export const storefrontApi = api.injectEndpoints({
       invalidatesTags: ["CustomerSession"],
     }),
 
+    /** Close the account and take the customer's details off it. Orders
+     *  stay: see legal/data-deletion.html, which this promises exactly. */
+    closeAccount: build.mutation<void, void>({
+      query: () => ({ url: "/customer/account", method: "DELETE", customerAuth: true }),
+      invalidatesTags: ["CustomerSession"],
+    }),
+
     /** Agree to the terms in force. No body: what was agreed to is the
      *  wording this deployment serves, which the server knows. */
     acceptTerms: build.mutation<CustomerSession, void>({
@@ -235,6 +242,7 @@ export const {
   useEndGuestSessionMutation,
   useUpdateProfileMutation,
   useSyncProfileEmailMutation,
+  useCloseAccountMutation,
   useAcceptTermsMutation,
   useCustomerOrdersQuery,
   useLazyCustomerOrdersQuery,

@@ -11,8 +11,20 @@ type Email = Awaited<ReturnType<ClerkUser["createEmailAddress"]>>;
 
 /** Clerk owns verification; the API independently reads the verified primary
  * address before updating its mirror. A failed sync can be retried safely. */
-export function ChangeEmail({ session, slug }: { session: CustomerSession; slug: string }) {
-  const [open, setOpen] = useState(false);
+export function ChangeEmail({
+  session,
+  slug,
+  open,
+  onOpenChange,
+}: {
+  session: CustomerSession;
+  slug: string;
+  /** Held by the page, because the link that opens this sits beside the
+   *  email field rather than inside this component. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const setOpen = onOpenChange;
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [pending, setPending] = useState<Email | null>(null);
@@ -80,12 +92,13 @@ export function ChangeEmail({ session, slug }: { session: CustomerSession; slug:
   }
 
   if (session.is_guest) return null;
+  // Nothing of its own until it is opened: the link that opens it is beside
+  // the email field, where the address it changes is.
+  if (!open && !saved) return null;
   return (
     <div className="mt-6 border-t border-hairline pt-6">
       {saved && <p className="note-success mb-4" role="status">Your verified email is saved.</p>}
-      {!open ? <button type="button" className="link" onClick={() => {
-        setOpen(true); setSaved(false); setError(null);
-      }}>Change email address</button> : (
+      {!open ? null : (
         <form onSubmit={e => { e.preventDefault(); void submit(); }} className="space-y-4">
           <h3 className="font-semibold">Change email address</h3>
           <p className="text-sm text-muted">Verify the new address before it becomes your sign-in and receipt email.</p>
