@@ -24,14 +24,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 
 from app.config import settings
+from app.core.admin_password import hash_password  # noqa: F401  (re-exported)
+from app.core.admin_password import hasher as _hasher
 
 log = logging.getLogger(__name__)
 
-_hasher = PasswordHasher()
 
 # Distinguishes a platform-admin session from any other token that might
 # reach get_principal. A Clerk token can never satisfy this and vice versa.
@@ -44,19 +44,6 @@ class PlatformAdmin:
     email: str
     # Epoch seconds the session token was issued; None for a fresh sign-in.
     issued_at: float | None = None
-
-
-def hash_password(password: str) -> str:
-    """Produce a value for ADMIN_USERS. Used by scripts/hash_password.py.
-
-    Base64 encoded, because a raw argon2 hash is hostile to .env files: it
-    looks like "$argon2id$v=19$m=65536,t=3,p=4$salt$digest". Docker Compose
-    expands the "$" segments as variable references and substitutes empty
-    strings, so containers silently receive a corrupted hash while a native
-    run sees the correct one -- the same credentials working in one mode and
-    failing in the other. Base64 has no character any layer treats specially.
-    """
-    return base64.b64encode(_hasher.hash(password).encode()).decode()
 
 
 def _registry() -> dict[str, str]:
