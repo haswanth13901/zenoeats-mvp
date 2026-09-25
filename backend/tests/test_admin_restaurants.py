@@ -276,7 +276,7 @@ def test_an_invited_owner_can_have_their_password_reset(admin_user, cleanup):
     ],
 )
 def test_a_value_the_database_cannot_hold_is_a_422_not_a_500(
-    admin_user, overrides, field, monkeypatch
+    admin_user, cleanup, overrides, field, monkeypatch
 ):
     """Found by the security pass: an overlong currency reached the INSERT and
     came back as a 500 carrying the database's own error."""
@@ -298,5 +298,9 @@ def test_a_value_the_database_cannot_hold_is_a_422_not_a_500(
         "/api/v1/admin/restaurants",
         json={"slug": f"bad-{uuid.uuid4().hex[:8]}", "name": "Probe", **overrides},
     )
+    if res.status_code == 201:
+        # Only against code without the bounds -- but then it must not be left
+        # behind in whatever database the suite ran against.
+        cleanup.append(res.json()["id"])
     assert res.status_code == 422, res.text
     assert field in res.json()["message"]
