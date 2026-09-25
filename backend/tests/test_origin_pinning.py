@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from app.core import platform_auth, staff_auth
 
+from tests.test_error_envelope import orderable_slug  # noqa: F401  (fixture)
 from tests.test_admin_restaurants import (  # noqa: F401  (fixtures)
     _create,
     _email,
@@ -125,3 +126,50 @@ def test_the_storefront_api_still_answers_across_origins(admin_user, cleanup):
         "/api/v1/menu", headers={"Origin": "http://somewhere-else.zenoeats.local"}
     )
     assert res.status_code != 403
+
+
+# ------------------------------------------------------ the guest cookie ---
+#
+# A guest orders with a cookie, not a bearer token, so the orders API has the
+# same exposure the operator APIs had: a page on a neighbouring storefront is
+# same-site, and the browser attaches the cookie by itself.
+
+
+def _guest_client(slug, monkeypatch):
+    from app.core import ratelimit
+
+    monkeypatch.setattr(ratelimit, "_consume", lambda *a, **k: None)
+    host = f"{slug}.zenoeats.local"
+    client = _client(host)
+    started = client.post(
+        "/api/v1/orders/guest-session", json={"email": "guest@zenoeats.invalid"},
+        headers={"Origin": f"http://{host}"},
+    )
+    assert started.status_code in (200, 201), started.text
+    return client, host
+
+
+def test_a_guest_cookie_is_refused_from_another_origin(orderable_slug, monkeypatch):
+    client, host = _guest_client(orderable_slug, monkeypatch)
+
+    ours = client.get("/api/v1/orders/session", headers={"Origin": f"http://{host}"})
+    assert ours.status_code == 200, ours.text
+
+    theirs = client.get(
+        "/api/v1/orders/session", headers={"Origin": "http://neighbour.zenoeats.local"}
+    )
+    assert theirs.status_code == 403
+    assert theirs.json()["detail"]["code"] == "CROSS_ORIGIN_DENIED"
+
+
+def test_a_cross_site_form_cannot_deliver_an_order_body(orderable_slug, monkeypatch):
+    """What kept this safe before the pin, kept as a check of its own: a form
+    can only post the "simple" content types, and a JSON body that is not
+    declared application/json is refused before any handler runs."""
+    client, host = _guest_client(orderable_slug, monkeypatch)
+    res = client.post(
+        "/api/v1/orders/guest-session",
+        content='{"email": "attacker@zenoeats.invalid"}',
+        headers={"Content-Type": "text/plain"},
+    )
+    assert res.status_code == 422
