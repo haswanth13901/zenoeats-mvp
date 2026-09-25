@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAppDispatch, useAppSelector } from "@/app/hooks";
+import { useAppSelector } from "@/app/hooks";
 import {
-  comboQuantitySet,
-  lineQuantitySet,
   selectCartCombos,
   selectCartLines,
 } from "@/features/cart/cartSlice";
@@ -19,7 +17,7 @@ import { ApiError, errorMessage, newIdempotencyKey } from "@/services/apiClient"
 import { money } from "@/utils/format";
 import { ErrorNote, Loading, Spinner, StatePage } from "@/components/common/Feedback";
 import { Cloche, Icon } from "@/components/common/icons";
-import { QuantityStepper } from "@/components/common/Sheet";
+import { CartLines } from "@/features/cart/components/CartLines";
 import { CustomerAccountBar } from "@/features/storefront/components/CustomerAccountBar";
 import { CustomerHeader } from "@/features/storefront/components/CustomerHeader";
 import { ContactFields } from "@/features/storefront/components/ContactFields";
@@ -89,7 +87,6 @@ function attemptKeyFor(signature: string): string {
 
 export function CheckoutPage() {
   const navigate = useNavigate();
-  const dispatch = useAppDispatch();
 
   // Restores the saved cart. Checkout is reached by a full navigation back
   // from sign-in, so without this the store is empty and the customer is told
@@ -549,72 +546,10 @@ export function CheckoutPage() {
               Your items
               <span className="sr-only">, {itemCount}</span>
             </h2>
-            <ul>
-              {/* Combos first, and each as one row. A meal deal that listed its
-                  three items separately would read as three orders and would
-                  let a customer remove the drink from a deal that requires
-                  one. */}
-              {combos.map((line) => (
-                <li key={line.key} className="border-b border-hairline py-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[17px] font-semibold">{line.name}</p>
-                      <ul className="mt-[7px] text-[13px] text-muted">
-                        {line.selections.map((sel) => (
-                          <li key={sel.slot_id}>
-                            {sel.slotLabel}: {sel.itemName}
-                            {sel.modifiers.length > 0 && (
-                              <span> · {sel.modifiers.map((m) => m.label).join(" · ")}</span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                      {line.note && <p className="mt-[7px] text-[13px] italic text-muted">{line.note}</p>}
-                    </div>
-                    <span className="tnum whitespace-nowrap text-[15px]">
-                      {money(line.unitPreviewMinor * line.quantity, currency)}
-                    </span>
-                  </div>
-                  {/* Minus at one removes the line: there is no separate remove
-                      button, and no upper limit here. */}
-                  <div className="mt-3">
-                    <QuantityStepper
-                      value={line.quantity}
-                      min={0}
-                      label={line.name}
-                      onChange={(quantity) => dispatch(comboQuantitySet({ key: line.key, quantity }))}
-                    />
-                  </div>
-                </li>
-              ))}
-
-              {lines.map((line) => (
-                <li key={line.key} className="border-b border-hairline py-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[17px] font-semibold">{line.name}</p>
-                      {line.modifiers.length > 0 && (
-                        <p className="mt-[7px] text-[13px] text-muted">
-                          {line.modifiers.map((m) => m.label).join(" · ")}
-                        </p>
-                      )}
-                      {line.note && <p className="mt-[7px] text-[13px] italic text-muted">{line.note}</p>}
-                    </div>
-                    <span className="tnum whitespace-nowrap text-[15px]">
-                      {money(line.unitPreviewMinor * line.quantity, currency)}
-                    </span>
-                  </div>
-                  <div className="mt-3">
-                    <QuantityStepper
-                      value={line.quantity}
-                      min={0}
-                      label={line.name}
-                      onChange={(quantity) => dispatch(lineQuantitySet({ key: line.key, quantity }))}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
+            {/* The same rows the cart page draws, from the same component:
+                a quantity changed in one place and not the other would be two
+                carts, and only one of them real. */}
+            <CartLines lines={lines} combos={combos} currency={currency} />
           </div>
 
           <aside className="rounded-banner border border-hairline bg-surface p-5 shadow-raised sm:p-6 lg:sticky lg:top-6">

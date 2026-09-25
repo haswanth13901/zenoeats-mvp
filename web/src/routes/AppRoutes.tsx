@@ -63,6 +63,9 @@ const PaymentRoute = lazyRoute(() =>
 const OrderRoute = lazyRoute(() =>
   import("@/pages/storefront/OrderPage").then((m) => ({ default: m.OrderPage })),
 );
+const CartRoute = lazyRoute(() =>
+  import("@/pages/storefront/CartPage").then((m) => ({ default: m.CartPage })),
+);
 const ProfileRoute = lazyRoute(() =>
   import("@/pages/storefront/ProfilePage").then((m) => ({ default: m.ProfilePage })),
 );
@@ -75,6 +78,9 @@ const router = createBrowserRouter(createRoutesFromElements(
             routes that need an identity are guarded. */}
         <Route element={<CustomerSurface />}>
           <Route path="/" element={<StorefrontPage />} />
+          {/* Reviewing your own cart needs no account. Checkout is where an
+              identity is asked for, because that is where an order is placed. */}
+          <Route path="/cart" element={CartRoute} />
           <Route
             path="/checkout"
             element={

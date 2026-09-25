@@ -152,7 +152,7 @@ function OrderButton({ orderable }: { orderable: boolean }) {
   }
   return (
     <Link
-      to="/checkout"
+      to="/cart"
       aria-label={label}
       className={`${shape} border-brick bg-brick text-white transition-colors duration-color ease-standard hover:bg-brickDark`}
     >
