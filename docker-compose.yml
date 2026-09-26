@@ -232,7 +232,7 @@ services:
       - "127.0.0.1:3000:3000"
 
   nginx:
-    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    image: nginx:1.31-alpine@sha256:1ed1b0e1d7652937d6cbdaf4018c7b6fc009a7dd6c3047351e2eddda745de43f
     # Pin the host gateway into /etc/hosts so nginx resolves it at startup
     # instead of per-request through Docker's embedded DNS, which answers
     # inconsistently and produced intermittent 502s.
