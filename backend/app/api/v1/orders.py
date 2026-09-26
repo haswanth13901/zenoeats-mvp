@@ -409,7 +409,6 @@ def create_payment_intent(
 def get_order(
     order_id: UUID,
     background: BackgroundTasks,
-    t: str | None = None,
     x_order_token: str | None = Header(default=None, alias="X-Order-Token"),
     user: User | None = Depends(optional_current_user),
     restaurant: Restaurant = Depends(current_restaurant),
@@ -423,18 +422,18 @@ def get_order(
     visible to the next poll.
 
     Two ways in. Ordinarily the caller owns the order -- a Clerk session or
-    the guest cookie that created it. `t` is the other: the order-scoped token
+    the guest cookie that created it. X-Order-Token is the other: the token
     in a guest's confirmation email, which is how someone who ordered without
     an account reaches their pickup PIN from a phone that is not the one they
     ordered on. It is checked against this order id, so it opens nothing else.
 
-    The token arrives in the X-Order-Token header. `?t=` still works, but it
-    puts a seven-day key to a pickup PIN into every access log the request
-    passes through -- uvicorn's and nginx's both record the query string --
-    so the page no longer sends it that way, and the email link carries it
-    in the fragment, which no server ever sees.
+    Only ever a header. It used to be ?t=, which put a seven-day key to a
+    pickup PIN into every access log the request passed through -- uvicorn's
+    and nginx's both record the query string. The email link now carries it
+    in the fragment, which no server sees, and the page moves it into this
+    header; a ?t= is ignored, so no client can put it back in a URL.
     """
-    t = x_order_token or t
+    t = x_order_token
     # Decided before the order is read: a caller with neither a session nor a
     # token has nothing to be told apart from a 404, and asking the database
     # first would only turn "sign in" into "no such order".

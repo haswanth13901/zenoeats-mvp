@@ -240,7 +240,7 @@ def track(pending, monkeypatch):
     token = guest_auth.issue_order_token(pending.order_id)
 
     def poll():
-        res = client.get(f"/api/v1/orders/{pending.order_id}", params={"t": token})
+        res = client.get(f"/api/v1/orders/{pending.order_id}", headers={"X-Order-Token": token})
         assert res.status_code == 200, res.text
         return res.json()
 
@@ -267,6 +267,11 @@ def test_an_order_token_works_from_a_header_and_opens_only_its_own_order(pending
 
     forged = client.get(url, headers={"X-Order-Token": "not-a-token"})
     assert forged.status_code == 401
+
+    # Only the header. A token in the query string is ignored, so a client
+    # that puts one back in a URL -- and so in the access logs -- gets nothing.
+    in_query = client.get(url, params={"t": guest_auth.issue_order_token(pending.order_id)})
+    assert in_query.status_code == 401
 
 
 @integration
