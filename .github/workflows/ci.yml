@@ -256,6 +256,18 @@ jobs:
           docker build -t "$IMAGE_BASE/api:${{ github.sha }}" ./backend
           docker build -t "$IMAGE_BASE/web:${{ github.sha }}" ./web
 
+      # Asked of the built image, not read from the Dockerfile: a USER line can
+      # be undone by a later stage or a base image, and only the result counts.
+      # Root in either image fails the build before anything is published.
+      - name: Images do not run as root
+        run: |
+          set -euo pipefail
+          for image in api web; do
+            uid=$(docker run --rm --entrypoint id "$IMAGE_BASE/$image:${{ github.sha }}" -u)
+            echo "$image runs as uid $uid"
+            test "$uid" != "0"
+          done
+
       # Everything below is skipped on a pull request, where GITHUB_TOKEN is
       # read-only anyway and a push would fail rather than be refused.
       - name: Sign in to the registry
