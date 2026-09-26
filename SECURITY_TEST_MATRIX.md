@@ -26,7 +26,7 @@ mounted, it passed.
 
 | Risk | Test cases (file::test) | Kind | Observed | Gap |
 |---|---|---|---|---|
-| **F-01** order token in logs | `test_notifications.py::test_a_guest_link_keeps_its_token_out_of_every_server_log`; `test_payment_reconciliation.py::test_an_order_token_works_from_a_header_and_opens_only_its_own_order`; `test_logsafe.py::test_the_access_log_never_records_a_query_string`, `::test_a_path_without_a_query_is_left_alone`, `::test_the_filter_is_on_uvicorns_access_logger`; `web/tests/ordertoken.test.mjs` (6) | unit, integration, authz-negative | pass; live probe: token absent from API and nginx logs; Chromium email-link flow OK | Production nginx log format proven by `nginx -t` and code only, not by a live production log |
+| **F-01** order token in logs (and `?t=` refused since e1862c9) | `test_notifications.py::test_a_guest_link_keeps_its_token_out_of_every_server_log`; `test_payment_reconciliation.py::test_an_order_token_works_from_a_header_and_opens_only_its_own_order`; `test_logsafe.py::test_the_access_log_never_records_a_query_string`, `::test_a_path_without_a_query_is_left_alone`, `::test_the_filter_is_on_uvicorns_access_logger`; `web/tests/ordertoken.test.mjs` (6) | unit, integration, authz-negative | pass; live probe: token absent from API and nginx logs; Chromium email-link flow OK | Production nginx log format proven by `nginx -t` and code only, not by a live production log |
 | **F-02** open redirect | `web/tests/safenext.test.mjs` (3 tests, 11 bypass spellings) | unit | pass; also run in Chromium on the live site | Staff and admin sign-in not driven end to end in a browser (no known passwords); covered by the shared function |
 | **F-04** brute force | `test_sign_in_throttling.py` (6): spent account refuses the right password; successes never counted; per-account isolation; no enumeration; HMAC key; admin budget | integration, negative | pass | Real distributed attack not simulated; limiter fail-open under Redis loss covered only by `/health/operations` |
 | Per-IP limits, forged IPs | `test_client_ip.py`; live probe with forged `X-Forwarded-For`/`X-Real-IP` | integration, live | 429 after 10 | — |
@@ -35,7 +35,7 @@ mounted, it passed.
 | **F-11** CSRF / origin | `test_origin_pinning.py::test_a_guest_cookie_is_refused_from_another_origin`, `::test_a_cross_site_form_cannot_deliver_an_order_body` + 6 existing | integration, negative | pass; cross-origin 200 before the fix → 403 | — |
 | **F-10** published secrets | `test_startup_checks.py::test_a_secret_this_repository_publishes_is_refused` (3), `::test_a_development_database_password_is_refused` (2), `::test_the_published_secrets_are_the_ones_actually_published` | unit | pass | — |
 | Test keys / unsafe prod config | `test_startup_checks.py` (27 total) | unit | pass | — |
-| **F-05** non-root web | Build and run: `id -un` = nginx; Trivy DS-0002 cleared | manual, scanner | pass | Not asserted in CI (add `trivy config` to CI: follow-up) |
+| **F-05** non-root web | Build and run: `id -un` = nginx; Trivy DS-0002 cleared | manual, scanner, CI | pass | Asserted in CI since 42205b2 (the built image must not run as root; a root image was checked to fail) |
 | **F-06** CI | `actionlint`; SHA-to-release check via GitHub API | manual | pass | Takes effect on the first CI run of the branch |
 | **F-09** version disclosure | Live `curl -I` → `Server: nginx` | manual | pass | — |
 | Tenant isolation | `test_rls_isolation.py` (7), `test_tenant_resolution.py`, `test_origin_pinning.py` | integration | pass | Staging should re-run the gates (STEPS §4.1) |
@@ -56,7 +56,6 @@ mounted, it passed.
 ## Outstanding coverage gaps
 
 1. No automated browser suite in CI for the sign-in pages (F-02 is unit-tested only).
-2. No CI assertion that images run non-root (add `trivy config --exit-code 1`).
-3. Nothing verifies production-only configuration: TLS, Cloudflare, firewall, live keys.
-4. No load or DoS testing; F-12 container limits are not set.
-5. No human penetration test yet.
+2. Nothing verifies production-only configuration: TLS, Cloudflare, firewall, live keys.
+3. No load or DoS testing. Container limits are set (F-12) and were proven on a production-shape rehearsal, not under load.
+4. No human penetration test yet.

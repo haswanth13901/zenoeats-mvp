@@ -29,9 +29,10 @@ evidence rather than by reading alone:
 - **Secrets.** No secret has ever been committed to this public repository.
 
 **Twelve findings were raised: no Critical, four Medium, eight Low (two of
-them Low–Medium). Ten are fixed in code, with 39 new regression tests.** One Medium finding (F-07,
-branch protection) and one Low finding (F-12, container limits) need the
-owner's decision.
+them Low–Medium). All twelve are now remediated** — ten in code with 39
+new regression tests, F-12 (container limits) on 26 September, and F-07
+(branch protection) as a repository setting the owner approved on 26
+September.
 
 The most consequential issues fixed:
 
@@ -128,7 +129,7 @@ Severity is a triage priority, not proof of exploitability.
 | F-01 | Medium | V10/V01 data exposure | **REMEDIATED** | Guest order-view token logged by API and nginx |
 | F-02 | Medium | Open redirect | **REMEDIATED** | `?next=` bypass on customer, staff and admin sign-in |
 | F-04 | Medium | V06 | **REMEDIATED** | Sign-in throttled per IP only; oracles unthrottled |
-| F-07 | Medium | CI/CD, S12 | **BLOCKED (owner approval)** | `main` unprotected: no required checks or review |
+| F-07 | Medium | CI/CD, S12 | **REMEDIATED** | `main` unprotected: no required checks or review |
 | F-08 | Low–Med | V02 injection | **REMEDIATED** | CSV formula injection in admin export |
 | F-05 | Low–Med | Container | **REMEDIATED** | Web container ran as root |
 | F-03 | Low | V02/V08 | **REMEDIATED** | Overlong admin input → 500 instead of 422 |
@@ -136,7 +137,7 @@ Severity is a triage priority, not proof of exploitability.
 | F-09 | Low | V04 | **REMEDIATED** | nginx version disclosed |
 | F-10 | Low | V01/S13 | **REMEDIATED** | Published CI secrets would be accepted in production |
 | F-11 | Low | V03 CSRF | **REMEDIATED** | Orders API not origin-pinned though guests use a cookie |
-| F-12 | Low | Resource exhaustion | **NEEDS OWNER DECISION** | No container memory/CPU limits |
+| F-12 | Low | Resource exhaustion | **REMEDIATED** | No container memory/CPU limits |
 
 ### F-01 — Guest order-view token written to access logs (Medium, REMEDIATED)
 
@@ -155,7 +156,9 @@ Severity is a triage priority, not proof of exploitability.
 - **Remediation** (commit ec5a548):
   - The email link carries the token in `#t=`, which is never sent to a server.
   - The page sends it in an `X-Order-Token` header.
-  - `?t=` is still accepted, so the API contract is unchanged.
+  - `?t=` is no longer accepted at all (e1862c9): no client can put the
+    token back in a URL. The page still reads `?t=` from an old link in the
+    browser and sends it in the header.
   - uvicorn's access log drops query strings (`logsafe.DropQueryStrings`).
   - The production nginx logs `$uri` through its own format.
 - **Tests.**
@@ -213,7 +216,7 @@ Severity is a triage priority, not proof of exploitability.
   - admin sign-in has the same budget
 - **Needs human review:** the threshold trade-off (see below).
 
-### F-07 — `main` has no branch protection (Medium, BLOCKED: owner approval)
+### F-07 — `main` has no branch protection (Medium, REMEDIATED)
 
 - **Evidence.** `GET repos/haswanth13901/zenoeats-mvp/branches/main/protection`
   returns 404 "Branch not protected", and there are no rulesets.
@@ -228,8 +231,18 @@ Severity is a triage priority, not proof of exploitability.
   With a single maintainer, "required approvals" would block self-merge;
   requiring PRs plus checks, with the owner as the reviewer of record, is the
   practical gate.
-- **Not done:** it's a repository-settings change and needs your
-  authorization.
+- **Remediated** 26 September, with the owner's approval. Read back from
+  the API:
+  - a pull request is required, with zero approvals (so the owner can merge
+    their own, as the reviewer of record)
+  - the checks `secrets`, `backend`, `frontend` and `docker` must pass on an
+    up-to-date branch
+  - **enforced for admins too.** The AI works through the owner's token, so
+    without this it could still push straight to `main`
+  - force pushes and deletion are refused
+
+  Also switched on: Dependabot alerts and security updates, secret scanning,
+  and push protection.
 
 ### F-08 — CSV formula injection in the platform export (Low–Medium, REMEDIATED)
 
@@ -274,8 +287,12 @@ Severity is a triage priority, not proof of exploitability.
   - `.github/dependabot.yml` for actions, pip and npm
 - **Verified.** `actionlint` passes, and a dry run on the tracked files is
   clean.
-- **Remaining (Low).** Base images (`python:3.12-slim`, `node:22-alpine`,
-  `nginx:1.27-alpine`) are pinned by tag, not digest.
+- **Also done** (220a777, 42205b2):
+  - every base and service image is pinned by digest (Dockerfiles, compose,
+    the CI service images, Trivy, the restore drill), with Dependabot watching
+    `docker` and `docker-compose`
+  - CI asks each built image who it runs as, and fails before publishing if
+    either is root (a stock root image was checked to fail)
 
 ### F-09 — nginx version disclosure (Low, REMEDIATED)
 
@@ -303,15 +320,32 @@ them.
 - **Verified live.** A full guest checkout and payment, and a cancel and
   refund through the kitchen board, work after the change.
 
-### F-12 — No container resource limits (Low, NEEDS OWNER DECISION)
+### F-12 — No container resource limits (Low, REMEDIATED)
 
-`docker-compose.prod.yml` sets no `mem_limit` or `cpus`, so a runaway
-process (for example a large image decode) can starve Postgres on a shared
-VM. The right values depend on the VM size, which isn't chosen yet.
-Recommendation for a 4 GB VM:
+- **Where.** `docker-compose.prod.yml` set no `mem_limit` or `cpus`, so a
+  runaway process (for example a pathological image decode) could starve
+  Postgres on a shared VM.
+- **Remediation** (fc16228). Caps sized for the recommended 2 vCPU / 4 GB VM,
+  each overridable in `.env`:
 
-| Service | Memory |
-|---|---|
+  | Service | Memory | CPUs |
+  |---|---|---|
+  | api | 1 GB | 1.5 |
+  | worker | 768 MB | 1.0 |
+  | beat | 256 MB | — |
+  | redis-runtime | 320 MB | — |
+  | web | 128 MB | — |
+  | nginx | 128 MB | — |
+  | migrate | 512 MB | — |
+
+  Postgres and the Redis broker are deliberately uncapped: they hold data,
+  and an out-of-memory kill there costs more than it saves.
+- **Verified** on a production-shape rehearsal running the caps and the
+  pinned images. Every service was healthy inside its limit (api 246 MB of
+  1 GB with two processes, worker 162 of 768, beat 106 of 256), and both
+  health endpoints were OK through the HTTPS edge.
+
+---|---|
 | api | 1 GB |
 | worker | 512 MB |
 | beat | 256 MB |
@@ -362,7 +396,7 @@ Legend:
 | S09 | Signed webhooks, replay, idempotency | PASS | Stripe `construct_event` and svix over the raw body, 5-minute tolerance, unique event ids, `IntegrityError` → 200 duplicate |
 | S10 | Environment separation | PASS (code) / NV | `ALLOW_TEST_KEYS`, key-mode checks, per-environment `.env` from `make_prod_env.py`; separate staging Clerk instance is a process step |
 | S11 | AI agent input handling | N/A | No AI or LLM component in the application |
-| S12 | Human review gate for AI changes | **BLOCKED (F-07)** | Needs branch protection; this audit's own changes await review |
+| S12 | Human review gate for AI changes | PASS (F-07 fixed) | PR plus four required checks, enforced for admins; this audit's own changes await the owner's review in PR #21 |
 | S13 | Startup config validation | PASS + FIXED (F-10) | `startup_checks.py` refuses unsafe production configuration, test keys, published secrets and dev DB passwords |
 
 ### Additional production checks
@@ -377,11 +411,11 @@ Legend:
 | Path traversal / file access | PASS | Image keys regex-validated and resolved under the root |
 | Deserialization / command injection | PASS | Celery JSON only; no `pickle`, `subprocess`, `os.system` or `eval` in `app/` |
 | DB least privilege, backups, restore | PASS (local) / NV (prod) | Three-role model; `backup.sh` plus `restore_drill.sh` proven locally; production drill pending |
-| Container / VM | PASS + FIXED (F-05) / NV | Both images non-root; no internal ports in prod; F-12 limits; host firewall, SSH and disk encryption unverified |
-| CI/CD | FIXED (F-06) / BLOCKED (F-07) | Tag-based release; manual deploy |
+| Container / VM | PASS + FIXED (F-05, F-12) / NV | Both images non-root (asserted in CI); no internal ports in prod; limits set; host firewall, SSH and disk encryption unverified |
+| CI/CD | FIXED (F-06, F-07) | Tag-based release; manual deploy; required checks; digest-pinned images |
 | Concurrency | PASS | Webhook dedupe; `FOR UPDATE` on PIN; idempotency keys; unique successful payment per order |
 | Data protection | PASS / NV | PIN Fernet-encrypted; PII masked in logs; Sentry scrubbed; backups age-encrypted; TLS; disk encryption at rest depends on the VM provider |
-| Resource exhaustion | PASS / F-12 | Body limits; list endpoints capped (50–200); report range ≤ 366 days; per-restaurant Stripe Tax cap |
+| Resource exhaustion | PASS + FIXED (F-12) | Body limits; list endpoints capped (50–200); report range ≤ 366 days; per-restaurant Stripe Tax cap |
 
 ---
 
@@ -420,8 +454,9 @@ Legend:
    deliberate trade-off between brute-force resistance and an attacker's
    ability to lock an owner out. Confirm it fits your support model; staff
    who are already signed in are unaffected.
-2. **F-01 compatibility.** `?t=` is still accepted by the API. Once no older
-   emails are live (7 days after deploying), consider removing it.
+2. **F-01.** `?t=` was removed from the API outright (no production emails
+   exist yet). Any link in an old test email that still carries `?t=` works
+   only through the page, which moves the token into the header.
 3. **F-11.** Any future cross-origin browser client of `/orders` would now be
    refused. Native apps and servers send no `Origin` and are unaffected.
 4. **F-10.** `PUBLISHED_SECRETS` is a denylist and must track CI's values;
@@ -437,24 +472,25 @@ Legend:
 
 | # | Action | Owner | Priority |
 |---|---|---|---|
-| 1 | Approve and enable branch protection on `main` (F-07) | You | Before launch |
-| 2 | Review and merge `security-audit`; tag `v1.0.1` | You | Before launch |
-| 3 | Pick VM size; add container limits (F-12) | You + me | Before launch |
-| 4 | Provider firewall: 80/443 from Cloudflare only, SSH from your IP (STEPS §4.1) | You | Before launch |
-| 5 | Staging rehearsal incl. CSP report-only, webhooks, Apple Pay (STEPS §10) | You | Before launch |
-| 6 | Manual penetration test of the staging environment by a human tester | External | Before or soon after launch |
-| 7 | Pin base images by digest; enable Dependabot alerts in repo settings | You | Soon |
-| 8 | Remove `?t=` support after the transition (see above) | Dev | Soon |
-| 9 | Delete the stale untracked `backend/.env` (test-mode Stripe and Clerk secrets, never committed) | You | Soon |
+| 1 | Review PR #21 line by line and merge it; tag `v1.0.1` | You | Before launch |
+| 2 | Provider firewall: 80/443 from Cloudflare only, SSH from your IP (STEPS §4.1) | You | Before launch |
+| 3 | Staging rehearsal incl. CSP report-only, webhooks, Apple Pay (STEPS §10) | You | Before launch |
+| 4 | Manual penetration test of the staging environment by a human tester | External | Before or soon after launch |
+| 5 | Re-check the container limits once the VM is chosen (only if it is not 2 vCPU / 4 GB) | You | At deploy |
+
+Done since the first version of this report (26 September): branch
+protection and GitHub security features (F-07), container limits (F-12),
+digest pinning, the non-root CI check, removing `?t=`, and deleting the stale
+`backend/.env`.
 
 ## Release status
 
 **CONDITIONAL / PENDING VERIFICATION.**
 
-The code is ready for human release review once `security-audit` is reviewed
-and merged. The release is not cleared, because:
+Every finding is remediated, and the code is **ready for human release
+review** in PR #21. The release is still not cleared, because:
 
-- **F-07 is blocked on your authorization.**
+- **PR #21 needs your review and merge.** That is the gate F-07 now enforces.
 - **Production-only evidence is missing:**
   - the real domain, TLS and Cloudflare
   - the VM firewall and disk encryption

@@ -8,15 +8,15 @@ before real money.
 ## 1. Code and release gates
 
 - [ ] `security-audit` branch reviewed line by line by a human and merged via PR
-- [ ] **Branch protection on `main`** (F-07):
+- [x] **Branch protection on `main`** (F-07), enabled 26 September:
   - require a PR
   - require the checks `secrets`, `backend`, `frontend` and `docker`
   - no force pushes, no deletion
 - [ ] CI green on the exact commit being released, including the new `secrets` job
 - [ ] Release tagged (`v1.0.1` or later, containing the audit fixes); deploy
       only images CI published for that tag
-- [ ] Dependabot alerts and secret scanning (push protection) switched on in
-      GitHub → Settings → Code security. Free for public repositories.
+- [x] Dependabot alerts and security updates, secret scanning and push
+      protection: enabled 26 September
 
 ## 2. Environment configuration
 
@@ -48,7 +48,7 @@ before real money.
 | Cloudflare origin certificate key | `infra/certs/privkey.pem`, mode 600 | 15-year validity; calendar reminder |
 
 - [ ] All of the above escrowed in a password manager, separate from the backups
-- [ ] Stale local `backend/.env` (test-mode Stripe and Clerk secrets, never
+- [x] Stale local `backend/.env` (test-mode Stripe and Clerk secrets, never
       committed) deleted from the development laptop. Optionally roll those
       test keys too.
 - [ ] On any suspected leak: rotate at the provider first, then update `.env`.
@@ -63,7 +63,7 @@ before real money.
 - [ ] Only nginx publishes ports (`docker ps` shows `0.0.0.0:80`/`443` and nothing else)
 - [ ] Cloudflare: SSL **Full (strict)**, Always Use HTTPS, Min TLS 1.2
 - [ ] Disk encryption at rest confirmed with the VM provider
-- [ ] Container resource limits set once the VM size is chosen (F-12)
+- [x] Container resource limits set (F-12), sized for 2 vCPU / 4 GB. Raise them in `.env` for a bigger VM
 - [ ] `docker compose ps`: every service healthy, `migrate` exited 0
 
 ## 5. Monitoring and incident signals
@@ -102,10 +102,10 @@ that performed this audit did not and cannot perform them.
 | Decision | By | Date |
 |---|---|---|
 | Security-audit changes reviewed and approved for merge | | |
-| Branch protection enabled on `main` (F-07) | | |
+| Branch protection enabled on `main` (F-07) | Owner (approved in session) | 2026-09-26 |
 | F-04 threshold (50 / 15 min / account) accepted | | |
 | Accepted risks re-confirmed: limiter fails open without Redis; temporary staff passwords emailed | | |
-| Container limits chosen (F-12) | | |
+| Container limits chosen (F-12) | Defaults for 2 vCPU / 4 GB; confirm against the chosen VM | |
 | Production configuration checked (§2–§4) | | |
 | Restore drill passed on production backups (§6) | | |
 | Staging rehearsal and penetration test passed (§7) | | |
