@@ -1,4 +1,6 @@
-FROM python:3.12-slim
+# Pinned by digest: a tag can be re-pointed at different contents by whoever
+# publishes it, a digest cannot. Dependabot proposes updates.
+FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 

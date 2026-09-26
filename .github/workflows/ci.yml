@@ -29,14 +29,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Secret scan
         run: |
-          docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.74.0 fs \
+          docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 fs \
             --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress /src
 
   backend:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
         env:
           POSTGRES_DB: zenoeats
           POSTGRES_USER: postgres
@@ -51,7 +51,7 @@ jobs:
       # reasons that matter there and not here (one evicts, one must never);
       # one instance with two databases is enough to run against.
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s
           --health-timeout 5s --health-retries 10

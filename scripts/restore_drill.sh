@@ -67,7 +67,7 @@ docker rm -f "$container" > /dev/null 2>&1 || true
 # daemon, including one that cannot see this machine's files.
 docker create --name "$container" --network none \
   -e POSTGRES_DB=zenoeats -e POSTGRES_PASSWORD=drill \
-  postgres:16-alpine > /dev/null
+  postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea > /dev/null
 docker cp "$REPO/infra/postgres/01-roles.sql" "$container:/docker-entrypoint-initdb.d/01-roles.sql"
 docker start "$container" > /dev/null
 # The image restarts the server once after running init scripts; wait for
