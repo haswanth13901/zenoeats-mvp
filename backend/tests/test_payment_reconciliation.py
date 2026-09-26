@@ -240,11 +240,38 @@ def track(pending, monkeypatch):
     token = guest_auth.issue_order_token(pending.order_id)
 
     def poll():
-        res = client.get(f"/api/v1/orders/{pending.order_id}", params={"t": token})
+        res = client.get(f"/api/v1/orders/{pending.order_id}", headers={"X-Order-Token": token})
         assert res.status_code == 200, res.text
         return res.json()
 
     return poll
+
+
+@integration
+def test_an_order_token_works_from_a_header_and_opens_only_its_own_order(pending):
+    """The page sends the emailed token in X-Order-Token, not ?t=, so it stays
+    out of access logs. The header must grant exactly what the query did."""
+    from fastapi.testclient import TestClient
+
+    from app.core import guest_auth
+    from app.main import app
+
+    client = TestClient(app, base_url=f"http://{pending.slug}.zenoeats.local")
+    url = f"/api/v1/orders/{pending.order_id}"
+
+    own = client.get(url, headers={"X-Order-Token": guest_auth.issue_order_token(pending.order_id)})
+    assert own.status_code == 200, own.text
+
+    other = client.get(url, headers={"X-Order-Token": guest_auth.issue_order_token(uuid.uuid4())})
+    assert other.status_code == 401
+
+    forged = client.get(url, headers={"X-Order-Token": "not-a-token"})
+    assert forged.status_code == 401
+
+    # Only the header. A token in the query string is ignored, so a client
+    # that puts one back in a URL -- and so in the access logs -- gets nothing.
+    in_query = client.get(url, params={"t": guest_auth.issue_order_token(pending.order_id)})
+    assert in_query.status_code == 401
 
 
 @integration

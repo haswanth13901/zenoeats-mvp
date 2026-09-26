@@ -32,6 +32,14 @@
 # lines in .env are ignored by these containers. Leave the DOCKER_* ones out
 # of a production .env; compose then warns they are unset, which is harmless.
 
+# Resource limits (mem_limit, cpus below). Without them one runaway process
+# -- a pathological image decode, a stuck task -- can take the whole VM's
+# memory and Postgres with it. Sized for the recommended 2 vCPU / 4 GB VM and
+# overridable per variable in .env (API_MEM_LIMIT=1536m, ...) for a bigger one.
+# Postgres and the Redis broker are deliberately left unlimited: they hold
+# data, and an out-of-memory kill there costs more than it saves. The runtime
+# Redis is capped just above its own 256 MB maxmemory.
+
 x-runtime-urls: &runtime-urls
   DATABASE_URL_APP: postgresql+psycopg2://zenoeats_app:${ZENOEATS_APP_PASSWORD:?set ZENOEATS_APP_PASSWORD}@postgres:5432/zenoeats
   DATABASE_URL_SYSTEM: postgresql+psycopg2://zenoeats_system:${ZENOEATS_SYSTEM_PASSWORD:?set ZENOEATS_SYSTEM_PASSWORD}@postgres:5432/zenoeats
@@ -75,6 +83,7 @@ services:
     restart: unless-stopped
 
   redis-runtime:
+    mem_limit: ${REDIS_RUNTIME_MEM_LIMIT:-320m}
     command: >
       redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
       --requirepass ${REDIS_RUNTIME_PASSWORD:?set REDIS_RUNTIME_PASSWORD}
@@ -86,6 +95,7 @@ services:
     restart: unless-stopped
 
   migrate:
+    mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
     image: ${API_IMAGE:?set API_IMAGE to the api image CI published}
     build: !reset null
     environment:
@@ -93,6 +103,8 @@ services:
       DATABASE_URL_MIGRATE: postgresql+psycopg2://zenoeats_migrate:${ZENOEATS_MIGRATE_PASSWORD}@postgres:5432/zenoeats
 
   api:
+    mem_limit: ${API_MEM_LIMIT:-1g}
+    cpus: ${API_CPUS:-1.5}
     image: ${API_IMAGE:?set API_IMAGE to the api image CI published}
     environment:
       <<: *runtime-env
@@ -109,6 +121,8 @@ services:
     restart: unless-stopped
 
   worker:
+    mem_limit: ${WORKER_MEM_LIMIT:-768m}
+    cpus: ${WORKER_CPUS:-1.0}
     image: ${API_IMAGE:?set API_IMAGE to the api image CI published}
     environment:
       <<: *runtime-env
@@ -117,18 +131,21 @@ services:
   # Exactly one, always. Two beats schedule every task twice; none means
   # abandoned checkouts never expire. Never `--scale beat=`.
   beat:
+    mem_limit: ${BEAT_MEM_LIMIT:-256m}
     image: ${API_IMAGE:?set API_IMAGE to the api image CI published}
     environment:
       <<: *runtime-env
     restart: unless-stopped
 
   web:
+    mem_limit: ${WEB_MEM_LIMIT:-128m}
     image: ${WEB_IMAGE:?set WEB_IMAGE to the web image CI published}
     build: !reset null
     ports: !reset []
     restart: unless-stopped
 
   nginx:
+    mem_limit: ${NGINX_MEM_LIMIT:-128m}
     # The development edge pins the host gateway; production proxies to the
     # api and web containers on the compose network instead.
     extra_hosts: !reset []

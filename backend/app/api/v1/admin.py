@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import ensure_platform_admin_user, require_platform_admin
 from app.config import settings
 from app.core import platform_auth
+from app.core import ratelimit
 from app.core.ratelimit import per_ip
 from app.core import staff_auth
 from app.core import errors
@@ -60,11 +61,16 @@ class AdminOut(BaseModel):
     dependencies=[Depends(per_ip("admin_login", limit=10, window_seconds=300))],
 )
 def login(body: LoginIn, response: Response):
+    # Per account as well as per address; see ratelimit.sign_in_blocked.
+    if ratelimit.sign_in_blocked("admin_login", body.email):
+        log.warning("platform admin sign-in throttled for %s", email_for_log(body.email))
+        raise ratelimit.sign_in_throttled()
     admin = platform_auth.authenticate(body.email, body.password)
     if admin is None:
         # One message for both "no such admin" and "wrong password". The
         # difference would tell an attacker which addresses are worth attacking.
         log.warning("failed platform admin sign-in for %s", email_for_log(body.email))
+        ratelimit.sign_in_failed("admin_login", body.email)
         raise errors.ApiError(401, "INVALID_CREDENTIALS", "Email or password is incorrect.")
 
     response.set_cookie(
@@ -1148,6 +1154,18 @@ def platform_reports(admin: User = Depends(require_platform_admin)):
     ]
 
 
+# A spreadsheet runs a cell that starts with one of these as a formula. The
+# restaurant's name is typed by its own owner in Settings, so "=HYPERLINK(...)"
+# or a DDE payload would execute on the platform admin's machine the moment
+# the export is opened. Prefixed with an apostrophe, it is shown as text.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_text(value: object) -> str:
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(_FORMULA_PREFIXES) else text
+
+
 @router.get("/reports.csv")
 def platform_reports_csv(admin: User = Depends(require_platform_admin)):
     with system_session() as session:
@@ -1165,7 +1183,8 @@ def platform_reports_csv(admin: User = Depends(require_platform_admin)):
         paid = r["orders_paid"] or 0
         gross = int(r["gross_revenue_minor"] or 0)
         writer.writerow([
-            r["name"], r["slug"], r["status"], r["currency"], paid,
+            _csv_text(r["name"]), _csv_text(r["slug"]), _csv_text(r["status"]),
+            _csv_text(r["currency"]), paid,
             f"{gross / 100:.2f}",
             f"{int(r['tax_collected_minor'] or 0) / 100:.2f}",
             f"{(gross // paid) / 100:.2f}" if paid else "0.00",

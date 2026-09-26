@@ -36,7 +36,7 @@ export function RequireCustomer({
   allowOrderToken = false,
 }: {
   children: ReactNode;
-  /** Let a ?t= order-view token through unasked.
+  /** Let an order-view token (#t=, or ?t= from older links) through unasked.
    *
    *  Order tracking sets it, because the link in a guest's confirmation email
    *  is meant to be opened on whatever device the email is read on -- a phone
@@ -49,7 +49,7 @@ export function RequireCustomer({
 }) {
   const dispatch = useAppDispatch();
   // Read once, on the first render that can see it: takeOrderToken moves the
-  // token out of the address bar, so a later reader would find no ?t= and
+  // token out of the address bar, so a later reader would find no token and
   // must get the same answer from where this put it.
   const [hasOrderToken] = useState(() => (allowOrderToken ? takeOrderToken() !== null : false));
   const { data, error, isLoading, isFetching, refetch } = useCustomerSessionQuery(undefined, {

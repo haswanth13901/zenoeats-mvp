@@ -61,6 +61,28 @@ def test_the_confirmation_never_contains_the_pickup_pin():
         assert "pickup PIN is on your order page" in body
 
 
+def test_a_guest_link_keeps_its_token_out_of_every_server_log(monkeypatch):
+    """The token opens the order and its PIN for days. After "#", a browser
+    never sends it anywhere, so no access log or Referer on the way sees it."""
+    from urllib.parse import urlsplit
+
+    from app.core import guest_auth
+
+    monkeypatch.setattr(settings, "STOREFRONT_URL_TEMPLATE", "https://{slug}.{root_domain}")
+    monkeypatch.setattr(settings, "ROOT_DOMAIN", "zenoeats.com")
+    order = _order()
+    _, body_html, body_text = notifications.compose_order_confirmation(
+        restaurant_name="Spice House", slug="spicehouse", order=order, customer_name=None,
+        for_guest=True,
+    )
+    link = next(w for w in body_text.split() if w.startswith("https://spicehouse."))
+    parts = urlsplit(link)
+
+    assert parts.query == "", "a token in the query string is written to access logs"
+    assert parts.fragment.startswith("t=")
+    assert guest_auth.order_token_grants(parts.fragment[2:], order.id)
+
+
 def test_a_delivery_confirmation_promises_no_pin_and_shows_its_fee():
     """A delivery is not collected at a counter, and its fee is part of the total."""
     order = _order(

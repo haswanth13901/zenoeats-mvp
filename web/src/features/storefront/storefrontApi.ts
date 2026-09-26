@@ -106,9 +106,10 @@ export const storefrontApi = api.injectEndpoints({
      *  guest cookie -- the API checks it against this order and no other. */
     order: build.query<Order, { orderId: string; token?: string | null }>({
       query: ({ orderId, token }) => ({
-        url: token
-          ? `/orders/${orderId}?t=${encodeURIComponent(token)}`
-          : `/orders/${orderId}`,
+        url: `/orders/${orderId}`,
+        // A header rather than ?t=, which would put the token in the access
+        // logs of every hop on each poll.
+        orderToken: token ?? undefined,
         // With a token, nothing else is needed and Clerk is not worth
         // loading -- this is the path opened from an email, often on a device
         // that has never signed in to anything here.

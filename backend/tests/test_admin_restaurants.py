@@ -264,3 +264,43 @@ def test_an_invited_owner_can_have_their_password_reset(admin_user, cleanup):
     out = reset_owner_password(second.id, CreateOwnerIn(email=email), admin=admin_user)
     assert out.temporary_password
     assert out.status == "INVITED"
+
+
+@pytest.mark.parametrize(
+    "overrides, field",
+    [
+        ({"currency": "USDOLLARS"}, "currency"),
+        ({"currency": "us"}, "currency"),
+        ({"tagline": "x" * 201}, "tagline"),
+        ({"admin_email": "a" * 321}, "admin email"),
+    ],
+)
+def test_a_value_the_database_cannot_hold_is_a_422_not_a_500(
+    admin_user, cleanup, overrides, field, monkeypatch
+):
+    """Found by the security pass: an overlong currency reached the INSERT and
+    came back as a 500 carrying the database's own error."""
+    from fastapi.testclient import TestClient
+
+    from app.core import platform_auth
+    from app.main import app
+
+    monkeypatch.setattr(
+        platform_auth.settings, "ADMIN_USERS",
+        f"{admin_user.email}:{platform_auth.hash_password('x' * 16)}",
+    )
+    client = TestClient(app, base_url="http://admin.zenoeats.local")
+    client.cookies.set(
+        platform_auth.SESSION_COOKIE,
+        platform_auth.issue_session(platform_auth.PlatformAdmin(email=admin_user.email)),
+    )
+    res = client.post(
+        "/api/v1/admin/restaurants",
+        json={"slug": f"bad-{uuid.uuid4().hex[:8]}", "name": "Probe", **overrides},
+    )
+    if res.status_code == 201:
+        # Only against code without the bounds -- but then it must not be left
+        # behind in whatever database the suite ran against.
+        cleanup.append(res.json()["id"])
+    assert res.status_code == 422, res.text
+    assert field in res.json()["message"]

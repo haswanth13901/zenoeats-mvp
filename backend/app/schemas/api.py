@@ -512,10 +512,12 @@ class CreateRestaurantIn(BaseModel):
     slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str = Field(min_length=1, max_length=160)
     timezone: str = "America/Chicago"
-    currency: str = "USD"
+    # Bounded as the columns are, so a bad value is a 422 naming the field
+    # rather than a 500 from the database after the request got that far.
+    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
     tax_rate_bps: int = Field(default=0, ge=0, le=3000)
-    tagline: str | None = None
-    admin_email: str | None = None
+    tagline: str | None = Field(default=None, max_length=200)
+    admin_email: str | None = Field(default=None, max_length=320)
 
     _timezone = field_validator("timezone")(_known_timezone)
 

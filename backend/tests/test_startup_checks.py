@@ -104,6 +104,39 @@ def test_stripe_keys_from_different_modes_are_refused(allow_test_keys):
     assert any("different modes" in p for p in problems)
 
 
+@pytest.mark.parametrize("secret", sorted(startup_checks.PUBLISHED_SECRETS))
+def test_a_secret_this_repository_publishes_is_refused(secret):
+    """Each is readable by anyone; a copy into production is no secret."""
+    name = "FIELD_ENCRYPTION_KEY" if secret.endswith("=") else "SESSION_SECRET"
+    with pytest.raises(RuntimeError) as caught:
+        startup_checks.enforce(_production(**{name: secret}))
+    assert f"{name} is a value published in this repository" in str(caught.value)
+
+
+def test_the_published_secrets_are_the_ones_actually_published():
+    """So the list cannot drift from the files it describes."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    published = "".join(
+        (root / f).read_text(encoding="utf-8")
+        for f in (".github/workflows/ci.yml", "scripts/verify_redesign.py")
+        if (root / f).exists()
+    )
+    if not published:
+        pytest.skip("repository files are not mounted here")
+    for secret in startup_checks.PUBLISHED_SECRETS:
+        assert secret in published
+
+
+@pytest.mark.parametrize("name", ["DATABASE_URL_APP", "DATABASE_URL_SYSTEM"])
+def test_a_development_database_password_is_refused(name):
+    url = "postgresql+psycopg2://zenoeats_app:app_dev_pw@postgres:5432/zenoeats"
+    with pytest.raises(RuntimeError) as caught:
+        startup_checks.enforce(_production(**{name: url}))
+    assert "development password" in str(caught.value)
+
+
 def test_every_problem_is_reported_at_once():
     """Fixing one variable per failed deploy is a slow way to find five."""
     problems = startup_checks.configuration_problems(

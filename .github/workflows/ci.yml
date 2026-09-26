@@ -8,12 +8,35 @@ on:
     tags: ["v*"]
   pull_request:
 
+# Read-only unless a job says otherwise. Only the docker job, which publishes
+# images, asks for more. Without this line every job ran with whatever the
+# repository's default token permissions were.
+#
+# Actions are pinned to a full commit SHA, with the version in a comment. A
+# tag such as v4 can be moved to different code by whoever controls that
+# repository; a SHA cannot. Dependabot (.github/dependabot.yml) proposes
+# updates to them.
+permissions:
+  contents: read
+
 jobs:
+  # A key committed by mistake is published the moment it is pushed: this
+  # repository is public. High and critical only -- publishable keys, which
+  # are public by design, are low.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Secret scan
+        run: |
+          docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 fs \
+            --scanners secret --severity HIGH,CRITICAL --exit-code 1 --no-progress /src
+
   backend:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
         env:
           POSTGRES_DB: zenoeats
           POSTGRES_USER: postgres
@@ -28,7 +51,7 @@ jobs:
       # reasons that matter there and not here (one evicts, one must never);
       # one instance with two databases is enough to run against.
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s
           --health-timeout 5s --health-retries 10
@@ -61,8 +84,8 @@ jobs:
       STRIPE_CONNECT_WEBHOOK_SECRET: whsec_ci_only_not_a_real_endpoint_secret
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -123,8 +146,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
@@ -220,7 +243,7 @@ jobs:
       # rotate or leak -- the token is minted per run and dies with it.
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # ghcr.io rejects an uppercase path, and a GitHub owner may contain
       # capitals, so the name is lowered here rather than assumed.
@@ -232,6 +255,18 @@ jobs:
         run: |
           docker build -t "$IMAGE_BASE/api:${{ github.sha }}" ./backend
           docker build -t "$IMAGE_BASE/web:${{ github.sha }}" ./web
+
+      # Asked of the built image, not read from the Dockerfile: a USER line can
+      # be undone by a later stage or a base image, and only the result counts.
+      # Root in either image fails the build before anything is published.
+      - name: Images do not run as root
+        run: |
+          set -euo pipefail
+          for image in api web; do
+            uid=$(docker run --rm --entrypoint id "$IMAGE_BASE/$image:${{ github.sha }}" -u)
+            echo "$image runs as uid $uid"
+            test "$uid" != "0"
+          done
 
       # Everything below is skipped on a pull request, where GITHUB_TOKEN is
       # read-only anyway and a push would fail rather than be refused.

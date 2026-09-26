@@ -28,6 +28,18 @@
 
 include /etc/nginx/snippets/cloudflare-realip.conf;
 
+# The version number tells a scanner which advisories to try first.
+server_tokens off;
+
+# Nginx's default "combined" format logs $request, the whole request line
+# with its query string -- which is where a token lands whenever a client puts
+# one in a URL (an order-view link opens a pickup PIN for days). $uri is the
+# path alone. Set per server below: an access_log here, at http level, would
+# add a second log beside the image's own rather than replace it.
+log_format zenoeats_noquery '$remote_addr - $remote_user [$time_local] '
+                            '"$request_method $uri $server_protocol" $status '
+                            '$body_bytes_sent "$http_user_agent" rt=$request_time';
+
 upstream zenoeats_api {
     server api:8000;
     keepalive 32;
@@ -62,6 +74,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name ${ROOT_DOMAIN} *.${ROOT_DOMAIN};
+    access_log /var/log/nginx/access.log zenoeats_noquery;
 
     # HTTP-01 challenges, for a certificate issued per name. A wildcard
     # certificate needs DNS-01 instead and never uses this.
@@ -81,6 +94,7 @@ server {
     listen [::]:443 ssl;
     http2 on;
     server_name ${ROOT_DOMAIN} *.${ROOT_DOMAIN};
+    access_log /var/log/nginx/access.log zenoeats_noquery;
 
     # A wildcard certificate covering ROOT_DOMAIN and *.ROOT_DOMAIN, mounted
     # read-only. With Cloudflare in front, a Cloudflare Origin Certificate

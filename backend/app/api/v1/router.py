@@ -5,10 +5,13 @@ from app.api.v1 import admin, customer, orders, portal, restaurant, webhooks
 
 api_router = APIRouter(prefix="/api/v1")
 
-# The customer routers authenticate with a bearer token the caller must
-# possess, so a request from another origin carries no authority of its own.
+# The storefront's public reads carry no credential at all.
 api_router.include_router(portal.router)
-api_router.include_router(orders.router)
+# Ordering takes a Clerk bearer token -- or a guest's cookie, which a browser
+# attaches by itself to a request from any page on a neighbouring storefront
+# (same site). JSON-only bodies and SameSite=Lax already stopped a forged
+# order; the pin makes the cookie useless from another origin outright.
+api_router.include_router(orders.router, dependencies=[Depends(require_same_origin)])
 # The customer's own page. Bearer-authenticated like the two above, but a
 # guest reaches it with a cookie too, and it writes -- so it is pinned to its
 # own origin the way the cookie portals are.

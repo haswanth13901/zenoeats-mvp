@@ -1,4 +1,5 @@
 import { errorMessage, request } from "@/services/apiClient";
+import { safeNextPath } from "./safe-next";
 
 /**
  * Restaurant staff sign-in. Deliberately outside React, like the admin one.
@@ -22,10 +23,8 @@ function home(me: StaffMe): string {
 }
 
 function nextPath(): string {
-  const raw = new URLSearchParams(window.location.search).get("next");
-  // Same-origin paths only. An absolute URL here would be an open redirect.
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/manage";
-  return raw;
+  // Same-origin paths only; see safe-next for why a prefix check was not.
+  return safeNextPath(new URLSearchParams(window.location.search).get("next"), "/manage");
 }
 
 function el<T extends HTMLElement>(id: string): T {

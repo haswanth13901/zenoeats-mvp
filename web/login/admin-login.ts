@@ -1,4 +1,5 @@
 import { errorMessage, request } from "@/services/apiClient";
+import { safeNextPath } from "./safe-next";
 
 /**
  * Platform administrator sign-in. Deliberately outside React.
@@ -19,9 +20,7 @@ type AdminOut = { email: string };
  *  paths are accepted: an absolute URL here would be an open redirect, which
  *  is how a convincing phishing page gets to live on your own domain. */
 function nextPath(): string {
-  const raw = new URLSearchParams(window.location.search).get("next");
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/admin";
-  return raw;
+  return safeNextPath(new URLSearchParams(window.location.search).get("next"), "/admin");
 }
 
 function el<T extends HTMLElement>(id: string): T {
